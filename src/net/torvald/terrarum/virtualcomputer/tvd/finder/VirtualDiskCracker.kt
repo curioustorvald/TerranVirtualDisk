@@ -642,7 +642,7 @@ class VirtualDiskCracker(val sysCharset: Charset = Charsets.UTF_8) : JFrame() {
     }
     private fun getDiskInfoText(disk: VirtualDisk): String {
         return """Name: ${String(disk.diskName, sysCharset)}
-Capacity: ${disk.capacity} bytes (${disk.usedBytes} bytes used)"""
+Capacity: ${disk.capacity} bytes (${disk.usedBytes} bytes used, ${disk.capacity - disk.usedBytes} bytes free)"""
     }
     private fun getFileInfoText(file: DiskEntry): String {
         return """Name: ${file.getFilenameString(sysCharset)}

@@ -38,7 +38,7 @@ object VDUtil {
         println("[VDUtil] currentUnixtime = $currentUnixtime")
 
         var entryOffset = 44
-        while (!Arrays.equals(inbytes.sliceArray(entryOffset..entryOffset + 1), VirtualDisk.FOOTER_START_MARK)) {
+        while (!Arrays.equals(inbytes.sliceArray(entryOffset..entryOffset + 3), VirtualDisk.FOOTER_START_MARK)) {
             println("[VDUtil] entryOffset = $entryOffset")
             // read and prepare all the shits
             val entryIndexNum = inbytes.sliceArray(entryOffset..entryOffset + 3).toIntBig()
@@ -488,7 +488,7 @@ object VDUtil {
      */
     fun VirtualDisk.checkCapacity(newSize: Int) {
         if (this.usedBytes + newSize > this.capacity)
-            throw IOException("Not enough space in the disk")
+            throw IOException("Not enough space on the disk")
     }
     private fun Array<DiskEntry>.searchForFilename(name: String): DiskEntry? {
         this.forEach { if (String(it.filename) == name) return it }

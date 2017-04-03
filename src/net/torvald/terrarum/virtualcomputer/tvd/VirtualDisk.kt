@@ -34,7 +34,7 @@ class VirtualDisk(
 
     fun serialize(): AppendableByteBuffer {
         val entriesBuffer = serializeEntriesOnly()
-        val buffer = AppendableByteBuffer(44 + entriesBuffer.size + 4)
+        val buffer = AppendableByteBuffer(HEADER_SIZE + entriesBuffer.size + FOOTER_SIZE)
         val crc = hashCode().toBigEndian()
 
         buffer.put(MAGIC)
@@ -70,7 +70,7 @@ class VirtualDisk(
         var id: Int
         do {
             id = Random().nextInt()
-        } while (null != entries[id])
+        } while (null != entries[id] || id == FOOTER_MARKER)
         return id
     }
 
@@ -79,11 +79,12 @@ class VirtualDisk(
 
     companion object {
         val HEADER_SIZE = 44 // according to the spec
-        val FOOTER_SIZE = 4  // footer mark + EOF
+        val FOOTER_SIZE = 6  // footer mark + EOF
         val NAME_LENGTH = 32
 
         val MAGIC = "TEVd".toByteArray()
-        val FOOTER_START_MARK = byteArrayOf(0xFE.toByte(), 0xFF.toByte())
+        val FOOTER_MARKER = 0xFEFEFEFE.toInt()
+        val FOOTER_START_MARK = FOOTER_MARKER.toBigEndian()
         val EOF_MARK = byteArrayOf(0xFF.toByte(), 0x19.toByte())
     }
 }
