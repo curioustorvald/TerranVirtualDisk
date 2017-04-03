@@ -1,0 +1,5 @@
+Manifest-Version: 1.0
+Class-Path: kotlin/kotlin-runtime.jar kotlin/kotlin-reflect.jar
+Main-Class: net.torvald.terrarum.virtualcomputer.tvd.finder.VirtualDis
+ kCrackerKt
+
