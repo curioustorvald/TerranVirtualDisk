@@ -22,7 +22,7 @@ Interactions with virtual disk will be done with ```VDUtil```.
 - Name of the file/directory is limited to 256 bytes
 - Name of the disk is limited to 32 bytes
 - Total number of entries cannot exceed 4 294 967 295
-- Timestamp will overflow after 292 million years
+- Timestamp will overflow after [292 million years](https://www.wolframalpha.com/input/?i=(2%5E63+%2F+1000)+seconds+from+unix+epoch)
 
 ## Documentation
 

@@ -19,6 +19,8 @@ object VDUtil {
     }
 
     /**
+     * Reads serialised binary and returns corresponding VirtualDisk instance.
+     *
      * @param crcWarnLevel Level.OFF -- no warning, Level.WARNING -- print out warning, Level.SEVERE -- throw error
      */
     fun readDiskArchive(infile: File, crcWarnLevel: Level = Level.SEVERE): VirtualDisk {
@@ -135,7 +137,9 @@ object VDUtil {
     }
 
 
-
+    /**
+     * Get list of entries of directory.
+     */
     fun getDirectoryEntries(disk: VirtualDisk, entry: DiskEntry): Array<DiskEntry> {
         if (entry.contents !is EntryDirectory)
             throw IllegalArgumentException("The entry is not directory")
@@ -145,6 +149,9 @@ object VDUtil {
                 { disk.entries[entry.contents.entries[it]]!! }
         )
     }
+    /**
+     * Get list of entries of directory.
+     */
     fun getDirectoryEntries(disk: VirtualDisk, entryID: IndexNumber): Array<DiskEntry> {
         val entry = disk.entries[entryID]
         if (entry == null) {
@@ -156,6 +163,7 @@ object VDUtil {
     }
 
     /**
+     * Search a entry using path
      * @return Pair of <The file, Parent file>
      */
     fun getFile(disk: VirtualDisk, path: String): EntrySearchResult? {
@@ -218,14 +226,29 @@ object VDUtil {
                     else
                         throw RuntimeException("Unknown entry type")
 
+    /**
+     * Search for the file and returns a instance of normal file.
+     */
     fun getAsNormalFile(disk: VirtualDisk, path: String) =
             getFile(disk, path)!!.file.getAsNormalFile(disk)
+    /**
+     * Fetch the file and returns a instance of normal file.
+     */
     fun getAsNormalFile(disk: VirtualDisk, entryIndex: IndexNumber) =
             disk.entries[entryIndex]!!.getAsNormalFile(disk)
+    /**
+     * Search for the file and returns a instance of directory.
+     */
     fun getAsDirectory(disk: VirtualDisk, path: String) =
             getFile(disk, path)!!.file.getAsDirectory(disk)
+    /**
+     * Fetch the file and returns a instance of directory.
+     */
     fun getAsDirectory(disk: VirtualDisk, entryIndex: IndexNumber) =
             disk.entries[entryIndex]!!.getAsDirectory(disk)
+    /**
+     * Deletes file on the disk safely.
+     */
     fun deleteFile(disk: VirtualDisk, path: String) {
         disk.checkReadOnly()
 
@@ -243,6 +266,9 @@ object VDUtil {
             throw FileNotFoundException("No such file")
         }
     }
+    /**
+     * Deletes file on the disk safely.
+     */
     fun deleteFile(disk: VirtualDisk, parent: IndexNumber, target: IndexNumber) {
         disk.checkReadOnly()
 
@@ -266,6 +292,9 @@ object VDUtil {
             throw FileNotFoundException("No such file")
         }
     }
+    /**
+     * Changes the name of the entry.
+     */
     fun renameFile(disk: VirtualDisk, path: String, newName: String) {
         val file = getFile(disk, path)?.file
 
@@ -277,6 +306,10 @@ object VDUtil {
             throw FileNotFoundException()
         }
     }
+
+    /**
+     * Add file to the specified directory.
+     */
     fun addFile(disk: VirtualDisk, parentPath: String, file: DiskEntry) {
         disk.checkReadOnly()
         disk.checkCapacity(file.size)
@@ -291,6 +324,9 @@ object VDUtil {
             throw FileNotFoundException("No such directory")
         }
     }
+    /**
+     * Add file to the specified directory.
+     */
     fun addFile(disk: VirtualDisk, directoryID: IndexNumber, file: DiskEntry) {
         disk.checkReadOnly()
         disk.checkCapacity(file.size)
@@ -305,6 +341,9 @@ object VDUtil {
             throw FileNotFoundException("No such directory")
         }
     }
+    /**
+     * Add subdirectory to the specified directory.
+     */
     fun addDir(disk: VirtualDisk, parentPath: String, name: String) {
         disk.checkReadOnly()
         disk.checkCapacity(EntryDirectory.NEW_ENTRY_SIZE)
@@ -327,6 +366,9 @@ object VDUtil {
             throw FileNotFoundException("No such directory")
         }
     }
+    /**
+     * Add file to the specified directory.
+     */
     fun addDir(disk: VirtualDisk, directoryID: IndexNumber, name: String) {
         disk.checkReadOnly()
         disk.checkCapacity(EntryDirectory.NEW_ENTRY_SIZE)
@@ -351,7 +393,9 @@ object VDUtil {
     }
 
 
-
+    /**
+     * Imports external file and returns corresponding DiskEntry.
+     */
     fun importFile(file: File, id: IndexNumber): DiskEntry {
         if (file.isDirectory) {
             throw IOException("The file is a directory")
@@ -365,10 +409,17 @@ object VDUtil {
                 contents = EntryFile(file.readBytes())
         )
     }
+    /**
+     * Export file on the virtual disk into real disk.
+     */
     fun exportFile(entryFile: EntryFile, outfile: File) {
         outfile.createNewFile()
         outfile.writeBytes(entryFile.bytes)
     }
+
+    /**
+     * Check for name collision in specified directory.
+     */
     fun nameExists(disk: VirtualDisk, name: String, directoryID: IndexNumber, charset: Charset = Charsets.UTF_8): Boolean {
         val name = name.toEntryName(256, charset)
         val directoryContents = getDirectoryEntries(disk, directoryID)
@@ -380,8 +431,9 @@ object VDUtil {
     }
 
 
-
-
+    /**
+     * Creates new disk with given name and capacity
+     */
     fun createNewDisk(diskSize: Int, diskName: String, charset: Charset = Charsets.UTF_8): VirtualDisk {
         val newdisk = VirtualDisk(diskSize, diskName.toEntryName(32, charset))
         val rootDir = DiskEntry(
@@ -396,6 +448,9 @@ object VDUtil {
 
         return newdisk
     }
+    /**
+     * Creates new zero-filled file with given name and size
+     */
     fun createNewBlankFile(disk: VirtualDisk, directoryID: IndexNumber, fileSize: Int, filename: String, charset: Charset = Charsets.UTF_8) {
         disk.checkReadOnly()
         disk.checkCapacity(fileSize + DiskEntry.HEADER_SIZE + 4)
@@ -410,12 +465,17 @@ object VDUtil {
     }
 
 
-
-    private fun VirtualDisk.checkReadOnly() {
+    /**
+     * Throws an exception if the disk is read-only
+     */
+    fun VirtualDisk.checkReadOnly() {
         if (this.isReadOnly)
             throw IOException("Disk is read-only")
     }
-    private fun VirtualDisk.checkCapacity(newSize: Int) {
+    /**
+     * Throws an exception if specified size cannot fit into the disk
+     */
+    fun VirtualDisk.checkCapacity(newSize: Int) {
         if (this.usedBytes + newSize > this.capacity)
             throw IOException("Not enough space in the disk")
     }
