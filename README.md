@@ -17,12 +17,12 @@ Interactions with virtual disk will be done with ```VDUtil```.
 ## Limitation
 
 - Each directory cannot hold more than 65 535 entries
-- Each file can be no larger than 4 Gigabytes
-- Capacity of the disk cannot exceed 4 Gigabytes
+- Each file can be no larger than 2 Gigabytes
+- Capacity of the disk cannot exceed 2 Gigabytes
 - Name of the file/directory is limited to 256 bytes
 - Name of the disk is limited to 32 bytes
 - Total number of entries cannot exceed 4 294 967 295
-- Timestamp will overflow after 292277026596-12-04T15:30:08
+- Timestamp will overflow after 292 million years
 
 ## Documentation
 

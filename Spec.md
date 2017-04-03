@@ -24,13 +24,13 @@
 
 
 ##  Header
-    Int8[4]     Magic: TEVd
-    Uint32      Disk size in bytes (max 4096 MBytes)
+    Uint8[4]     Magic: TEVd
+    Int32      Disk size in bytes (max 2048 MBytes)
     Uint8[32]   Disk name
-    Uint32      CRC-32
+    Int32      CRC-32
                 1. create list of arrays that contains CRC
                 2. put all the CRCs of entries
-                3. sort the list
+                3. sort the list (here's the catch -- you will treat CRCs as SIGNED integer)
                 4. for elems on list: update crc with the elem (crc = calculateCRC(crc, elem))
     
     (Header size: 44 bytes)
@@ -54,7 +54,7 @@
     (Header size: 281 bytes)
 
 ###  Entry of File
-    Uint32      File size in bytes (max 4096 MBytes)
+    Int32      File size in bytes (max 2048 MBytes)
     <Bytes>     Actual Contents
     
     (Header size: 4 bytes)
