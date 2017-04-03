@@ -14,8 +14,7 @@ import java.util.logging.Level
 import javax.swing.*
 import javax.swing.table.AbstractTableModel
 import javax.swing.ListSelectionModel
-
-
+import javax.swing.text.DefaultCaret
 
 
 /**
@@ -36,39 +35,45 @@ class VirtualDiskCracker(val sysCharset: Charset = Charsets.UTF_8) : JFrame() {
     private val statBar = JLabel("Open a disk or create new to get started")
 
     private var vdisk: VirtualDisk? = null
-    private var clipboard: IndexNumber? = null
+    private var clipboard: DiskEntry? = null
 
     private val labelPath = JLabel("(root)")
     private var currentDirectoryEntries: Array<DiskEntry>? = null
-    private val directoryHierarchy = Stack<IndexNumber>(); init { directoryHierarchy.push(0) }
+    private val directoryHierarchy = Stack<EntryID>(); init { directoryHierarchy.push(0) }
 
-    private fun gotoSubDirectory(id: IndexNumber) {
+    private fun gotoSubDirectory(id: EntryID) {
         directoryHierarchy.push(id)
         labelPath.text = vdisk!!.entries[id]!!.getFilenameString(sysCharset)
+        selectedFile = null
+        fileDesc.text = ""
         updateDiskInfo()
         updateCurrentDirectoryEntry()
     }
-    val currentDirectory: IndexNumber
+    val currentDirectory: EntryID
         get() = directoryHierarchy.peek()
-    val parentDirectory: IndexNumber
+    val parentDirectory: EntryID
         get() = if (directoryHierarchy.lastIndex == 0) 0
                 else directoryHierarchy[directoryHierarchy.lastIndex - 1]
     private fun gotoRoot() {
         directoryHierarchy.removeAllElements()
         directoryHierarchy.push(0)
+        selectedFile = null
+        fileDesc.text = ""
         updateDiskInfo()
         updateCurrentDirectoryEntry()
     }
     private fun gotoParent() {
         if (directoryHierarchy.size > 1)
             directoryHierarchy.pop()
+        selectedFile = null
+        fileDesc.text = ""
         updateDiskInfo()
         updateCurrentDirectoryEntry()
     }
 
 
 
-    private var currentlySelectedFile: IndexNumber? = null
+    private var selectedFile: EntryID? = null
 
     val tableColumns = arrayOf("Name", "Date Modified", "Size")
     val tableParentRecord = arrayOf(arrayOf("..", "", ""))
@@ -85,14 +90,16 @@ class VirtualDiskCracker(val sysCharset: Charset = Charsets.UTF_8) : JFrame() {
                 val row = table.rowAtPoint(e.point)
 
 
-                currentlySelectedFile = if (row > 0)
-                    currentDirectoryEntries!![row - 1].indexNumber
+                selectedFile = if (row > 0)
+                    currentDirectoryEntries!![row - 1].entryID
                 else
                     null // clicked ".."
-                fileDesc.text = if (currentlySelectedFile != null)
-                    getFileInfoText(vdisk!!.entries[currentlySelectedFile!!]!!)
+                fileDesc.text = if (selectedFile != null) {
+                    getFileInfoText(vdisk!!.entries[selectedFile!!]!!)
+                }
                 else
                     ""
+                fileDesc.caretPosition = 0
 
 
                 // double click
@@ -103,7 +110,7 @@ class VirtualDiskCracker(val sysCharset: Charset = Charsets.UTF_8) : JFrame() {
                     else {
                         val record = currentDirectoryEntries!![row - 1]
                         if (record.contents is EntryDirectory) {
-                            gotoSubDirectory(record.indexNumber)
+                            gotoSubDirectory(record.entryID)
                         }
                     }
                 }
@@ -155,28 +162,34 @@ class VirtualDiskCracker(val sysCharset: Charset = Charsets.UTF_8) : JFrame() {
         menuFile.mnemonic = KeyEvent.VK_F
         menuFile.add("New Disk…").addMouseListener(object : MouseAdapter() {
             override fun mousePressed(e: MouseEvent?) {
-                val makeNewDisk: Boolean
-                if (vdisk != null) {
-                    makeNewDisk = confirmedDiscard()
-                }
-                else {
-                    makeNewDisk = true
-                }
-                if (makeNewDisk) {
-                    // inquire new size
-                    val dialogBox = OptionDiskNameAndCap()
-                    val confirmNew = JOptionPane.OK_OPTION == dialogBox.showDialog("Set Property of New Disk")
-
-                    if (confirmNew) {
-                        vdisk = VDUtil.createNewDisk(
-                                dialogBox.capacity.value as Int,
-                                dialogBox.name.text,
-                                sysCharset
-                        )
-                        gotoRoot()
-                        updateDiskInfo()
-                        setStat("Disk created")
+                try {
+                    val makeNewDisk: Boolean
+                    if (vdisk != null) {
+                        makeNewDisk = confirmedDiscard()
                     }
+                    else {
+                        makeNewDisk = true
+                    }
+                    if (makeNewDisk) {
+                        // inquire new size
+                        val dialogBox = OptionDiskNameAndCap()
+                        val confirmNew = JOptionPane.OK_OPTION == dialogBox.showDialog("Set Property of New Disk")
+
+                        if (confirmNew) {
+                            vdisk = VDUtil.createNewDisk(
+                                    dialogBox.capacity.value as Int,
+                                    dialogBox.name.text,
+                                    sysCharset
+                            )
+                            gotoRoot()
+                            updateDiskInfo()
+                            setStat("Disk created")
+                        }
+                    }
+                }
+                catch (e: Exception) {
+                    e.printStackTrace()
+                    popupError(e.toString())
                 }
             }
         })
@@ -284,17 +297,16 @@ class VirtualDiskCracker(val sysCharset: Charset = Charsets.UTF_8) : JFrame() {
                 }
             }
         })
-        menuEdit.add("New Symbolic Link…")
         menuEdit.addSeparator()
         menuEdit.add("Cut").addMouseListener(object : MouseAdapter() {
             override fun mousePressed(e: MouseEvent?) {
                 // copy
-                clipboard = currentlySelectedFile
+                clipboard = vdisk!!.entries[selectedFile]
 
                 // delete
-                if (vdisk != null && currentlySelectedFile != null) {
+                if (vdisk != null && selectedFile != null) {
                     try {
-                        VDUtil.deleteFile(vdisk!!, parentDirectory, currentlySelectedFile!!)
+                        VDUtil.deleteFile(vdisk!!, parentDirectory, selectedFile!!)
                         updateDiskInfo()
                         setStat("File deleted")
                     }
@@ -307,15 +319,95 @@ class VirtualDiskCracker(val sysCharset: Charset = Charsets.UTF_8) : JFrame() {
         })
         menuEdit.add("Copy").addMouseListener(object : MouseAdapter() {
             override fun mousePressed(e: MouseEvent?) {
-                clipboard = currentlySelectedFile
+                clipboard = vdisk!!.entries[selectedFile]
+                setStat("File copied")
             }
         })
-        menuEdit.add("Paste")
+        menuEdit.add("Paste").addMouseListener(object : MouseAdapter() {
+            override fun mousePressed(e: MouseEvent?) {
+                fun paste1(newname: ByteArray) {
+                    try {
+                        VDUtil.addFile(vdisk!!, currentDirectory, DiskEntry(// clone
+                                vdisk!!.generateUniqueID(),
+                                newname,
+                                clipboard!!.creationDate,
+                                clipboard!!.modificationDate,
+                                clipboard!!.contents
+                        ))
+
+                        updateDiskInfo()
+                        setStat("File pasted")
+                    }
+                    catch (e: Exception) {
+                        e.printStackTrace()
+                        popupError(e.toString())
+                    }
+                }
+                if (clipboard != null && vdisk != null) {
+                    if (clipboard!!.contents is EntryDirectory) {
+                        popupError("Cannot paste directory")
+                        return
+                    }
+
+                    // check name collision. If it is, ask for new one
+                    if (VDUtil.nameExists(vdisk!!, clipboard!!.getFilenameString(sysCharset), currentDirectory, sysCharset)) {
+                        val newname = JOptionPane.showInputDialog("The name already exists. Enter a new name:")
+                        if (newname != null) {
+                            paste1(newname.toEntryName(DiskEntry.NAME_LENGTH, sysCharset))
+                        }
+                    }
+                    else {
+                        paste1(clipboard!!.filename)
+                    }
+                }
+            }
+        })
+        menuEdit.add("Paste as Symbolic Link").addMouseListener(object : MouseAdapter() {
+            override fun mousePressed(e: MouseEvent?) {
+                fun pasteSymbolic(newname: ByteArray) {
+                    try {
+                        // check if the original file is there in the first place
+                        if (vdisk!!.entries[clipboard!!.entryID] != null) {
+                            val entrySymlink = EntrySymlink(clipboard!!.entryID)
+                            VDUtil.addFile(vdisk!!, currentDirectory, DiskEntry(
+                                    vdisk!!.generateUniqueID(),
+                                    newname,
+                                    VDUtil.currentUnixtime,
+                                    VDUtil.currentUnixtime,
+                                    entrySymlink
+                            ))
+
+                            updateDiskInfo()
+                            setStat("Symbolic link created")
+                        }
+                        else {
+                            popupError("The orignal file is gone")
+                        }
+                    }
+                    catch (e: Exception) {
+                        e.printStackTrace()
+                        popupError(e.toString())
+                    }
+                }
+                if (clipboard != null && vdisk != null) {
+                    // check name collision. If it is, ask for new one
+                    if (VDUtil.nameExists(vdisk!!, clipboard!!.getFilenameString(sysCharset), currentDirectory, sysCharset)) {
+                        val newname = JOptionPane.showInputDialog("The name already exists. Enter a new name:")
+                        if (newname != null) {
+                            pasteSymbolic(newname.toEntryName(DiskEntry.NAME_LENGTH, sysCharset))
+                        }
+                    }
+                    else {
+                        pasteSymbolic(clipboard!!.filename)
+                    }
+                }
+            }
+        })
         menuEdit.add("Delete").addMouseListener(object : MouseAdapter() {
             override fun mousePressed(e: MouseEvent?) {
-                if (vdisk != null && currentlySelectedFile != null) {
+                if (vdisk != null && selectedFile != null) {
                     try {
-                        VDUtil.deleteFile(vdisk!!, parentDirectory, currentlySelectedFile!!)
+                        VDUtil.deleteFile(vdisk!!, parentDirectory, selectedFile!!)
                         updateDiskInfo()
                         setStat("File deleted")
                     }
@@ -326,13 +418,37 @@ class VirtualDiskCracker(val sysCharset: Charset = Charsets.UTF_8) : JFrame() {
                 }
             }
         })
-        menuEdit.add("Rename…")
+        menuEdit.add("Rename…").addMouseListener(object : MouseAdapter() {
+            override fun mousePressed(e: MouseEvent?) {
+                if (selectedFile != null) {
+                    try {
+                        val newname = JOptionPane.showInputDialog("Enter a new directory name:")
+                        if (newname != null) {
+                            if (VDUtil.nameExists(vdisk!!, newname, currentDirectory, sysCharset)) {
+                                popupError("The name already exists")
+                            }
+                            else {
+                                VDUtil.renameFile(vdisk!!, selectedFile!!, newname)
+                                updateDiskInfo()
+                                setStat("File renamed")
+                            }
+                        }
+                    }
+                    catch (e: Exception) {
+                        e.printStackTrace()
+                        popupError(e.toString())
+                    }
+                }
+            }
+        })
         menuEdit.add("Look Clipboard").addMouseListener(object : MouseAdapter() {
             override fun mousePressed(e: MouseEvent?) {
                 popupMessage(if (clipboard != null)
-                    "Entry index $clipboard\n${vdisk?.entries?.get(clipboard!!) ?: "(Bug found!)"}"
-                        else "(nothing)", "Clipboard")
+                    "${clipboard ?: "(bug found)"}"
+                else "(nothing)", "Clipboard"
+                )
             }
+
         })
         menuEdit.addSeparator()
         menuEdit.add("Import File…").addMouseListener(object : MouseAdapter() {
@@ -357,18 +473,19 @@ class VirtualDiskCracker(val sysCharset: Charset = Charsets.UTF_8) : JFrame() {
         })
         menuEdit.add("Export File…").addMouseListener(object : MouseAdapter() {
             override fun mousePressed(e: MouseEvent?) {
-                if (vdisk != null && currentlySelectedFile != null) {
-                    val file = vdisk!!.entries[currentlySelectedFile!!]!!
+                if (vdisk != null && selectedFile != null) {
+                    val file = vdisk!!.entries[selectedFile!!]!!
 
                     if (file.contents is EntryFile || file.contents is EntrySymlink) {
                         val fileChooser = JFileChooser()
                         fileChooser.showOpenDialog(null)
                         if (fileChooser.selectedFile != null) {
                             try {
-                                val file = VDUtil.resolveIfSymlink(vdisk!!, file.indexNumber)
+                                val file = VDUtil.resolveIfSymlink(vdisk!!, file.entryID)
                                 if (file.contents is EntryFile) {
                                     fileChooser.selectedFile.createNewFile()
                                     fileChooser.selectedFile.writeBytes(file.contents.bytes)
+                                    setStat("File exported")
                                 }
                                 else {
                                     popupError("Cannot export directory")
@@ -390,11 +507,17 @@ class VirtualDiskCracker(val sysCharset: Charset = Charsets.UTF_8) : JFrame() {
         menuEdit.add("Rename Disk…").addMouseListener(object : MouseAdapter() {
             override fun mousePressed(e: MouseEvent?) {
                 if (vdisk != null) {
-                    val newname = JOptionPane.showInputDialog("Enter a new directory name:")
-                    if (newname != null) {
-                        vdisk!!.diskName = newname.toEntryName(VirtualDisk.NAME_LENGTH, sysCharset)
-                        updateDiskInfo()
-                        setStat("Disk renamed")
+                    try {
+                        val newname = JOptionPane.showInputDialog("Enter a new directory name:")
+                        if (newname != null) {
+                            vdisk!!.diskName = newname.toEntryName(VirtualDisk.NAME_LENGTH, sysCharset)
+                            updateDiskInfo()
+                            setStat("Disk renamed")
+                        }
+                    }
+                    catch (e: Exception) {
+                        e.printStackTrace()
+                        popupError(e.toString())
                     }
                 }
             }
@@ -402,12 +525,18 @@ class VirtualDiskCracker(val sysCharset: Charset = Charsets.UTF_8) : JFrame() {
         menuEdit.add("Resize Disk…").addMouseListener(object : MouseAdapter() {
             override fun mousePressed(e: MouseEvent?) {
                 if (vdisk != null) {
-                    val dialog = OptionSize()
-                    val confirmed = dialog.showDialog("Input") == JOptionPane.OK_OPTION
-                    if (confirmed) {
-                        vdisk!!.capacity = dialog.capacity.value as Int
-                        updateDiskInfo()
-                        setStat("Disk resized")
+                    try {
+                        val dialog = OptionSize()
+                        val confirmed = dialog.showDialog("Input") == JOptionPane.OK_OPTION
+                        if (confirmed) {
+                            vdisk!!.capacity = dialog.capacity.value as Int
+                            updateDiskInfo()
+                            setStat("Disk resized")
+                        }
+                    }
+                    catch (e: Exception) {
+                        e.printStackTrace()
+                        popupError(e.toString())
                     }
                 }
             }
@@ -430,9 +559,12 @@ class VirtualDiskCracker(val sysCharset: Charset = Charsets.UTF_8) : JFrame() {
 
         fileDesc.highlighter = null
         fileDesc.text = ""
+        fileDesc.caret.isVisible = false
+        (fileDesc.caret as DefaultCaret).updatePolicy = DefaultCaret.NEVER_UPDATE
 
         val fileDescScroll = JScrollPane(fileDesc)
         val tableFilesScroll = JScrollPane(tableFiles)
+        tableFilesScroll.size = Dimension(200, -1)
 
         val panelFinder = JPanel(BorderLayout())
         panelFinder.add(labelPath, BorderLayout.NORTH)
@@ -443,7 +575,7 @@ class VirtualDiskCracker(val sysCharset: Charset = Charsets.UTF_8) : JFrame() {
         panelFileDesc.add(fileDescScroll, BorderLayout.CENTER)
 
         val filesSplit = JSplitPane(JSplitPane.HORIZONTAL_SPLIT, panelFinder, panelFileDesc)
-        filesSplit.resizeWeight = 0.9
+        filesSplit.resizeWeight = 0.714285
 
 
         val panelDiskOp = JPanel(BorderLayout(2, 2))
@@ -516,7 +648,8 @@ Capacity: ${disk.capacity} bytes (${disk.usedBytes} bytes used)"""
         return """Name: ${file.getFilenameString(sysCharset)}
 Size: ${file.getEffectiveSize()}
 Type: ${DiskEntry.getTypeString(file.contents)}
-CRC: ${file.hashCode()}""" + if (file.contents is EntryFile) """
+CRC: ${file.hashCode()}
+EntryID: ${file.entryID}""" + if (file.contents is EntryFile) """
 
 Contents:
 ${String(file.contents.bytes.sliceArray(0..minOf(PREVIEW_MAX_BYTES, file.contents.bytes.size)), sysCharset)}""" else ""

@@ -1,6 +1,6 @@
 # TerranVirtualDisk
 
-Virtual Filesystem with built-in editor.
+Virtual Filesystem with built-in finder (aka explorer by Windows folks).
 
 ## How to use
 
@@ -11,7 +11,7 @@ Interactions with virtual disk will be done with ```VDUtil```.
 - Built-in finder (```VirtualDiskCracker```)
 - Directories (managed by Linked List)
 - Symbolic links
-- Timestamp of creation and modification
+- Timestamp of creation and modification, and is 64-Bit
 - CRC
 
 ## Limitation
@@ -26,5 +26,5 @@ Interactions with virtual disk will be done with ```VDUtil```.
 
 ## Documentation
 
-- Specifications of the filesystem: read ```Spec.md```
+- Specifications: read ```Spec.md```
 - Javadoc: TBA

@@ -9,14 +9,14 @@ import java.util.zip.CRC32
  * Created by SKYHi14 on 2017-03-31.
  */
 
-typealias IndexNumber = Int
+typealias EntryID = Int
 
 class VirtualDisk(
         /** capacity of 0 makes the disk read-only */
         var capacity: Int,
         var diskName: ByteArray = ByteArray(NAME_LENGTH)
 ) {
-    val entries = HashMap<IndexNumber, DiskEntry>()
+    val entries = HashMap<EntryID, DiskEntry>()
     val isReadOnly: Boolean
         get() = capacity == 0
     fun getDiskNameString(charset: Charset) = String(diskName, charset)
@@ -91,7 +91,7 @@ class VirtualDisk(
 
 class DiskEntry(
         // header
-        val indexNumber: IndexNumber,
+        var entryID: EntryID,
         var filename: ByteArray = ByteArray(NAME_LENGTH),
         var creationDate: Long,
         var modificationDate: Long,
@@ -99,7 +99,7 @@ class DiskEntry(
         // content
         val contents: DiskEntryContent
 ) {
-    fun getFilenameString(charset: Charset) = if (indexNumber == 0) ROOTNAME else String(filename, charset)
+    fun getFilenameString(charset: Charset) = if (entryID == 0) ROOTNAME else String(filename, charset)
 
     val size: Int
         get() = contents.getSizeEntry() + HEADER_SIZE
@@ -130,7 +130,7 @@ class DiskEntry(
         val serialisedContents = contents.serialize()
         val buffer = AppendableByteBuffer(281 + serialisedContents.size)
 
-        buffer.put(indexNumber.toBigEndian())
+        buffer.put(entryID.toBigEndian())
         buffer.put(contents.getTypeFlag())
         buffer.put(filename.forceSize(NAME_LENGTH))
         buffer.put(creationDate.toBigEndian())
@@ -145,7 +145,7 @@ class DiskEntry(
 
     override fun equals(other: Any?) = if (other == null) false else this.hashCode() == other.hashCode()
 
-    override fun toString() = "DiskEntry(name: ${getFilenameString(Charsets.UTF_8)}, index: $indexNumber, type: ${contents.getTypeFlag()}, crc: ${hashCode().toHex()})"
+    override fun toString() = "DiskEntry(name: ${getFilenameString(Charsets.UTF_8)}, index: $entryID, type: ${contents.getTypeFlag()}, crc: ${hashCode().toHex()})"
 }
 
 
@@ -172,7 +172,7 @@ class EntryFile(val bytes: ByteArray) : DiskEntryContent {
         return buffer
     }
 }
-class EntryDirectory(val entries: ArrayList<IndexNumber> = ArrayList<IndexNumber>()) : DiskEntryContent {
+class EntryDirectory(val entries: ArrayList<EntryID> = ArrayList<EntryID>()) : DiskEntryContent {
 
     override fun getSizePure() = entries.size * 4
     override fun getSizeEntry() = getSizePure() + 2
@@ -188,7 +188,7 @@ class EntryDirectory(val entries: ArrayList<IndexNumber> = ArrayList<IndexNumber
         val NEW_ENTRY_SIZE = DiskEntry.HEADER_SIZE + 4
     }
 }
-class EntrySymlink(val target: IndexNumber) : DiskEntryContent {
+class EntrySymlink(val target: EntryID) : DiskEntryContent {
 
     override fun getSizePure() = 4
     override fun getSizeEntry() = 4
@@ -225,11 +225,11 @@ class AppendableByteBuffer(val size: Int) {
     
     fun put(byteArray: ByteArray): AppendableByteBuffer {
         System.arraycopy(
-                byteArray,
-                0,
-                array,
-                offset,
-                byteArray.size
+                byteArray, // source
+                0,         // source pos
+                array,     // destination
+                offset,    // destination pos
+                byteArray.size // length
         )
         offset += byteArray.size
         return this

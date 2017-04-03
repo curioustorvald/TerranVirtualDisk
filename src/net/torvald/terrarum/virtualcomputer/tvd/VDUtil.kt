@@ -78,7 +78,7 @@ object VDUtil {
 
             // create entry
             val diskEntry = DiskEntry(
-                    indexNumber = entryIndexNum,
+                    entryID = entryIndexNum,
                     filename = entryFileName,
                     creationDate = entryCreationTime,
                     modificationDate = entryModifyTime,
@@ -86,7 +86,7 @@ object VDUtil {
                         EntryFile(entryData)
                     }
                     else if (entryTypeFlag == DiskEntry.DIRECTORY) {
-                        val entryList = ArrayList<IndexNumber>()
+                        val entryList = ArrayList<EntryID>()
                         (0..entryData.size / 4 - 1).forEach {
                             entryList.add(entryData.sliceArray(4 * it..4 * it + 3).toIntBig())
                         }
@@ -152,7 +152,7 @@ object VDUtil {
     /**
      * Get list of entries of directory.
      */
-    fun getDirectoryEntries(disk: VirtualDisk, entryID: IndexNumber): Array<DiskEntry> {
+    fun getDirectoryEntries(disk: VirtualDisk, entryID: EntryID): Array<DiskEntry> {
         val entry = disk.entries[entryID]
         if (entry == null) {
             throw IOException("Entry does not exist")
@@ -184,7 +184,7 @@ object VDUtil {
                 }
                 else {
                     val searchResult = directory.searchForFilename(pathName)!!
-                    hierarchy.add(searchResult.indexNumber)
+                    hierarchy.add(searchResult.entryID)
                     directory = getDirectoryEntries(disk, searchResult)
                 }
             }
@@ -234,7 +234,7 @@ object VDUtil {
     /**
      * Fetch the file and returns a instance of normal file.
      */
-    fun getAsNormalFile(disk: VirtualDisk, entryIndex: IndexNumber) =
+    fun getAsNormalFile(disk: VirtualDisk, entryIndex: EntryID) =
             disk.entries[entryIndex]!!.getAsNormalFile(disk)
     /**
      * Search for the file and returns a instance of directory.
@@ -244,7 +244,7 @@ object VDUtil {
     /**
      * Fetch the file and returns a instance of directory.
      */
-    fun getAsDirectory(disk: VirtualDisk, entryIndex: IndexNumber) =
+    fun getAsDirectory(disk: VirtualDisk, entryIndex: EntryID) =
             disk.entries[entryIndex]!!.getAsDirectory(disk)
     /**
      * Deletes file on the disk safely.
@@ -258,9 +258,9 @@ object VDUtil {
         try {
             val file = getFile(disk, path)!!
             // delete file record
-            disk.entries.remove(file.file.indexNumber)
+            disk.entries.remove(file.file.entryID)
             // unlist file from parent directory
-            (file.parent.contents as EntryDirectory).entries.remove(file.file.indexNumber)
+            (file.parent.contents as EntryDirectory).entries.remove(file.file.entryID)
         }
         catch (e: KotlinNullPointerException) {
             throw FileNotFoundException("No such file")
@@ -269,7 +269,7 @@ object VDUtil {
     /**
      * Deletes file on the disk safely.
      */
-    fun deleteFile(disk: VirtualDisk, parent: IndexNumber, target: IndexNumber) {
+    fun deleteFile(disk: VirtualDisk, parent: EntryID, target: EntryID) {
         disk.checkReadOnly()
 
         try {
@@ -300,13 +300,24 @@ object VDUtil {
 
         if (file != null) {
             file.filename = newName.sanitisePath().toByteArray()
-            file.modificationDate = currentUnixtime
         }
         else {
             throw FileNotFoundException()
         }
     }
+    /**
+     * Changes the name of the entry.
+     */
+    fun renameFile(disk: VirtualDisk, fileID: EntryID, newName: String) {
+        val file = disk.entries[fileID]
 
+        if (file != null) {
+            file.filename = newName.sanitisePath().toByteArray()
+        }
+        else {
+            throw FileNotFoundException()
+        }
+    }
     /**
      * Add file to the specified directory.
      */
@@ -316,9 +327,9 @@ object VDUtil {
 
         try {
             // add record to the directory
-            getAsDirectory(disk, parentPath).entries.add(file.indexNumber)
+            getAsDirectory(disk, parentPath).entries.add(file.entryID)
             // add entry on the disk
-            disk.entries[file.indexNumber] = file
+            disk.entries[file.entryID] = file
         }
         catch (e: KotlinNullPointerException) {
             throw FileNotFoundException("No such directory")
@@ -327,15 +338,15 @@ object VDUtil {
     /**
      * Add file to the specified directory.
      */
-    fun addFile(disk: VirtualDisk, directoryID: IndexNumber, file: DiskEntry) {
+    fun addFile(disk: VirtualDisk, directoryID: EntryID, file: DiskEntry) {
         disk.checkReadOnly()
         disk.checkCapacity(file.size)
 
         try {
             // add record to the directory
-            getAsDirectory(disk, directoryID).entries.add(file.indexNumber)
+            getAsDirectory(disk, directoryID).entries.add(file.entryID)
             // add entry on the disk
-            disk.entries[file.indexNumber] = file
+            disk.entries[file.entryID] = file
         }
         catch (e: KotlinNullPointerException) {
             throw FileNotFoundException("No such directory")
@@ -369,7 +380,7 @@ object VDUtil {
     /**
      * Add file to the specified directory.
      */
-    fun addDir(disk: VirtualDisk, directoryID: IndexNumber, name: String) {
+    fun addDir(disk: VirtualDisk, directoryID: EntryID, name: String) {
         disk.checkReadOnly()
         disk.checkCapacity(EntryDirectory.NEW_ENTRY_SIZE)
 
@@ -396,13 +407,13 @@ object VDUtil {
     /**
      * Imports external file and returns corresponding DiskEntry.
      */
-    fun importFile(file: File, id: IndexNumber): DiskEntry {
+    fun importFile(file: File, id: EntryID): DiskEntry {
         if (file.isDirectory) {
             throw IOException("The file is a directory")
         }
 
         return DiskEntry(
-                indexNumber = id,
+                entryID = id,
                 filename = file.name.toByteArray(),
                 creationDate = currentUnixtime,
                 modificationDate = currentUnixtime,
@@ -420,7 +431,7 @@ object VDUtil {
     /**
      * Check for name collision in specified directory.
      */
-    fun nameExists(disk: VirtualDisk, name: String, directoryID: IndexNumber, charset: Charset = Charsets.UTF_8): Boolean {
+    fun nameExists(disk: VirtualDisk, name: String, directoryID: EntryID, charset: Charset = Charsets.UTF_8): Boolean {
         val name = name.toEntryName(DiskEntry.NAME_LENGTH, charset)
         val directoryContents = getDirectoryEntries(disk, directoryID)
         directoryContents.forEach {
@@ -437,7 +448,7 @@ object VDUtil {
     fun createNewDisk(diskSize: Int, diskName: String, charset: Charset = Charsets.UTF_8): VirtualDisk {
         val newdisk = VirtualDisk(diskSize, diskName.toEntryName(VirtualDisk.NAME_LENGTH, charset))
         val rootDir = DiskEntry(
-                indexNumber = 0,
+                entryID = 0,
                 filename = DiskEntry.ROOTNAME.toByteArray(charset),
                 creationDate = currentUnixtime,
                 modificationDate = currentUnixtime,
@@ -451,13 +462,13 @@ object VDUtil {
     /**
      * Creates new zero-filled file with given name and size
      */
-    fun createNewBlankFile(disk: VirtualDisk, directoryID: IndexNumber, fileSize: Int, filename: String, charset: Charset = Charsets.UTF_8) {
+    fun createNewBlankFile(disk: VirtualDisk, directoryID: EntryID, fileSize: Int, filename: String, charset: Charset = Charsets.UTF_8) {
         disk.checkReadOnly()
         disk.checkCapacity(fileSize + DiskEntry.HEADER_SIZE + 4)
 
         addFile(disk, directoryID, DiskEntry(
                 disk.generateUniqueID(),
-                filename.toEntryName(charset = charset),
+                filename.toEntryName(DiskEntry.NAME_LENGTH, charset = charset),
                 currentUnixtime,
                 currentUnixtime,
                 EntryFile(fileSize)
@@ -515,9 +526,10 @@ object VDUtil {
     }
     data class EntrySearchResult(val file: DiskEntry, val parent: DiskEntry)
 
-    fun resolveIfSymlink(disk: VirtualDisk, indexNumber: IndexNumber, recurse: Boolean = false): DiskEntry {
+    fun resolveIfSymlink(disk: VirtualDisk, indexNumber: EntryID, recurse: Boolean = false): DiskEntry {
         var entry: DiskEntry? = disk.entries[indexNumber]
         if (entry == null) throw IOException("File does not exist")
+        if (entry.contents !is EntrySymlink) return entry
         if (recurse) {
             while (entry!!.contents is EntrySymlink) {
                 entry = disk.entries[(entry.contents as EntrySymlink).target]
@@ -531,7 +543,7 @@ object VDUtil {
         return entry
     }
 
-    private val currentUnixtime: Long
+    val currentUnixtime: Long
         get() = System.currentTimeMillis() / 1000
 }
 
@@ -539,9 +551,9 @@ fun Byte.toUint() = java.lang.Byte.toUnsignedInt(this)
 fun magicMismatch(magic: ByteArray, array: ByteArray): Boolean {
     return !Arrays.equals(array.sliceArray(0..magic.lastIndex), magic)
 }
-fun String.toEntryName(length: Int = DiskEntry.NAME_LENGTH, charset: Charset = Charsets.UTF_8): ByteArray {
+fun String.toEntryName(length: Int, charset: Charset = Charsets.UTF_8): ByteArray {
     val buffer = AppendableByteBuffer(length)
     val stringByteArray = this.toByteArray(charset)
-    buffer.put(stringByteArray.sliceArray(0..minOf(length, stringByteArray.size)))
+    buffer.put(stringByteArray.sliceArray(0..minOf(length, stringByteArray.size) - 1))
     return buffer.array
 }
