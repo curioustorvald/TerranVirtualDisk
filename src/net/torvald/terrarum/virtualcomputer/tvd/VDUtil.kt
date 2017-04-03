@@ -87,7 +87,7 @@ object VDUtil {
                     }
                     else if (entryTypeFlag == DiskEntry.DIRECTORY) {
                         val entryList = ArrayList<IndexNumber>()
-                        (0..entryData.size / 4).forEach {
+                        (0..entryData.size / 4 - 1).forEach {
                             entryList.add(entryData.sliceArray(4 * it..4 * it + 3).toIntBig())
                         }
 
