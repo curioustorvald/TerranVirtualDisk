@@ -51,7 +51,8 @@ class VirtualDiskCracker(val sysCharset: Charset = Charsets.UTF_8) : JFrame() {
     val currentDirectory: IndexNumber
         get() = directoryHierarchy.peek()
     val parentDirectory: IndexNumber
-        get() = directoryHierarchy[directoryHierarchy.lastIndex - 1]
+        get() = if (directoryHierarchy.lastIndex == 0) 0
+                else directoryHierarchy[directoryHierarchy.lastIndex - 1]
     private fun gotoRoot() {
         directoryHierarchy.removeAllElements()
         directoryHierarchy.push(0)
