@@ -19,16 +19,16 @@ class OptionDiskNameAndCap {
     val settingPanel = JPanel()
 
     init {
-        capacity.model = SpinnerNumberModel(368640, 0, 1073741824, 1) // default 360 KiB, MAX 1 GiB
+        capacity.model = SpinnerNumberModel(368640, 0, 2147483647, 1) // default 360 KiB, MAX 2 GiB
         mainPanel.layout = BorderLayout()
         settingPanel.layout = GridLayout(2, 2, 2, 0)
 
-        name.text = "Unnamed"
+        //name.text = "Unnamed"
 
-        settingPanel.add(JLabel("Name (max 32 bytes)"), BorderLayout.WEST)
-        settingPanel.add(name, BorderLayout.EAST)
-        settingPanel.add(JLabel("Capacity (bytes)"), BorderLayout.WEST)
-        settingPanel.add(capacity, BorderLayout.EAST)
+        settingPanel.add(JLabel("Name (max 32 bytes)"))
+        settingPanel.add(name)
+        settingPanel.add(JLabel("Capacity (bytes)"))
+        settingPanel.add(capacity)
 
         mainPanel.add(settingPanel, BorderLayout.CENTER)
         mainPanel.add(JLabel("Set capacity to 0 to make the disk read-only"), BorderLayout.SOUTH)
@@ -50,16 +50,16 @@ class OptionFileNameAndCap {
     val settingPanel = JPanel()
 
     init {
-        capacity.model = SpinnerNumberModel(368640, 0, 1073741824, 1) // default 360 KiB, MAX 1 GiB
+        capacity.model = SpinnerNumberModel(4096, 0, 2147483647, 1) // default 360 KiB, MAX 2 GiB
         mainPanel.layout = BorderLayout()
         settingPanel.layout = GridLayout(2, 2, 2, 0)
 
-        name.text = "Unnamed"
+        //name.text = "Unnamed"
 
-        settingPanel.add(JLabel("Name (max 256 bytes)"), BorderLayout.WEST)
-        settingPanel.add(name, BorderLayout.EAST)
-        settingPanel.add(JLabel("Capacity (bytes)"), BorderLayout.WEST)
-        settingPanel.add(capacity, BorderLayout.EAST)
+        settingPanel.add(JLabel("Name (max 32 bytes)"))
+        settingPanel.add(name)
+        settingPanel.add(JLabel("Capacity (bytes)"))
+        settingPanel.add(capacity)
 
         mainPanel.add(settingPanel, BorderLayout.CENTER)
     }
@@ -69,6 +69,26 @@ class OptionFileNameAndCap {
      */
     fun showDialog(title: String): Int {
         return JOptionPane.showConfirmDialog(null, mainPanel,
+                title, JOptionPane.OK_CANCEL_OPTION)
+    }
+}
+
+class OptionSize {
+    val capacity = JSpinner()
+    val settingPanel = JPanel()
+
+    init {
+        capacity.model = SpinnerNumberModel(368640, 0, 2147483647, 1) // default 360 KiB, MAX 2 GiB
+
+        settingPanel.add(JLabel("Size (bytes)"))
+        settingPanel.add(capacity)
+    }
+
+    /**
+     * returns either JOptionPane.OK_OPTION or JOptionPane.CANCEL_OPTION
+     */
+    fun showDialog(title: String): Int {
+        return JOptionPane.showConfirmDialog(null, settingPanel,
                 title, JOptionPane.OK_CANCEL_OPTION)
     }
 }

@@ -421,7 +421,7 @@ object VDUtil {
      * Check for name collision in specified directory.
      */
     fun nameExists(disk: VirtualDisk, name: String, directoryID: IndexNumber, charset: Charset = Charsets.UTF_8): Boolean {
-        val name = name.toEntryName(256, charset)
+        val name = name.toEntryName(DiskEntry.NAME_LENGTH, charset)
         val directoryContents = getDirectoryEntries(disk, directoryID)
         directoryContents.forEach {
             if (Arrays.equals(name, it.filename))
@@ -435,7 +435,7 @@ object VDUtil {
      * Creates new disk with given name and capacity
      */
     fun createNewDisk(diskSize: Int, diskName: String, charset: Charset = Charsets.UTF_8): VirtualDisk {
-        val newdisk = VirtualDisk(diskSize, diskName.toEntryName(32, charset))
+        val newdisk = VirtualDisk(diskSize, diskName.toEntryName(VirtualDisk.NAME_LENGTH, charset))
         val rootDir = DiskEntry(
                 indexNumber = 0,
                 filename = DiskEntry.ROOTNAME.toByteArray(charset),
@@ -515,13 +515,6 @@ object VDUtil {
     }
     data class EntrySearchResult(val file: DiskEntry, val parent: DiskEntry)
 
-    fun String.toEntryName(length: Int = 256, charset: Charset = Charsets.UTF_8): ByteArray {
-        val buffer = AppendableByteBuffer(length)
-        val stringByteArray = this.toByteArray(charset)
-        buffer.put(stringByteArray.sliceArray(0..minOf(length, stringByteArray.size)))
-        return buffer.array
-    }
-
     fun resolveIfSymlink(disk: VirtualDisk, indexNumber: IndexNumber, recurse: Boolean = false): DiskEntry {
         var entry: DiskEntry? = disk.entries[indexNumber]
         if (entry == null) throw IOException("File does not exist")
@@ -545,4 +538,10 @@ object VDUtil {
 fun Byte.toUint() = java.lang.Byte.toUnsignedInt(this)
 fun magicMismatch(magic: ByteArray, array: ByteArray): Boolean {
     return !Arrays.equals(array.sliceArray(0..magic.lastIndex), magic)
+}
+fun String.toEntryName(length: Int = DiskEntry.NAME_LENGTH, charset: Charset = Charsets.UTF_8): ByteArray {
+    val buffer = AppendableByteBuffer(length)
+    val stringByteArray = this.toByteArray(charset)
+    buffer.put(stringByteArray.sliceArray(0..minOf(length, stringByteArray.size)))
+    return buffer.array
 }

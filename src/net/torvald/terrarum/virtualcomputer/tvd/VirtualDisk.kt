@@ -14,7 +14,7 @@ typealias IndexNumber = Int
 class VirtualDisk(
         /** capacity of 0 makes the disk read-only */
         var capacity: Int,
-        var diskName: ByteArray = ByteArray(32)
+        var diskName: ByteArray = ByteArray(NAME_LENGTH)
 ) {
     val entries = HashMap<IndexNumber, DiskEntry>()
     val isReadOnly: Boolean
@@ -39,7 +39,7 @@ class VirtualDisk(
 
         buffer.put(MAGIC)
         buffer.put(capacity.toBigEndian())
-        buffer.put(diskName.forceSize(32))
+        buffer.put(diskName.forceSize(NAME_LENGTH))
         buffer.put(crc)
         buffer.put(entriesBuffer)
         buffer.put(FOOTER_START_MARK)
@@ -80,6 +80,7 @@ class VirtualDisk(
     companion object {
         val HEADER_SIZE = 44 // according to the spec
         val FOOTER_SIZE = 4  // footer mark + EOF
+        val NAME_LENGTH = 32
 
         val MAGIC = "TEVd".toByteArray()
         val FOOTER_START_MARK = byteArrayOf(0xFE.toByte(), 0xFF.toByte())
@@ -91,7 +92,7 @@ class VirtualDisk(
 class DiskEntry(
         // header
         val indexNumber: IndexNumber,
-        var filename: ByteArray = ByteArray(256),
+        var filename: ByteArray = ByteArray(NAME_LENGTH),
         var creationDate: Long,
         var modificationDate: Long,
 
@@ -106,6 +107,7 @@ class DiskEntry(
     companion object {
         val HEADER_SIZE = 281 // according to the spec
         val ROOTNAME = "(root)"
+        val NAME_LENGTH  = 256
 
         val NORMAL_FILE = 1.toByte()
         val DIRECTORY =   2.toByte()
@@ -130,7 +132,7 @@ class DiskEntry(
 
         buffer.put(indexNumber.toBigEndian())
         buffer.put(contents.getTypeFlag())
-        buffer.put(filename.forceSize(256))
+        buffer.put(filename.forceSize(NAME_LENGTH))
         buffer.put(creationDate.toBigEndian())
         buffer.put(modificationDate.toBigEndian())
         buffer.put(this.hashCode().toBigEndian())
