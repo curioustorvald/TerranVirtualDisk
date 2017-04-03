@@ -46,6 +46,7 @@ class VirtualDiskCracker(val sysCharset: Charset = Charsets.UTF_8) : JFrame() {
         directoryHierarchy.push(id)
         labelPath.text = vdisk!!.entries[id]!!.getFilenameString(sysCharset)
         updateDiskInfo()
+        updateCurrentDirectoryEntry()
     }
     val currentDirectory: IndexNumber
         get() = directoryHierarchy.peek()
@@ -55,11 +56,13 @@ class VirtualDiskCracker(val sysCharset: Charset = Charsets.UTF_8) : JFrame() {
         directoryHierarchy.removeAllElements()
         directoryHierarchy.push(0)
         updateDiskInfo()
+        updateCurrentDirectoryEntry()
     }
     private fun gotoParent() {
         if (directoryHierarchy.size > 1)
             directoryHierarchy.pop()
         updateDiskInfo()
+        updateCurrentDirectoryEntry()
     }
 
 
@@ -79,6 +82,18 @@ class VirtualDiskCracker(val sysCharset: Charset = Charsets.UTF_8) : JFrame() {
             override fun mousePressed(e: MouseEvent) {
                 val table = e.source as JTable
                 val row = table.rowAtPoint(e.point)
+
+
+                currentlySelectedFile = if (row > 0)
+                    currentDirectoryEntries!![row - 1].indexNumber
+                else
+                    null // clicked ".."
+                fileDesc.text = if (currentlySelectedFile != null)
+                    getFileInfoText(vdisk!!.entries[currentlySelectedFile!!]!!)
+                else
+                    ""
+
+
                 // double click
                 if (e.clickCount == 2) {
                     if (row == 0) {
@@ -95,21 +110,10 @@ class VirtualDiskCracker(val sysCharset: Charset = Charsets.UTF_8) : JFrame() {
         })
         tableFiles.selectionModel = object : DefaultListSelectionModel() {
             init { selectionMode = ListSelectionModel.SINGLE_SELECTION }
-            override fun clearSelection() {}
-            override fun removeSelectionInterval(index0: Int, index1: Int) {}
-            override fun fireValueChanged(isAdjusting: Boolean) {
-                if (tableFiles.selectedRow >= 1 && currentDirectoryEntries != null) {
-                    currentlySelectedFile = currentDirectoryEntries!![tableFiles.selectedRow - 1].indexNumber
+            override fun clearSelection() { } // required!
+            override fun removeSelectionInterval(index0: Int, index1: Int) { } // required!
+            override fun fireValueChanged(isAdjusting: Boolean) { } // required!
 
-                    fileDesc.text = if (currentlySelectedFile != null)
-                        getFileInfoText(vdisk!!.entries[currentlySelectedFile!!]!!)
-                    else
-                        "(File description displayed here)"
-                }
-                else {
-                    fileDesc.text = "(File description displayed here)"
-                }
-            }
         }
         tableFiles.model = object : AbstractTableModel() {
             override fun getRowCount(): Int {
@@ -126,9 +130,7 @@ class VirtualDiskCracker(val sysCharset: Charset = Charsets.UTF_8) : JFrame() {
                 }
                 else {
                     if (vdisk != null) {
-                        currentDirectoryEntries = VDUtil.getDirectoryEntries(vdisk!!,
-                                vdisk!!.entries[currentDirectory]!!
-                        )
+                        updateCurrentDirectoryEntry()
                         val entry = currentDirectoryEntries!![rowIndex - 1]
                         return when(columnIndex) {
                             0 -> entry.getFilenameString(sysCharset)
@@ -400,7 +402,7 @@ class VirtualDiskCracker(val sysCharset: Charset = Charsets.UTF_8) : JFrame() {
         diskInfo.preferredSize = Dimension(-1, 60)
 
         fileDesc.highlighter = null
-        fileDesc.text = "(File description displayed here)"
+        fileDesc.text = ""
         fileDesc.preferredSize = Dimension(200, -1)
 
         val fileDescScroll = JScrollPane(fileDesc)
@@ -463,6 +465,9 @@ class VirtualDiskCracker(val sysCharset: Charset = Charsets.UTF_8) : JFrame() {
                 JOptionPane.ERROR_MESSAGE,
                 null, null, null
         )
+    }
+    private fun updateCurrentDirectoryEntry() {
+        currentDirectoryEntries = VDUtil.getDirectoryEntries(vdisk!!, currentDirectory)
     }
     private fun updateDiskInfo() {
         val sb = StringBuilder()

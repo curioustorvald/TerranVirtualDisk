@@ -49,12 +49,12 @@ object VDUtil {
             val entryData = when (entryTypeFlag) {
                 DiskEntry.NORMAL_FILE -> {
                     val filesize = inbytes.sliceArray(entryOffset + 281..entryOffset + 284).toIntBig()
-                    println("[VDUtil] filesize = $filesize")
+                    println("[VDUtil] --> is file; filesize = $filesize")
                     inbytes.sliceArray(entryOffset + 285..entryOffset + 284 + filesize)
                 }
                 DiskEntry.DIRECTORY   -> {
                     val entryCount = inbytes.sliceArray(entryOffset + 281..entryOffset + 282).toShortBig()
-                    println("[VDUtil] entryCount = $entryCount")
+                    println("[VDUtil] --> is directory; entryCount = $entryCount")
                     inbytes.sliceArray(entryOffset + 283..entryOffset + 282 + entryCount * 4)
                 }
                 DiskEntry.SYMLINK     -> {
