@@ -23,7 +23,7 @@ object VDUtil {
      *
      * @param crcWarnLevel Level.OFF -- no warning, Level.WARNING -- print out warning, Level.SEVERE -- throw error
      */
-    fun readDiskArchive(infile: File, crcWarnLevel: Level = Level.SEVERE): VirtualDisk {
+    fun readDiskArchive(infile: File, crcWarnLevel: Level = Level.SEVERE, warningFunc: ((String) -> Unit)? = null): VirtualDisk {
         val inbytes = infile.readBytes()
 
         if (magicMismatch(VirtualDisk.MAGIC, inbytes))
@@ -35,11 +35,11 @@ object VDUtil {
 
         val vdisk = VirtualDisk(diskSize, diskName)
 
-        println("[VDUtil] currentUnixtime = $currentUnixtime")
+        //println("[VDUtil] currentUnixtime = $currentUnixtime")
 
         var entryOffset = 44
         while (!Arrays.equals(inbytes.sliceArray(entryOffset..entryOffset + 3), VirtualDisk.FOOTER_START_MARK)) {
-            println("[VDUtil] entryOffset = $entryOffset")
+            //println("[VDUtil] entryOffset = $entryOffset")
             // read and prepare all the shits
             val entryIndexNum = inbytes.sliceArray(entryOffset..entryOffset + 3).toIntBig()
             val entryTypeFlag = inbytes[entryOffset + 4]
@@ -51,12 +51,12 @@ object VDUtil {
             val entryData = when (entryTypeFlag) {
                 DiskEntry.NORMAL_FILE -> {
                     val filesize = inbytes.sliceArray(entryOffset + 281..entryOffset + 284).toIntBig()
-                    println("[VDUtil] --> is file; filesize = $filesize")
+                    //println("[VDUtil] --> is file; filesize = $filesize")
                     inbytes.sliceArray(entryOffset + 285..entryOffset + 284 + filesize)
                 }
                 DiskEntry.DIRECTORY   -> {
                     val entryCount = inbytes.sliceArray(entryOffset + 281..entryOffset + 282).toShortBig()
-                    println("[VDUtil] --> is directory; entryCount = $entryCount")
+                    //println("[VDUtil] --> is directory; entryCount = $entryCount")
                     inbytes.sliceArray(entryOffset + 283..entryOffset + 282 + entryCount * 4)
                 }
                 DiskEntry.SYMLINK     -> {
@@ -108,9 +108,9 @@ object VDUtil {
 
                 if (calculatedCRC != entryCRC) {
                     if (crcWarnLevel == Level.SEVERE)
-                        throw RuntimeException(crcMsg)
-                    else
-                        println("[VDUtil] $crcMsg")
+                        throw IOException(crcMsg)
+                    else if (warningFunc != null)
+                        warningFunc(crcMsg)
                 }
             }
 
@@ -127,9 +127,9 @@ object VDUtil {
 
             if (calculatedCRC != diskCRC) {
                 if (crcWarnLevel == Level.SEVERE)
-                    throw RuntimeException(crcMsg)
-                else
-                    println("[VDUtil] $crcMsg")
+                    throw IOException(crcMsg)
+                else if (warningFunc != null)
+                    warningFunc(crcMsg)
             }
         }
 
@@ -432,7 +432,12 @@ object VDUtil {
      * Check for name collision in specified directory.
      */
     fun nameExists(disk: VirtualDisk, name: String, directoryID: EntryID, charset: Charset = Charsets.UTF_8): Boolean {
-        val name = name.toEntryName(DiskEntry.NAME_LENGTH, charset)
+        return nameExists(disk, name.toEntryName(256, charset), directoryID)
+    }
+    /**
+     * Check for name collision in specified directory.
+     */
+    fun nameExists(disk: VirtualDisk, name: ByteArray, directoryID: EntryID): Boolean {
         val directoryContents = getDirectoryEntries(disk, directoryID)
         directoryContents.forEach {
             if (Arrays.equals(name, it.filename))

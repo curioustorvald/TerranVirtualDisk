@@ -207,10 +207,12 @@ class VirtualDiskCracker(val sysCharset: Charset = Charsets.UTF_8) : JFrame() {
                     fileChooser.showOpenDialog(null)
                     if (fileChooser.selectedFile != null) {
                         try {
-                            vdisk = VDUtil.readDiskArchive(fileChooser.selectedFile, Level.OFF)
-                            gotoRoot()
-                            updateDiskInfo()
-                            setStat("Disk loaded")
+                            vdisk = VDUtil.readDiskArchive(fileChooser.selectedFile, Level.WARNING, { popupWarning(it) })
+                            if (vdisk != null) {
+                                gotoRoot()
+                                updateDiskInfo()
+                                setStat("Disk loaded")
+                            }
                         }
                         catch (e: Exception) {
                             e.printStackTrace()
@@ -459,9 +461,20 @@ class VirtualDiskCracker(val sysCharset: Charset = Charsets.UTF_8) : JFrame() {
                     if (fileChooser.selectedFile != null) {
                         try {
                             val entry = VDUtil.importFile(fileChooser.selectedFile, vdisk!!.generateUniqueID())
-                            VDUtil.addFile(vdisk!!, currentDirectory, entry)
-                            updateDiskInfo()
-                            setStat("File added")
+                            val newname: String?
+                            if (VDUtil.nameExists(vdisk!!, entry.filename, currentDirectory)) {
+                                newname = JOptionPane.showInputDialog("The name already exists. Enter a new name:")
+                            }
+                            else {
+                                newname = entry.getFilenameString(sysCharset)
+                            }
+
+                            if (newname != null) {
+                                entry.filename = newname.toEntryName(DiskEntry.NAME_LENGTH, sysCharset)
+                                VDUtil.addFile(vdisk!!, currentDirectory, entry)
+                                updateDiskInfo()
+                                setStat("File added")
+                            }
                         }
                         catch (e: Exception) {
                             e.printStackTrace()
@@ -621,6 +634,16 @@ class VirtualDiskCracker(val sysCharset: Charset = Charsets.UTF_8) : JFrame() {
                 title,
                 JOptionPane.DEFAULT_OPTION,
                 JOptionPane.ERROR_MESSAGE,
+                null, null, null
+        )
+    }
+    private fun popupWarning(message: String, title: String = "Careful…") {
+        JOptionPane.showOptionDialog(
+                null,
+                message,
+                title,
+                JOptionPane.DEFAULT_OPTION,
+                JOptionPane.WARNING_MESSAGE,
                 null, null, null
         )
     }
