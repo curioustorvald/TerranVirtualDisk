@@ -23,7 +23,7 @@ object VDUtil {
      *
      * @param crcWarnLevel Level.OFF -- no warning, Level.WARNING -- print out warning, Level.SEVERE -- throw error
      */
-    fun readDiskArchive(infile: File, crcWarnLevel: Level = Level.SEVERE, warningFunc: ((String) -> Unit)? = null): VirtualDisk {
+    fun readDiskArchive(infile: File, crcWarnLevel: Level = Level.SEVERE, warningFunc: ((String) -> Unit)? = null, charset: Charset = Charsets.UTF_8): VirtualDisk {
         val inbytes = infile.readBytes()
 
         if (magicMismatch(VirtualDisk.MAGIC, inbytes))
@@ -104,7 +104,8 @@ object VDUtil {
             if (crcWarnLevel == Level.SEVERE || crcWarnLevel == Level.WARNING) {
                 val calculatedCRC = diskEntry.hashCode()
 
-                val crcMsg = "$diskEntry CRC failed -- expected ${entryCRC.toHex()}, got ${calculatedCRC.toHex()}"
+                val crcMsg = "CRC failed: expected ${entryCRC.toHex()}, got ${calculatedCRC.toHex()}\n" +
+                        "at file \"${diskEntry.getFilenameString(charset)}\" (entry ID ${diskEntry.entryID})"
 
                 if (calculatedCRC != entryCRC) {
                     if (crcWarnLevel == Level.SEVERE)
@@ -123,7 +124,7 @@ object VDUtil {
         if (crcWarnLevel == Level.SEVERE || crcWarnLevel == Level.WARNING) {
             val calculatedCRC = vdisk.hashCode()
 
-            val crcMsg = "$vdisk CRC failed -- expected ${diskCRC.toHex()}, got ${calculatedCRC.toHex()}"
+            val crcMsg = "Disk CRC failed: expected ${diskCRC.toHex()}, got ${calculatedCRC.toHex()}"
 
             if (calculatedCRC != diskCRC) {
                 if (crcWarnLevel == Level.SEVERE)

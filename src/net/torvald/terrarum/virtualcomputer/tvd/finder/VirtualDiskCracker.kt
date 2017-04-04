@@ -671,7 +671,7 @@ Capacity: ${disk.capacity} bytes (${disk.usedBytes} bytes used, ${disk.capacity 
         return """Name: ${file.getFilenameString(sysCharset)}
 Size: ${file.getEffectiveSize()}
 Type: ${DiskEntry.getTypeString(file.contents)}
-CRC: ${file.hashCode()}
+CRC: ${file.hashCode().toHex()}
 EntryID: ${file.entryID}""" + if (file.contents is EntryFile) """
 
 Contents:

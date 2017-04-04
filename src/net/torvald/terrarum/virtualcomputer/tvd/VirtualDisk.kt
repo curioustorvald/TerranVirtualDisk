@@ -201,7 +201,7 @@ class EntrySymlink(val target: EntryID) : DiskEntryContent {
 }
 
 
-fun Int.toHex() = this.toString(16)
+fun Int.toHex() = this.toLong().and(0xFFFFFFFF).toString(16).padStart(8, '0').toUpperCase()
 fun Int.toBigEndian(): ByteArray {
     return ByteArray(4, { this.ushr(24 - (8 * it)).toByte() })
 }
