@@ -207,7 +207,7 @@ class VirtualDiskCracker(val sysCharset: Charset = Charsets.UTF_8) : JFrame() {
                     fileChooser.showOpenDialog(null)
                     if (fileChooser.selectedFile != null) {
                         try {
-                            vdisk = VDUtil.readDiskArchive(fileChooser.selectedFile, Level.WARNING, { popupWarning(it) })
+                            vdisk = VDUtil.readDiskArchive(fileChooser.selectedFile, Level.WARNING, { popupWarning(it) }, sysCharset)
                             if (vdisk != null) {
                                 gotoRoot()
                                 updateDiskInfo()
@@ -430,7 +430,7 @@ class VirtualDiskCracker(val sysCharset: Charset = Charsets.UTF_8) : JFrame() {
                                 popupError("The name already exists")
                             }
                             else {
-                                VDUtil.renameFile(vdisk!!, selectedFile!!, newname)
+                                VDUtil.renameFile(vdisk!!, selectedFile!!, newname, sysCharset)
                                 updateDiskInfo()
                                 setStat("File renamed")
                             }

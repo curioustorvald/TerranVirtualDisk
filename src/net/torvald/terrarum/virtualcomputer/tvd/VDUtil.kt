@@ -23,7 +23,7 @@ object VDUtil {
      *
      * @param crcWarnLevel Level.OFF -- no warning, Level.WARNING -- print out warning, Level.SEVERE -- throw error
      */
-    fun readDiskArchive(infile: File, crcWarnLevel: Level = Level.SEVERE, warningFunc: ((String) -> Unit)? = null, charset: Charset = Charsets.UTF_8): VirtualDisk {
+    fun readDiskArchive(infile: File, crcWarnLevel: Level = Level.SEVERE, warningFunc: ((String) -> Unit)? = null, charset: Charset): VirtualDisk {
         val inbytes = infile.readBytes()
 
         if (magicMismatch(VirtualDisk.MAGIC, inbytes))
@@ -167,7 +167,7 @@ object VDUtil {
      * Search a entry using path
      * @return Pair of <The file, Parent file>
      */
-    fun getFile(disk: VirtualDisk, path: String): EntrySearchResult? {
+    fun getFile(disk: VirtualDisk, path: String, charset: Charset): EntrySearchResult? {
         try {
             // TODO will path starts with(out) / cause quirky behaviours?
 
@@ -179,12 +179,12 @@ object VDUtil {
                 // if finalpath then...
                 if (index == resolvedPath.lastIndex) {
                     return EntrySearchResult(
-                            directory.searchForFilename(pathName)!!, // file to search
+                            directory.searchForFilename(pathName, charset)!!, // file to search
                             disk.entries[hierarchy.last()]!!         // parent directory
                     )
                 }
                 else {
-                    val searchResult = directory.searchForFilename(pathName)!!
+                    val searchResult = directory.searchForFilename(pathName, charset)!!
                     hierarchy.add(searchResult.entryID)
                     directory = getDirectoryEntries(disk, searchResult)
                 }
@@ -230,8 +230,8 @@ object VDUtil {
     /**
      * Search for the file and returns a instance of normal file.
      */
-    fun getAsNormalFile(disk: VirtualDisk, path: String) =
-            getFile(disk, path)!!.file.getAsNormalFile(disk)
+    fun getAsNormalFile(disk: VirtualDisk, path: String, charset: Charset) =
+            getFile(disk, path, charset)!!.file.getAsNormalFile(disk)
     /**
      * Fetch the file and returns a instance of normal file.
      */
@@ -240,8 +240,8 @@ object VDUtil {
     /**
      * Search for the file and returns a instance of directory.
      */
-    fun getAsDirectory(disk: VirtualDisk, path: String) =
-            getFile(disk, path)!!.file.getAsDirectory(disk)
+    fun getAsDirectory(disk: VirtualDisk, path: String, charset: Charset) =
+            getFile(disk, path, charset)!!.file.getAsDirectory(disk)
     /**
      * Fetch the file and returns a instance of directory.
      */
@@ -250,14 +250,14 @@ object VDUtil {
     /**
      * Deletes file on the disk safely.
      */
-    fun deleteFile(disk: VirtualDisk, path: String) {
+    fun deleteFile(disk: VirtualDisk, path: String, charset: Charset) {
         disk.checkReadOnly()
 
         if (path.sanitisePath() == "/" || path.isEmpty())
             throw IOException("Cannot delete root file system")
 
         try {
-            val file = getFile(disk, path)!!
+            val file = getFile(disk, path, charset)!!
             // delete file record
             disk.entries.remove(file.file.entryID)
             // unlist file from parent directory
@@ -296,11 +296,11 @@ object VDUtil {
     /**
      * Changes the name of the entry.
      */
-    fun renameFile(disk: VirtualDisk, path: String, newName: String) {
-        val file = getFile(disk, path)?.file
+    fun renameFile(disk: VirtualDisk, path: String, newName: String, charset: Charset) {
+        val file = getFile(disk, path, charset)?.file
 
         if (file != null) {
-            file.filename = newName.sanitisePath().toByteArray()
+            file.filename = newName.sanitisePath().toEntryName(DiskEntry.NAME_LENGTH, charset)
         }
         else {
             throw FileNotFoundException()
@@ -309,11 +309,11 @@ object VDUtil {
     /**
      * Changes the name of the entry.
      */
-    fun renameFile(disk: VirtualDisk, fileID: EntryID, newName: String) {
+    fun renameFile(disk: VirtualDisk, fileID: EntryID, newName: String, charset: Charset) {
         val file = disk.entries[fileID]
 
         if (file != null) {
-            file.filename = newName.sanitisePath().toByteArray()
+            file.filename = newName.sanitisePath().toEntryName(DiskEntry.NAME_LENGTH, charset)
         }
         else {
             throw FileNotFoundException()
@@ -322,13 +322,13 @@ object VDUtil {
     /**
      * Add file to the specified directory.
      */
-    fun addFile(disk: VirtualDisk, parentPath: String, file: DiskEntry) {
+    fun addFile(disk: VirtualDisk, parentPath: String, file: DiskEntry, charset: Charset) {
         disk.checkReadOnly()
         disk.checkCapacity(file.size)
 
         try {
             // add record to the directory
-            getAsDirectory(disk, parentPath).entries.add(file.entryID)
+            getAsDirectory(disk, parentPath, charset).entries.add(file.entryID)
             // add entry on the disk
             disk.entries[file.entryID] = file
         }
@@ -356,7 +356,7 @@ object VDUtil {
     /**
      * Add subdirectory to the specified directory.
      */
-    fun addDir(disk: VirtualDisk, parentPath: String, name: String) {
+    fun addDir(disk: VirtualDisk, parentPath: String, name: String, charset: Charset) {
         disk.checkReadOnly()
         disk.checkCapacity(EntryDirectory.NEW_ENTRY_SIZE)
 
@@ -364,7 +364,7 @@ object VDUtil {
 
         try {
             // add record to the directory
-            getAsDirectory(disk, parentPath).entries.add(newID)
+            getAsDirectory(disk, parentPath, charset).entries.add(newID)
             // add entry on the disk
             disk.entries[newID] = DiskEntry(
                     newID,
@@ -432,7 +432,7 @@ object VDUtil {
     /**
      * Check for name collision in specified directory.
      */
-    fun nameExists(disk: VirtualDisk, name: String, directoryID: EntryID, charset: Charset = Charsets.UTF_8): Boolean {
+    fun nameExists(disk: VirtualDisk, name: String, directoryID: EntryID, charset: Charset): Boolean {
         return nameExists(disk, name.toEntryName(256, charset), directoryID)
     }
     /**
@@ -451,7 +451,7 @@ object VDUtil {
     /**
      * Creates new disk with given name and capacity
      */
-    fun createNewDisk(diskSize: Int, diskName: String, charset: Charset = Charsets.UTF_8): VirtualDisk {
+    fun createNewDisk(diskSize: Int, diskName: String, charset: Charset): VirtualDisk {
         val newdisk = VirtualDisk(diskSize, diskName.toEntryName(VirtualDisk.NAME_LENGTH, charset))
         val rootDir = DiskEntry(
                 entryID = 0,
@@ -468,7 +468,7 @@ object VDUtil {
     /**
      * Creates new zero-filled file with given name and size
      */
-    fun createNewBlankFile(disk: VirtualDisk, directoryID: EntryID, fileSize: Int, filename: String, charset: Charset = Charsets.UTF_8) {
+    fun createNewBlankFile(disk: VirtualDisk, directoryID: EntryID, fileSize: Int, filename: String, charset: Charset) {
         disk.checkReadOnly()
         disk.checkCapacity(fileSize + DiskEntry.HEADER_SIZE + 4)
 
@@ -496,8 +496,10 @@ object VDUtil {
         if (this.usedBytes + newSize > this.capacity)
             throw IOException("Not enough space on the disk")
     }
-    private fun Array<DiskEntry>.searchForFilename(name: String): DiskEntry? {
-        this.forEach { if (String(it.filename) == name) return it }
+    private fun Array<DiskEntry>.searchForFilename(name: String, charset: Charset): DiskEntry? {
+        this.forEach { if (Arrays.equals(it.filename, name.toEntryName(DiskEntry.NAME_LENGTH, charset)))
+            return it
+        }
         return null
     }
     fun ByteArray.toIntBig(): Int {
@@ -557,7 +559,7 @@ fun Byte.toUint() = java.lang.Byte.toUnsignedInt(this)
 fun magicMismatch(magic: ByteArray, array: ByteArray): Boolean {
     return !Arrays.equals(array.sliceArray(0..magic.lastIndex), magic)
 }
-fun String.toEntryName(length: Int, charset: Charset = Charsets.UTF_8): ByteArray {
+fun String.toEntryName(length: Int, charset: Charset): ByteArray {
     val buffer = AppendableByteBuffer(length)
     val stringByteArray = this.toByteArray(charset)
     buffer.put(stringByteArray.sliceArray(0..minOf(length, stringByteArray.size) - 1))
