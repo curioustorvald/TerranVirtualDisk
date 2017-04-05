@@ -234,9 +234,11 @@ object VDUtil {
         fun getCurrentEntry(): DiskEntry = searchHierarchy.last()
         //var currentDirectory = disk.root
 
+        searchHierarchy.add(disk.entries[0]!!)
+
         try {
             // search for the file
-            path.forEachIndexed { i, dirName ->
+            path.forEachIndexed { i, nameToSearch ->
                 // if we hit the last elem, we won't search more
                 if (i < path.lastIndex) {
 
@@ -244,7 +246,7 @@ object VDUtil {
 
                     var fileFound: DiskEntry? = null
                     for (entry in currentDirEntries) {
-                        if (Arrays.equals(entry.filename, dirName)) {
+                        if (Arrays.equals(entry.filename, nameToSearch)) {
                             fileFound = entry
                             break
                         }
