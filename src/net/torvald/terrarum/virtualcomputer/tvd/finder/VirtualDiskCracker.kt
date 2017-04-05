@@ -132,6 +132,8 @@ class VirtualDiskCracker(val sysCharset: Charset = Charsets.UTF_8) : JFrame() {
 
             override fun getColumnCount() = tableColumns.size
 
+            override fun getColumnName(column: Int) = tableColumns[column]
+
             override fun getValueAt(rowIndex: Int, columnIndex: Int): Any {
                 if (rowIndex == 0) {
                     return tableParentRecord[0][columnIndex]
@@ -286,7 +288,7 @@ class VirtualDiskCracker(val sysCharset: Charset = Charsets.UTF_8) : JFrame() {
                                 popupError("The name already exists")
                             }
                             else {
-                                VDUtil.addDir(vdisk!!, currentDirectory, newname)
+                                VDUtil.addDir(vdisk!!, currentDirectory, newname.toEntryName(DiskEntry.NAME_LENGTH, sysCharset))
                                 updateDiskInfo()
                                 setStat("Directory created")
                             }
@@ -453,27 +455,32 @@ class VirtualDiskCracker(val sysCharset: Charset = Charsets.UTF_8) : JFrame() {
 
         })
         menuEdit.addSeparator()
-        menuEdit.add("Import File…").addMouseListener(object : MouseAdapter() {
+        menuEdit.add("Import File(s)…").addMouseListener(object : MouseAdapter() {
             override fun mousePressed(e: MouseEvent?) {
                 if (vdisk != null) {
                     val fileChooser = JFileChooser()
+                    fileChooser.isMultiSelectionEnabled = true
                     fileChooser.showOpenDialog(null)
-                    if (fileChooser.selectedFile != null) {
+                    if (fileChooser.getSelectedFiles().isNotEmpty()) {
                         try {
-                            val entry = VDUtil.importFile(fileChooser.selectedFile, vdisk!!.generateUniqueID())
-                            val newname: String?
-                            if (VDUtil.nameExists(vdisk!!, entry.filename, currentDirectory)) {
-                                newname = JOptionPane.showInputDialog("The name already exists. Enter a new name:")
-                            }
-                            else {
-                                newname = entry.getFilenameString(sysCharset)
-                            }
+                            fileChooser.getSelectedFiles().forEach {
+                                if (!it.isDirectory) {
+                                    val entry = VDUtil.importFile(it, vdisk!!.generateUniqueID())
+                                    val newname: String?
+                                    if (VDUtil.nameExists(vdisk!!, entry.filename, currentDirectory)) {
+                                        newname = JOptionPane.showInputDialog("The name already exists. Enter a new name:")
+                                    }
+                                    else {
+                                        newname = entry.getFilenameString(sysCharset)
+                                    }
 
-                            if (newname != null) {
-                                entry.filename = newname.toEntryName(DiskEntry.NAME_LENGTH, sysCharset)
-                                VDUtil.addFile(vdisk!!, currentDirectory, entry)
-                                updateDiskInfo()
-                                setStat("File added")
+                                    if (newname != null) {
+                                        entry.filename = newname.toEntryName(DiskEntry.NAME_LENGTH, sysCharset)
+                                        VDUtil.addFile(vdisk!!, currentDirectory, entry)
+                                        updateDiskInfo()
+                                        setStat("File added")
+                                    }
+                                }
                             }
                         }
                         catch (e: Exception) {
@@ -481,6 +488,8 @@ class VirtualDiskCracker(val sysCharset: Charset = Charsets.UTF_8) : JFrame() {
                             popupError(e.toString())
                         }
                     }
+
+                    fileChooser.isMultiSelectionEnabled = false
                 }
             }
         })
