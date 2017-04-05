@@ -12,6 +12,55 @@ import javax.naming.OperationNotSupportedException
  * Created by SKYHi14 on 2017-04-01.
  */
 object VDUtil {
+    class VDPath(strPath: String, charset: Charset) {
+        /**
+         * input: (root)->etc->boot in Constructor
+         * output: ByteArrayOf(
+         *      e t c \0 \0 \0 \0 \0 ... ,
+         *      b o o t \0 \0 \0 \0 ...
+         * )
+         */
+        var hierarchy = ArrayList<ByteArray>()
+
+        val lastElem: Int
+            get() = hierarchy.lastIndex
+
+        init {
+            val unsanitisedHierarchy = ArrayList<String>()
+            strPath.sanitisePath().split('/').forEach { unsanitisedHierarchy.add(it) }
+
+            // deal with bad slashes (will drop '' and tail '')
+            // "/bin/boot/drivers/" -> "bin/boot/drivers"
+            //  removes head slash
+            if (unsanitisedHierarchy[0].isEmpty())
+                unsanitisedHierarchy.removeAt(0)
+            //  removes tail slash
+            if (unsanitisedHierarchy[unsanitisedHierarchy.lastIndex].isEmpty())
+                unsanitisedHierarchy.removeAt(unsanitisedHierarchy.lastIndex)
+
+            unsanitisedHierarchy.forEach {
+                hierarchy.add(it.toEntryName(DiskEntry.NAME_LENGTH, charset))
+            }
+        }
+
+        override fun toString(): String {
+            val sb = StringBuilder()
+            if (hierarchy.size > 0) {
+                sb.append(hierarchy[0])
+            }
+            if (hierarchy.size > 1) {
+                (1..hierarchy.lastIndex).forEach {
+                    sb.append('/')
+                    sb.append(hierarchy[it])
+                }
+            }
+
+            return sb.toString()
+        }
+
+        fun forEach(action: (ByteArray) -> Unit) = hierarchy.forEach(action)
+        fun forEachIndexed(action: (Int, ByteArray) -> Unit) = hierarchy.forEachIndexed(action)
+    }
 
     fun dumpToRealMachine(disk: VirtualDisk, outfile: File) {
         if (!outfile.exists()) outfile.createNewFile()
@@ -165,39 +214,46 @@ object VDUtil {
 
     /**
      * Search a entry using path
-     * @return Pair of <The file, Parent file>
+     * @return Pair of <The file, Parent file>, or null if not found
      */
-    fun getFile(disk: VirtualDisk, path: String, charset: Charset): EntrySearchResult? {
-        try {
-            // TODO will path starts with(out) / cause quirky behaviours?
+    fun getFile(disk: VirtualDisk, path: VDPath, charset: Charset): EntrySearchResult? {
+        val searchHierarchy = ArrayList<DiskEntry>()
+        fun getCurrentEntry(): DiskEntry = searchHierarchy.last()
+        //var currentDirectory = disk.root
 
-            val resolvedPath = path.sanitisePath().split('/')
-            val hierarchy = ArrayList<Int>()
-            hierarchy.add(0)
-            var directory = getDirectoryEntries(disk, disk.entries[hierarchy.last()]!!)
-            resolvedPath.forEachIndexed { index, pathName ->
-                // if finalpath then...
-                if (index == resolvedPath.lastIndex) {
-                    return EntrySearchResult(
-                            directory.searchForFilename(pathName, charset)!!, // file to search
-                            disk.entries[hierarchy.last()]!!         // parent directory
-                    )
-                }
-                else {
-                    val searchResult = directory.searchForFilename(pathName, charset)!!
-                    hierarchy.add(searchResult.entryID)
-                    directory = getDirectoryEntries(disk, searchResult)
+        try {
+            // search for the file
+            path.forEachIndexed { i, dirName ->
+                // if we hit the last elem, we won't search more
+                if (i < path.lastElem) {
+
+                    val currentDirEntries = getDirectoryEntries(disk, getCurrentEntry())
+
+                    var fileFound: DiskEntry? = null
+                    for (entry in currentDirEntries) {
+                        if (Arrays.equals(entry.filename, dirName)) {
+                            fileFound = entry
+                            break
+                        }
+                    }
+                    if (fileFound == null) { // file not found
+                        throw KotlinNullPointerException()
+                    }
+                    else { // file found
+                        searchHierarchy.add(fileFound)
+                    }
                 }
             }
         }
-        catch (noSuchFileException: KotlinNullPointerException) {
-            throw KotlinNullPointerException("No such file")
-        }
-        catch (unexpectedNotADirectoryException: IllegalArgumentException) {
-            throw IllegalArgumentException("No such directory")
+        catch (e1: KotlinNullPointerException) {
+            return null
         }
 
-        return null
+        // file found
+        return EntrySearchResult(
+                searchHierarchy[searchHierarchy.lastIndex],
+                searchHierarchy[searchHierarchy.lastIndex - 1]
+        )
     }
 
     /**
@@ -230,7 +286,7 @@ object VDUtil {
     /**
      * Search for the file and returns a instance of normal file.
      */
-    fun getAsNormalFile(disk: VirtualDisk, path: String, charset: Charset) =
+    fun getAsNormalFile(disk: VirtualDisk, path: VDPath, charset: Charset) =
             getFile(disk, path, charset)!!.file.getAsNormalFile(disk)
     /**
      * Fetch the file and returns a instance of normal file.
@@ -240,7 +296,7 @@ object VDUtil {
     /**
      * Search for the file and returns a instance of directory.
      */
-    fun getAsDirectory(disk: VirtualDisk, path: String, charset: Charset) =
+    fun getAsDirectory(disk: VirtualDisk, path: VDPath, charset: Charset) =
             getFile(disk, path, charset)!!.file.getAsDirectory(disk)
     /**
      * Fetch the file and returns a instance of directory.
@@ -250,11 +306,8 @@ object VDUtil {
     /**
      * Deletes file on the disk safely.
      */
-    fun deleteFile(disk: VirtualDisk, path: String, charset: Charset) {
+    fun deleteFile(disk: VirtualDisk, path: VDPath, charset: Charset) {
         disk.checkReadOnly()
-
-        if (path.sanitisePath() == "/" || path.isEmpty())
-            throw IOException("Cannot delete root file system")
 
         try {
             val file = getFile(disk, path, charset)!!
@@ -296,7 +349,7 @@ object VDUtil {
     /**
      * Changes the name of the entry.
      */
-    fun renameFile(disk: VirtualDisk, path: String, newName: String, charset: Charset) {
+    fun renameFile(disk: VirtualDisk, path: VDPath, newName: String, charset: Charset) {
         val file = getFile(disk, path, charset)?.file
 
         if (file != null) {
@@ -322,7 +375,7 @@ object VDUtil {
     /**
      * Add file to the specified directory.
      */
-    fun addFile(disk: VirtualDisk, parentPath: String, file: DiskEntry, charset: Charset) {
+    fun addFile(disk: VirtualDisk, parentPath: VDPath, file: DiskEntry, charset: Charset) {
         disk.checkReadOnly()
         disk.checkCapacity(file.size)
 
@@ -356,7 +409,7 @@ object VDUtil {
     /**
      * Add subdirectory to the specified directory.
      */
-    fun addDir(disk: VirtualDisk, parentPath: String, name: String, charset: Charset) {
+    fun addDir(disk: VirtualDisk, parentPath: VDPath, name: String, charset: Charset) {
         disk.checkReadOnly()
         disk.checkCapacity(EntryDirectory.NEW_ENTRY_SIZE)
 
@@ -495,12 +548,6 @@ object VDUtil {
     fun VirtualDisk.checkCapacity(newSize: Int) {
         if (this.usedBytes + newSize > this.capacity)
             throw IOException("Not enough space on the disk")
-    }
-    private fun Array<DiskEntry>.searchForFilename(name: String, charset: Charset): DiskEntry? {
-        this.forEach { if (Arrays.equals(it.filename, name.toEntryName(DiskEntry.NAME_LENGTH, charset)))
-            return it
-        }
-        return null
     }
     fun ByteArray.toIntBig(): Int {
         if (this.size != 4)

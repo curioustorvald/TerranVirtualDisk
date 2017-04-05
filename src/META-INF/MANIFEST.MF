@@ -1,5 +1,5 @@
 Manifest-Version: 1.0
-Class-Path: kotlin/kotlin-runtime.jar kotlin/kotlin-reflect.jar
+Class-Path: ./kotlin-runtime.jar ./kotlin-reflect.jar
 Main-Class: net.torvald.terrarum.virtualcomputer.tvd.finder.VirtualDis
  kCrackerKt
 

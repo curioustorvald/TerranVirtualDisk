@@ -2,15 +2,14 @@
   <artifact name="TerranVirtualDisk">
     <output-path>$PROJECT_DIR$/out/artifacts/TerranVirtualDisk</output-path>
     <root id="root">
-      <element id="directory" name="kotlin">
-        <element id="library" level="project" name="KotlinJavaRuntime" />
-      </element>
       <element id="archive" name="TerranVirtualDisk.jar">
         <element id="module-output" name="TerranVDImg" />
+        <element id="dir-copy" path="$PROJECT_DIR$/src" />
       </element>
       <element id="file-copy" path="$PROJECT_DIR$/LICENSE.md" />
       <element id="file-copy" path="$PROJECT_DIR$/README.md" />
       <element id="file-copy" path="$PROJECT_DIR$/Spec.md" />
+      <element id="library" level="project" name="KotlinJavaRuntime" />
     </root>
   </artifact>
 </component>

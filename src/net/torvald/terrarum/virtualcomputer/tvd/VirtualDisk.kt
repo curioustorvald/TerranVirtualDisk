@@ -20,6 +20,8 @@ class VirtualDisk(
     val isReadOnly: Boolean
         get() = capacity == 0
     fun getDiskNameString(charset: Charset) = String(diskName, charset)
+    val root: DiskEntry
+        get() = entries[0]!!
 
 
     private fun serializeEntriesOnly(): ByteArray {
@@ -223,7 +225,7 @@ fun AppendableByteBuffer.getCRC32(): Int {
 class AppendableByteBuffer(val size: Int) {
     val array = ByteArray(size, { 0.toByte() })
     private var offset = 0
-    
+
     fun put(byteArray: ByteArray): AppendableByteBuffer {
         System.arraycopy(
                 byteArray, // source
