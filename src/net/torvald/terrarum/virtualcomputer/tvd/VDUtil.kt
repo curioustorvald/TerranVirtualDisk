@@ -50,12 +50,12 @@ object VDUtil {
         override fun toString(): String {
             val sb = StringBuilder()
             if (hierarchy.size > 0) {
-                sb.append(hierarchy[0])
+                sb.append(String(hierarchy[0]))
             }
             if (hierarchy.size > 1) {
                 (1..hierarchy.lastIndex).forEach {
                     sb.append('/')
-                    sb.append(hierarchy[it])
+                    sb.append(String(hierarchy[it]))
                 }
             }
 
@@ -529,7 +529,7 @@ object VDUtil {
             try {
                 deleteFile(disk2, toPath)
             }
-            catch (e: KotlinNullPointerException) { "nothing to delete" }
+            catch (e: KotlinNullPointerException) { "Nothing to delete beforehand" }
 
             deleteFile(disk1, fromPath) // any uncaught no_from_file will be caught here
             try {
