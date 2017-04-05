@@ -66,7 +66,7 @@ class VirtualDisk(
 
     /** Expected size of the virtual disk */
     val usedBytes: Int
-        get() = entries.map { it.value.size }.sum() + HEADER_SIZE + FOOTER_SIZE
+        get() = entries.map { it.value.serialisedSize }.sum() + HEADER_SIZE + FOOTER_SIZE
 
     fun generateUniqueID(): Int {
         var id: Int
@@ -104,7 +104,7 @@ class DiskEntry(
 ) {
     fun getFilenameString(charset: Charset) = if (entryID == 0) ROOTNAME else String(filename, charset)
 
-    val size: Int
+    val serialisedSize: Int
         get() = contents.getSizeEntry() + HEADER_SIZE
 
     companion object {
@@ -160,7 +160,7 @@ interface DiskEntryContent {
     fun getSizePure(): Int
     fun getSizeEntry(): Int
 }
-class EntryFile(val bytes: ByteArray) : DiskEntryContent {
+class EntryFile(var bytes: ByteArray) : DiskEntryContent {
 
     override fun getSizePure() = bytes.size
     override fun getSizeEntry() = getSizePure() + 4

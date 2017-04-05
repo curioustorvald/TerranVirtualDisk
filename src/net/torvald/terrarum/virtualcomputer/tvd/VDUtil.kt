@@ -1,18 +1,17 @@
 package net.torvald.terrarum.virtualcomputer.tvd
 
-import java.io.File
-import java.io.FileNotFoundException
-import java.io.IOException
+import java.io.*
 import java.nio.charset.Charset
 import java.util.*
 import java.util.logging.Level
 import javax.naming.OperationNotSupportedException
+import kotlin.collections.ArrayList
 
 /**
  * Created by SKYHi14 on 2017-04-01.
  */
 object VDUtil {
-    class VDPath(strPath: String, charset: Charset) {
+    class VDPath() {
         /**
          * input: (root)->etc->boot in Constructor
          * output: ByteArrayOf(
@@ -22,10 +21,11 @@ object VDUtil {
          */
         var hierarchy = ArrayList<ByteArray>()
 
-        val lastElem: Int
+        val lastIndex: Int
             get() = hierarchy.lastIndex
+        fun last(): ByteArray = hierarchy.last()
 
-        init {
+        constructor(strPath: String, charset: Charset) : this() {
             val unsanitisedHierarchy = ArrayList<String>()
             strPath.sanitisePath().split('/').forEach { unsanitisedHierarchy.add(it) }
 
@@ -43,6 +43,10 @@ object VDUtil {
             }
         }
 
+        private constructor(newHierarchy: ArrayList<ByteArray>) : this() {
+            hierarchy = newHierarchy
+        }
+
         override fun toString(): String {
             val sb = StringBuilder()
             if (hierarchy.size > 0) {
@@ -58,8 +62,17 @@ object VDUtil {
             return sb.toString()
         }
 
+        operator fun get(i: Int) = hierarchy[i]
         fun forEach(action: (ByteArray) -> Unit) = hierarchy.forEach(action)
         fun forEachIndexed(action: (Int, ByteArray) -> Unit) = hierarchy.forEachIndexed(action)
+
+        fun getParent(ancestorCount: Int = 1): VDPath {
+            val newPath = ArrayList<ByteArray>()
+            hierarchy.forEach { newPath.add(it) }
+
+            repeat(ancestorCount) { newPath.removeAt(newPath.lastIndex) }
+            return VDPath(newPath)
+        }
     }
 
     fun dumpToRealMachine(disk: VirtualDisk, outfile: File) {
@@ -216,7 +229,7 @@ object VDUtil {
      * Search a entry using path
      * @return Pair of <The file, Parent file>, or null if not found
      */
-    fun getFile(disk: VirtualDisk, path: VDPath, charset: Charset): EntrySearchResult? {
+    fun getFile(disk: VirtualDisk, path: VDPath): EntrySearchResult? {
         val searchHierarchy = ArrayList<DiskEntry>()
         fun getCurrentEntry(): DiskEntry = searchHierarchy.last()
         //var currentDirectory = disk.root
@@ -225,7 +238,7 @@ object VDUtil {
             // search for the file
             path.forEachIndexed { i, dirName ->
                 // if we hit the last elem, we won't search more
-                if (i < path.lastElem) {
+                if (i < path.lastIndex) {
 
                     val currentDirEntries = getDirectoryEntries(disk, getCurrentEntry())
 
@@ -286,8 +299,8 @@ object VDUtil {
     /**
      * Search for the file and returns a instance of normal file.
      */
-    fun getAsNormalFile(disk: VirtualDisk, path: VDPath, charset: Charset) =
-            getFile(disk, path, charset)!!.file.getAsNormalFile(disk)
+    fun getAsNormalFile(disk: VirtualDisk, path: VDPath) =
+            getFile(disk, path)!!.file.getAsNormalFile(disk)
     /**
      * Fetch the file and returns a instance of normal file.
      */
@@ -296,8 +309,8 @@ object VDUtil {
     /**
      * Search for the file and returns a instance of directory.
      */
-    fun getAsDirectory(disk: VirtualDisk, path: VDPath, charset: Charset) =
-            getFile(disk, path, charset)!!.file.getAsDirectory(disk)
+    fun getAsDirectory(disk: VirtualDisk, path: VDPath) =
+            getFile(disk, path)!!.file.getAsDirectory(disk)
     /**
      * Fetch the file and returns a instance of directory.
      */
@@ -306,11 +319,11 @@ object VDUtil {
     /**
      * Deletes file on the disk safely.
      */
-    fun deleteFile(disk: VirtualDisk, path: VDPath, charset: Charset) {
+    fun deleteFile(disk: VirtualDisk, path: VDPath) {
         disk.checkReadOnly()
 
         try {
-            val file = getFile(disk, path, charset)!!
+            val file = getFile(disk, path)!!
             // delete file record
             disk.entries.remove(file.file.entryID)
             // unlist file from parent directory
@@ -350,7 +363,7 @@ object VDUtil {
      * Changes the name of the entry.
      */
     fun renameFile(disk: VirtualDisk, path: VDPath, newName: String, charset: Charset) {
-        val file = getFile(disk, path, charset)?.file
+        val file = getFile(disk, path)?.file
 
         if (file != null) {
             file.filename = newName.sanitisePath().toEntryName(DiskEntry.NAME_LENGTH, charset)
@@ -375,13 +388,13 @@ object VDUtil {
     /**
      * Add file to the specified directory.
      */
-    fun addFile(disk: VirtualDisk, parentPath: VDPath, file: DiskEntry, charset: Charset) {
+    fun addFile(disk: VirtualDisk, parentPath: VDPath, file: DiskEntry) {
         disk.checkReadOnly()
-        disk.checkCapacity(file.size)
+        disk.checkCapacity(file.serialisedSize)
 
         try {
             // add record to the directory
-            getAsDirectory(disk, parentPath, charset).entries.add(file.entryID)
+            getAsDirectory(disk, parentPath).entries.add(file.entryID)
             // add entry on the disk
             disk.entries[file.entryID] = file
         }
@@ -394,7 +407,7 @@ object VDUtil {
      */
     fun addFile(disk: VirtualDisk, directoryID: EntryID, file: DiskEntry) {
         disk.checkReadOnly()
-        disk.checkCapacity(file.size)
+        disk.checkCapacity(file.serialisedSize)
 
         try {
             // add record to the directory
@@ -409,7 +422,7 @@ object VDUtil {
     /**
      * Add subdirectory to the specified directory.
      */
-    fun addDir(disk: VirtualDisk, parentPath: VDPath, name: String, charset: Charset) {
+    fun addDir(disk: VirtualDisk, parentPath: VDPath, name: ByteArray) {
         disk.checkReadOnly()
         disk.checkCapacity(EntryDirectory.NEW_ENTRY_SIZE)
 
@@ -417,11 +430,11 @@ object VDUtil {
 
         try {
             // add record to the directory
-            getAsDirectory(disk, parentPath, charset).entries.add(newID)
+            getAsDirectory(disk, parentPath).entries.add(newID)
             // add entry on the disk
             disk.entries[newID] = DiskEntry(
                     newID,
-                    name.toByteArray(),
+                    name,
                     currentUnixtime,
                     currentUnixtime,
                     EntryDirectory()
@@ -434,7 +447,7 @@ object VDUtil {
     /**
      * Add file to the specified directory.
      */
-    fun addDir(disk: VirtualDisk, directoryID: EntryID, name: String) {
+    fun addDir(disk: VirtualDisk, directoryID: EntryID, name: ByteArray) {
         disk.checkReadOnly()
         disk.checkCapacity(EntryDirectory.NEW_ENTRY_SIZE)
 
@@ -446,7 +459,7 @@ object VDUtil {
             // add entry on the disk
             disk.entries[newID] = DiskEntry(
                     newID,
-                    name.toByteArray(),
+                    name,
                     currentUnixtime,
                     currentUnixtime,
                     EntryDirectory()
@@ -498,6 +511,39 @@ object VDUtil {
                 return true
         }
         return false
+    }
+
+    /**
+     * Move file from to there, overwrite
+     */
+    fun moveFile(disk1: VirtualDisk, fromPath: VDPath, disk2: VirtualDisk, toPath: VDPath) {
+        val file = getFile(disk1, fromPath)
+
+        if (file != null) {
+            if (file.file.contents is EntryDirectory) {
+                throw IOException("Cannot move directory")
+            }
+
+            disk2.checkCapacity(file.file.contents.getSizeEntry())
+
+            try {
+                deleteFile(disk2, toPath)
+            }
+            catch (e: KotlinNullPointerException) { "nothing to delete" }
+
+            deleteFile(disk1, fromPath) // any uncaught no_from_file will be caught here
+            try {
+                addFile(disk2, toPath.getParent(), file.file)
+            }
+            catch (e: FileNotFoundException) {
+                // roll back delete on disk1
+                addFile(disk1, file.parent.entryID, file.file)
+                throw FileNotFoundException("No such destination")
+            }
+        }
+        else {
+            throw FileNotFoundException("No such file to move")
+        }
     }
 
 
@@ -611,4 +657,111 @@ fun String.toEntryName(length: Int, charset: Charset): ByteArray {
     val stringByteArray = this.toByteArray(charset)
     buffer.put(stringByteArray.sliceArray(0..minOf(length, stringByteArray.size) - 1))
     return buffer.array
+}
+
+/**
+ * Writes String to the file
+ *
+ * @param fileEntry must be File, resolve symlink beforehand
+ * @param mode "w" or "a"
+ */
+class VDFileWriter(private val fileEntry: DiskEntry, private val append: Boolean, val charset: Charset) : Writer() {
+
+    private @Volatile var newFileBuffer = ArrayList<Byte>()
+
+    private @Volatile var closed = false
+
+    init {
+        if (fileEntry.contents !is EntryFile) {
+            throw FileNotFoundException("Not a file")
+        }
+    }
+
+    override fun write(cbuf: CharArray, off: Int, len: Int) {
+        if (!closed) {
+            val newByteArray = String(cbuf).toByteArray(charset)
+            newFileBuffer.addAll(newByteArray.asIterable())
+        }
+        else {
+            throw IOException()
+        }
+    }
+
+    override fun flush() {
+        if (!closed) {
+            val newByteArray = newFileBuffer.toByteArray()
+
+            if (!append) {
+                (fileEntry.contents as EntryFile).bytes = newByteArray
+            }
+            else {
+                val oldByteArray = (fileEntry.contents as EntryFile).bytes.copyOf()
+                val newFileBuffer = ByteArray(oldByteArray.size + newByteArray.size)
+
+                System.arraycopy(oldByteArray, 0, newFileBuffer, 0, oldByteArray.size)
+                System.arraycopy(newByteArray, 0, newFileBuffer, oldByteArray.size, newByteArray.size)
+
+                (fileEntry.contents as EntryFile).bytes = newByteArray
+            }
+
+            newFileBuffer = ArrayList<Byte>()
+
+            fileEntry.modificationDate = VDUtil.currentUnixtime
+        }
+        else {
+            throw IOException()
+        }
+    }
+
+    override fun close() {
+        flush()
+        closed = true
+    }
+}
+
+class VDFileOutputStream(private val fileEntry: DiskEntry, private val append: Boolean, val charset: Charset) : OutputStream() {
+
+    private @Volatile var newFileBuffer = ArrayList<Byte>()
+
+    private @Volatile var closed = false
+
+    override fun write(b: Int) {
+        if (!closed) {
+            newFileBuffer.add(b.toByte())
+        }
+        else {
+            throw IOException()
+        }
+    }
+
+    override fun flush() {
+        if (!closed) {
+            val newByteArray = newFileBuffer.toByteArray()
+
+            if (!append) {
+                (fileEntry.contents as EntryFile).bytes = newByteArray
+            }
+            else {
+                val oldByteArray = (fileEntry.contents as EntryFile).bytes.copyOf()
+                val newFileBuffer = ByteArray(oldByteArray.size + newByteArray.size)
+
+                System.arraycopy(oldByteArray, 0, newFileBuffer, 0, oldByteArray.size)
+                System.arraycopy(newByteArray, 0, newFileBuffer, oldByteArray.size, newByteArray.size)
+
+                (fileEntry.contents as EntryFile).bytes = newByteArray
+            }
+
+            newFileBuffer = ArrayList<Byte>()
+
+            fileEntry.modificationDate = VDUtil.currentUnixtime
+        }
+        else {
+            throw IOException()
+        }
+    }
+
+    override fun close() {
+        flush()
+        closed = true
+    }
 }
