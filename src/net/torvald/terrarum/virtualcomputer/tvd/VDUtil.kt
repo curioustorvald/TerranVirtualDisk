@@ -50,12 +50,12 @@ object VDUtil {
         override fun toString(): String {
             val sb = StringBuilder()
             if (hierarchy.size > 0) {
-                sb.append(String(hierarchy[0]))
+                sb.append(hierarchy[0].toCanonicalString())
             }
             if (hierarchy.size > 1) {
                 (1..hierarchy.lastIndex).forEach {
                     sb.append('/')
-                    sb.append(String(hierarchy[it]))
+                    sb.append(hierarchy[it].toCanonicalString())
                 }
             }
 
@@ -207,10 +207,13 @@ object VDUtil {
         if (entry.contents !is EntryDirectory)
             throw IllegalArgumentException("The entry is not directory")
 
-        return Array<DiskEntry>(
-                entry.contents.entries.size,
-                { disk.entries[entry.contents.entries[it]]!! }
-        )
+        val entriesList = ArrayList<DiskEntry>()
+        entry.contents.entries.forEach {
+            val entry = disk.entries[it]
+            if (entry != null) entriesList.add(entry)
+        }
+
+        return entriesList.toTypedArray()
     }
     /**
      * Get list of entries of directory.
@@ -659,6 +662,16 @@ fun String.toEntryName(length: Int, charset: Charset): ByteArray {
     val stringByteArray = this.toByteArray(charset)
     buffer.put(stringByteArray.sliceArray(0..minOf(length, stringByteArray.size) - 1))
     return buffer.array
+}
+fun ByteArray.toCanonicalString(): String {
+    var lastIndexOfRealStr = 0
+    for (i in this.lastIndex downTo 0) {
+        if (this[i] != 0.toByte()) {
+            lastIndexOfRealStr = i
+            break
+        }
+    }
+    return String(this.sliceArray(0..lastIndexOfRealStr))
 }
 
 /**

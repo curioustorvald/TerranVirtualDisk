@@ -426,7 +426,7 @@ class VirtualDiskCracker(val sysCharset: Charset = Charsets.UTF_8) : JFrame() {
             override fun mousePressed(e: MouseEvent?) {
                 if (selectedFile != null) {
                     try {
-                        val newname = JOptionPane.showInputDialog("Enter a new directory name:")
+                        val newname = JOptionPane.showInputDialog("Enter a new name:")
                         if (newname != null) {
                             if (VDUtil.nameExists(vdisk!!, newname, currentDirectory, sysCharset)) {
                                 popupError("The name already exists")
@@ -530,7 +530,7 @@ class VirtualDiskCracker(val sysCharset: Charset = Charsets.UTF_8) : JFrame() {
             override fun mousePressed(e: MouseEvent?) {
                 if (vdisk != null) {
                     try {
-                        val newname = JOptionPane.showInputDialog("Enter a new directory name:")
+                        val newname = JOptionPane.showInputDialog("Enter a new disk name:")
                         if (newname != null) {
                             vdisk!!.diskName = newname.toEntryName(VirtualDisk.NAME_LENGTH, sysCharset)
                             updateDiskInfo()
