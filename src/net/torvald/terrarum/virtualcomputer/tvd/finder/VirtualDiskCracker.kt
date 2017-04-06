@@ -51,7 +51,7 @@ class VirtualDiskCracker(val sysCharset: Charset = Charsets.UTF_8) : JFrame() {
     }
     val currentDirectory: EntryID
         get() = directoryHierarchy.peek()
-    val parentDirectory: EntryID
+    val upperDirectory: EntryID
         get() = if (directoryHierarchy.lastIndex == 0) 0
                 else directoryHierarchy[directoryHierarchy.lastIndex - 1]
     private fun gotoRoot() {
@@ -126,7 +126,7 @@ class VirtualDiskCracker(val sysCharset: Charset = Charsets.UTF_8) : JFrame() {
         tableFiles.model = object : AbstractTableModel() {
             override fun getRowCount(): Int {
                 return if (vdisk != null)
-                    1 + (VDUtil.getAsDirectory(vdisk!!, currentDirectory).entries.size)
+                    1 + (currentDirectoryEntries?.size ?: 0)
                 else 1
             }
 
@@ -310,7 +310,7 @@ class VirtualDiskCracker(val sysCharset: Charset = Charsets.UTF_8) : JFrame() {
                 // delete
                 if (vdisk != null && selectedFile != null) {
                     try {
-                        VDUtil.deleteFile(vdisk!!, parentDirectory, selectedFile!!)
+                        VDUtil.deleteFile(vdisk!!, currentDirectory, selectedFile!!)
                         updateDiskInfo()
                         setStat("File deleted")
                     }
@@ -411,7 +411,7 @@ class VirtualDiskCracker(val sysCharset: Charset = Charsets.UTF_8) : JFrame() {
             override fun mousePressed(e: MouseEvent?) {
                 if (vdisk != null && selectedFile != null) {
                     try {
-                        VDUtil.deleteFile(vdisk!!, parentDirectory, selectedFile!!)
+                        VDUtil.deleteFile(vdisk!!, currentDirectory, selectedFile!!)
                         updateDiskInfo()
                         setStat("File deleted")
                     }
@@ -482,6 +482,8 @@ class VirtualDiskCracker(val sysCharset: Charset = Charsets.UTF_8) : JFrame() {
                                     }
                                 }
                             }
+                            updateDiskInfo()
+                            setStat("File added")
                         }
                         catch (e: Exception) {
                             e.printStackTrace()

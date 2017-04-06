@@ -327,41 +327,51 @@ object VDUtil {
     fun deleteFile(disk: VirtualDisk, path: VDPath) {
         disk.checkReadOnly()
 
-        try {
-            val file = getFile(disk, path)!!
-            // delete file record
-            disk.entries.remove(file.file.entryID)
-            // unlist file from parent directory
-            (file.parent.contents as EntryDirectory).entries.remove(file.file.entryID)
-        }
-        catch (e: KotlinNullPointerException) {
-            throw FileNotFoundException("No such file")
-        }
+        val fileSearchResult = getFile(disk, path)!!
+
+        return deleteFile(disk, fileSearchResult.parent.entryID, fileSearchResult.file.entryID)
     }
     /**
      * Deletes file on the disk safely.
      */
-    fun deleteFile(disk: VirtualDisk, parent: EntryID, target: EntryID) {
+    fun deleteFile(disk: VirtualDisk, parentID: EntryID, targetID: EntryID) {
         disk.checkReadOnly()
 
-        try {
-            if (target != 0) {
-                if (disk.entries[target]!!.contents is EntryDirectory &&
-                        (disk.entries[target]!!.contents as EntryDirectory).entries.size > 0) {
-                    throw IOException("Cannot delete directory that contains something")
-                }
+        val file = disk.entries[targetID]
+        val parentDir = disk.entries[parentID]
 
-                // delete file record
-                disk.entries.remove(target)
-                // unlist file from parent directory
-                (disk.entries[parent]!!.contents as EntryDirectory).entries.remove(target)
+        fun rollback() {
+            if (!disk.entries.contains(targetID)) {
+                disk.entries[targetID] = file!!
             }
-            else {
-                throw IOException("Cannot delete root file system")
+            if (!(parentDir!!.contents as EntryDirectory).entries.contains(targetID)) {
+                (parentDir.contents as EntryDirectory).entries.add(targetID)
             }
         }
-        catch (e: KotlinNullPointerException) {
-            throw FileNotFoundException("No such file")
+
+        if (parentDir == null || parentDir.contents !is EntryDirectory) {
+            throw FileNotFoundException("No such parent directory")
+        }
+        else if (file == null || !directoryContains(disk, parentID, targetID)) {
+            throw FileNotFoundException("No such file to delete")
+        }
+        else if (targetID == 0) {
+            throw IOException("Cannot delete root file system")
+        }
+        else if (file.contents is EntryDirectory && file.contents.entries.size > 0) {
+            throw IOException("Cannot delete directory that contains something")
+        }
+        else {
+            try {
+                // delete file record
+                disk.entries.remove(targetID)
+                // unlist file from parent directly
+                (disk.entries[parentID]!!.contents as EntryDirectory).entries.remove(targetID)
+            }
+            catch (e: Exception) {
+                rollback()
+                throw InternalError("Unknown error *sigh* It's annoying, I know.")
+            }
         }
     }
     /**
@@ -651,6 +661,17 @@ object VDUtil {
 
     val currentUnixtime: Long
         get() = System.currentTimeMillis() / 1000
+
+    fun directoryContains(disk: VirtualDisk, dirID: EntryID, targetID: EntryID): Boolean {
+        val dir = resolveIfSymlink(disk, dirID)
+
+        if (dir.contents !is EntryDirectory) {
+            throw FileNotFoundException("Not a directory")
+        }
+        else {
+            return dir.contents.entries.contains(targetID)
+        }
+    }
 }
 
 fun Byte.toUint() = java.lang.Byte.toUnsignedInt(this)
