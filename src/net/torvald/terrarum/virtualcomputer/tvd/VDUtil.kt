@@ -14,9 +14,14 @@ object VDUtil {
     class VDPath() {
         /**
          * input: (root)->etc->boot in Constructor
-         * output: ByteArrayOf(
+         * output: ByteArrayListOf(
          *      e t c \0 \0 \0 \0 \0 ... ,
          *      b o o t \0 \0 \0 \0 ...
+         * )
+         *
+         * input: "/"
+         * interpretation: (root)
+         * output: ByteArrayListOf(
          * )
          */
         var hierarchy = ArrayList<ByteArray>()
@@ -35,7 +40,8 @@ object VDUtil {
             if (unsanitisedHierarchy[0].isEmpty())
                 unsanitisedHierarchy.removeAt(0)
             //  removes tail slash
-            if (unsanitisedHierarchy[unsanitisedHierarchy.lastIndex].isEmpty())
+            if (unsanitisedHierarchy.size > 0 &&
+                    unsanitisedHierarchy[unsanitisedHierarchy.lastIndex].isEmpty())
                 unsanitisedHierarchy.removeAt(unsanitisedHierarchy.lastIndex)
 
             unsanitisedHierarchy.forEach {
@@ -239,12 +245,19 @@ object VDUtil {
 
         searchHierarchy.add(disk.entries[0]!!)
 
+        // path of root
+        if (path.hierarchy.size == 0) {
+            return EntrySearchResult(
+                    disk.entries[0]!!,
+                    disk.entries[0]!!
+            )
+        }
+
         try {
             // search for the file
             path.forEachIndexed { i, nameToSearch ->
                 // if we hit the last elem, we won't search more
-                if (i < path.lastIndex) {
-
+                if (i <= path.lastIndex) {
                     val currentDirEntries = getDirectoryEntries(disk, getCurrentEntry())
 
                     var fileFound: DiskEntry? = null
