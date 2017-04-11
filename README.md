@@ -6,10 +6,12 @@ Virtual Filesystem with built-in finder (aka explorer by Windows folks).
 
 Interactions with virtual disk will be done with ```VDUtil```.
 
+Run the .jar file to launch the Finder.
+
 ## Features
 
-- Built-in finder (```VirtualDiskCracker```)
-- Directories (managed by Linked List)
+- Built-in finder
+- Directories (managed by Doubly Linked List)
 - Symbolic links
 - Timestamp of creation and modification, and is 64-Bit
 - CRC

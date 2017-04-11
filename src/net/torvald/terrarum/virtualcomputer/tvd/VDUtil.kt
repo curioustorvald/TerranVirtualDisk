@@ -100,35 +100,41 @@ object VDUtil {
         val diskSize = inbytes.sliceArray(4..7).toIntBig()
         val diskName = inbytes.sliceArray(8..8 + 31)
         val diskCRC = inbytes.sliceArray(8 + 32..8 + 32 + 3).toIntBig() // to check with completed vdisk
+        val diskSpecVersion = inbytes[8 + 32 + 4]
+
+
+        if (diskSpecVersion != specversion)
+            throw RuntimeException("Unsupported disk format version: current internal version is $specversion; the file's version is $diskSpecVersion")
 
         val vdisk = VirtualDisk(diskSize, diskName)
 
         //println("[VDUtil] currentUnixtime = $currentUnixtime")
 
-        var entryOffset = 44
+        var entryOffset = VirtualDisk.HEADER_SIZE
         while (!Arrays.equals(inbytes.sliceArray(entryOffset..entryOffset + 3), VirtualDisk.FOOTER_START_MARK)) {
             //println("[VDUtil] entryOffset = $entryOffset")
             // read and prepare all the shits
-            val entryIndexNum = inbytes.sliceArray(entryOffset..entryOffset + 3).toIntBig()
-            val entryTypeFlag = inbytes[entryOffset + 4]
-            val entryFileName = inbytes.sliceArray(entryOffset + 5..entryOffset + 260)
-            val entryCreationTime = inbytes.sliceArray(entryOffset + 261..entryOffset + 268).toLongBig()
-            val entryModifyTime = inbytes.sliceArray(entryOffset + 269..entryOffset + 276).toLongBig()
-            val entryCRC = inbytes.sliceArray(entryOffset + 277..entryOffset + 280).toIntBig() // to check with completed entry
+            val entryID = inbytes.sliceArray(entryOffset..entryOffset + 3).toIntBig()
+            val entryParentID = inbytes.sliceArray(entryOffset + 4..entryOffset + 7).toIntBig()
+            val entryTypeFlag = inbytes[entryOffset + 8]
+            val entryFileName = inbytes.sliceArray(entryOffset + 9..entryOffset + 9 + 255)
+            val entryCreationTime = inbytes.sliceArray(entryOffset + 265..entryOffset + 272).toLongBig()
+            val entryModifyTime = inbytes.sliceArray(entryOffset + 273..entryOffset + 280).toLongBig()
+            val entryCRC = inbytes.sliceArray(entryOffset + 281..entryOffset + 284).toIntBig() // to check with completed entry
 
             val entryData = when (entryTypeFlag) {
                 DiskEntry.NORMAL_FILE -> {
-                    val filesize = inbytes.sliceArray(entryOffset + 281..entryOffset + 284).toIntBig()
+                    val filesize = inbytes.sliceArray(entryOffset + DiskEntry.HEADER_SIZE..entryOffset + DiskEntry.HEADER_SIZE + 3).toIntBig()
                     //println("[VDUtil] --> is file; filesize = $filesize")
-                    inbytes.sliceArray(entryOffset + 285..entryOffset + 284 + filesize)
+                    inbytes.sliceArray(entryOffset + DiskEntry.HEADER_SIZE + 4..entryOffset + DiskEntry.HEADER_SIZE + 3 + filesize)
                 }
                 DiskEntry.DIRECTORY   -> {
-                    val entryCount = inbytes.sliceArray(entryOffset + 281..entryOffset + 282).toShortBig()
+                    val entryCount = inbytes.sliceArray(entryOffset + DiskEntry.HEADER_SIZE..entryOffset + DiskEntry.HEADER_SIZE + 1).toShortBig()
                     //println("[VDUtil] --> is directory; entryCount = $entryCount")
-                    inbytes.sliceArray(entryOffset + 283..entryOffset + 282 + entryCount * 4)
+                    inbytes.sliceArray(entryOffset + DiskEntry.HEADER_SIZE + 2..entryOffset + DiskEntry.HEADER_SIZE + 1 + entryCount * 4)
                 }
                 DiskEntry.SYMLINK     -> {
-                    inbytes.sliceArray(entryOffset + 281..entryOffset + 284)
+                    inbytes.sliceArray(entryOffset + DiskEntry.HEADER_SIZE..entryOffset + DiskEntry.HEADER_SIZE + 3)
                 }
                 else -> throw RuntimeException("Unknown entry with type $entryTypeFlag")
             }
@@ -136,7 +142,7 @@ object VDUtil {
 
 
             // update entryOffset so that we can fetch next entry in the binary
-            entryOffset += 281 + entryData.size + when (entryTypeFlag) {
+            entryOffset += DiskEntry.HEADER_SIZE + entryData.size + when (entryTypeFlag) {
                 DiskEntry.NORMAL_FILE -> 4
                 DiskEntry.DIRECTORY   -> 2
                 DiskEntry.SYMLINK     -> 0
@@ -146,7 +152,8 @@ object VDUtil {
 
             // create entry
             val diskEntry = DiskEntry(
-                    entryID = entryIndexNum,
+                    entryID = entryID,
+                    parentEntryID = entryParentID,
                     filename = entryFileName,
                     creationDate = entryCreationTime,
                     modificationDate = entryModifyTime,
@@ -184,7 +191,7 @@ object VDUtil {
             }
 
             // add entry to disk
-            vdisk.entries[entryIndexNum] = diskEntry
+            vdisk.entries[entryID] = diskEntry
         }
 
 
@@ -414,24 +421,26 @@ object VDUtil {
         }
     }
     /**
-     * Add file to the specified directory.
+     * Add file to the specified directory. ParentID of the file will be overwritten.
      */
     fun addFile(disk: VirtualDisk, parentPath: VDPath, file: DiskEntry) {
         disk.checkReadOnly()
         disk.checkCapacity(file.serialisedSize)
 
         try {
+            val parentID = getFile(disk, parentPath)!!.file.entryID
             // add record to the directory
             getAsDirectory(disk, parentPath).entries.add(file.entryID)
             // add entry on the disk
             disk.entries[file.entryID] = file
+            file.parentEntryID = parentID
         }
         catch (e: KotlinNullPointerException) {
             throw FileNotFoundException("No such directory")
         }
     }
     /**
-     * Add file to the specified directory.
+     * Add file to the specified directory. ParentID of the file will be overwritten.
      */
     fun addFile(disk: VirtualDisk, directoryID: EntryID, file: DiskEntry) {
         disk.checkReadOnly()
@@ -442,6 +451,7 @@ object VDUtil {
             getAsDirectory(disk, directoryID).entries.add(file.entryID)
             // add entry on the disk
             disk.entries[file.entryID] = file
+            file.parentEntryID = directoryID
         }
         catch (e: KotlinNullPointerException) {
             throw FileNotFoundException("No such directory")
@@ -457,11 +467,13 @@ object VDUtil {
         val newID = disk.generateUniqueID()
 
         try {
+            val parentID = getFile(disk, parentPath)!!.file.entryID
             // add record to the directory
             getAsDirectory(disk, parentPath).entries.add(newID)
             // add entry on the disk
             disk.entries[newID] = DiskEntry(
                     newID,
+                    parentID,
                     name,
                     currentUnixtime,
                     currentUnixtime,
@@ -487,6 +499,7 @@ object VDUtil {
             // add entry on the disk
             disk.entries[newID] = DiskEntry(
                     newID,
+                    directoryID,
                     name,
                     currentUnixtime,
                     currentUnixtime,
@@ -509,6 +522,7 @@ object VDUtil {
 
         return DiskEntry(
                 entryID = id,
+                parentEntryID = 0, // placeholder
                 filename = file.name.toByteArray(),
                 creationDate = currentUnixtime,
                 modificationDate = currentUnixtime,
@@ -582,6 +596,7 @@ object VDUtil {
         val newdisk = VirtualDisk(diskSize, diskName.toEntryName(VirtualDisk.NAME_LENGTH, charset))
         val rootDir = DiskEntry(
                 entryID = 0,
+                parentEntryID = 0,
                 filename = DiskEntry.ROOTNAME.toByteArray(charset),
                 creationDate = currentUnixtime,
                 modificationDate = currentUnixtime,
@@ -601,6 +616,7 @@ object VDUtil {
 
         addFile(disk, directoryID, DiskEntry(
                 disk.generateUniqueID(),
+                directoryID,
                 filename.toEntryName(DiskEntry.NAME_LENGTH, charset = charset),
                 currentUnixtime,
                 currentUnixtime,

@@ -11,6 +11,8 @@ import java.util.zip.CRC32
 
 typealias EntryID = Int
 
+val specversion = 0x01.toByte()
+
 class VirtualDisk(
         /** capacity of 0 makes the disk read-only */
         var capacity: Int,
@@ -43,6 +45,7 @@ class VirtualDisk(
         buffer.put(capacity.toBigEndian())
         buffer.put(diskName.forceSize(NAME_LENGTH))
         buffer.put(crc)
+        buffer.put(specversion)
         buffer.put(entriesBuffer)
         buffer.put(FOOTER_START_MARK)
         buffer.put(EOF_MARK)
@@ -80,7 +83,7 @@ class VirtualDisk(
     override fun toString() = "VirtualDisk(name: ${getDiskNameString(Charsets.UTF_8)}, capacity: $capacity bytes, crc: ${hashCode().toHex()})"
 
     companion object {
-        val HEADER_SIZE = 44 // according to the spec
+        val HEADER_SIZE = 45 // according to the spec
         val FOOTER_SIZE = 6  // footer mark + EOF
         val NAME_LENGTH = 32
 
@@ -95,6 +98,7 @@ class VirtualDisk(
 class DiskEntry(
         // header
         var entryID: EntryID,
+        var parentEntryID: EntryID,
         var filename: ByteArray = ByteArray(NAME_LENGTH),
         var creationDate: Long,
         var modificationDate: Long,
@@ -108,7 +112,7 @@ class DiskEntry(
         get() = contents.getSizeEntry() + HEADER_SIZE
 
     companion object {
-        val HEADER_SIZE = 281 // according to the spec
+        val HEADER_SIZE = 285 // according to the spec
         val ROOTNAME = "(root)"
         val NAME_LENGTH  = 256
 
@@ -131,9 +135,10 @@ class DiskEntry(
 
     fun serialize(): AppendableByteBuffer {
         val serialisedContents = contents.serialize()
-        val buffer = AppendableByteBuffer(281 + serialisedContents.size)
+        val buffer = AppendableByteBuffer(HEADER_SIZE + serialisedContents.size)
 
         buffer.put(entryID.toBigEndian())
+        buffer.put(parentEntryID.toBigEndian())
         buffer.put(contents.getTypeFlag())
         buffer.put(filename.forceSize(NAME_LENGTH))
         buffer.put(creationDate.toBigEndian())

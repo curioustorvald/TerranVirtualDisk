@@ -47,7 +47,6 @@ class VirtualDiskCracker(val sysCharset: Charset = Charsets.UTF_8) : JFrame() {
         selectedFile = null
         fileDesc.text = ""
         updateDiskInfo()
-        updateCurrentDirectoryEntry()
     }
     val currentDirectory: EntryID
         get() = directoryHierarchy.peek()
@@ -60,7 +59,6 @@ class VirtualDiskCracker(val sysCharset: Charset = Charsets.UTF_8) : JFrame() {
         selectedFile = null
         fileDesc.text = ""
         updateDiskInfo()
-        updateCurrentDirectoryEntry()
     }
     private fun gotoParent() {
         if (directoryHierarchy.size > 1)
@@ -68,7 +66,6 @@ class VirtualDiskCracker(val sysCharset: Charset = Charsets.UTF_8) : JFrame() {
         selectedFile = null
         fileDesc.text = ""
         updateDiskInfo()
-        updateCurrentDirectoryEntry()
     }
 
 
@@ -140,7 +137,7 @@ class VirtualDiskCracker(val sysCharset: Charset = Charsets.UTF_8) : JFrame() {
                 }
                 else {
                     if (vdisk != null) {
-                        updateCurrentDirectoryEntry()
+                        updateDiskInfo()
                         val entry = currentDirectoryEntries!![rowIndex - 1]
                         return when(columnIndex) {
                             0 -> entry.getFilenameString(sysCharset)
@@ -333,6 +330,7 @@ class VirtualDiskCracker(val sysCharset: Charset = Charsets.UTF_8) : JFrame() {
                     try {
                         VDUtil.addFile(vdisk!!, currentDirectory, DiskEntry(// clone
                                 vdisk!!.generateUniqueID(),
+                                currentDirectory,
                                 newname,
                                 clipboard!!.creationDate,
                                 clipboard!!.modificationDate,
@@ -375,6 +373,7 @@ class VirtualDiskCracker(val sysCharset: Charset = Charsets.UTF_8) : JFrame() {
                             val entrySymlink = EntrySymlink(clipboard!!.entryID)
                             VDUtil.addFile(vdisk!!, currentDirectory, DiskEntry(
                                     vdisk!!.generateUniqueID(),
+                                    currentDirectory,
                                     newname,
                                     VDUtil.currentUnixtime,
                                     VDUtil.currentUnixtime,
@@ -658,9 +657,6 @@ class VirtualDiskCracker(val sysCharset: Charset = Charsets.UTF_8) : JFrame() {
                 null, null, null
         )
     }
-    private fun updateCurrentDirectoryEntry() {
-        currentDirectoryEntries = VDUtil.getDirectoryEntries(vdisk!!, currentDirectory)
-    }
     private fun updateDiskInfo() {
         val sb = StringBuilder()
         directoryHierarchy.forEach {
@@ -673,6 +669,8 @@ class VirtualDiskCracker(val sysCharset: Charset = Charsets.UTF_8) : JFrame() {
         diskInfo.text = if (vdisk == null) "(Disk not loaded)" else getDiskInfoText(vdisk!!)
         tableFiles.revalidate()
         tableFiles.repaint()
+
+        currentDirectoryEntries = VDUtil.getDirectoryEntries(vdisk!!, currentDirectory)
     }
     private fun getDiskInfoText(disk: VirtualDisk): String {
         return """Name: ${String(disk.diskName, sysCharset)}
@@ -683,7 +681,8 @@ Capacity: ${disk.capacity} bytes (${disk.usedBytes} bytes used, ${disk.capacity 
 Size: ${file.getEffectiveSize()}
 Type: ${DiskEntry.getTypeString(file.contents)}
 CRC: ${file.hashCode().toHex()}
-EntryID: ${file.entryID}""" + if (file.contents is EntryFile) """
+EntryID: ${file.entryID}
+ParentID: ${file.parentEntryID}""" + if (file.contents is EntryFile) """
 
 Contents:
 ${String(file.contents.bytes.sliceArray(0..minOf(PREVIEW_MAX_BYTES, file.contents.bytes.size)), sysCharset)}""" else ""

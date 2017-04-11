@@ -32,9 +32,8 @@
                 2. put all the CRCs of entries
                 3. sort the list (here's the catch -- you will treat CRCs as SIGNED integer)
                 4. for elems on list: update crc with the elem (crc = calculateCRC(crc, elem))
-    Int8        Version
     
-    (Header size: 45 bytes)
+    (Header size: 44 bytes)
 
 
 
@@ -43,9 +42,8 @@
     <Actual Entry>
 
 ###  Entry Header
-    Int32       EntryID (random Integer). This act as "jump" position for directory listing.
+    Int32       Random Integer. This act as "jump" position for directory listing.
                 NOTE: Index 0 must be a root "Directory"; 0xFEFEFEFE is invalid (used as footer marker)
-    Int32       EntryID of parent directory
     Int8        Flag for file or directory or symlink (cannot be negative)
                 0x01: Normal file, 0x02: Directory list, 0x03: Symlink
     Uint8[256]  File name in UTF-8
@@ -53,7 +51,7 @@
     Int64       Last modification date in real-life UNIX timestamp
     Int32       CRC-32 of Actual Entry
 
-    (Header size: 285 bytes)
+    (Header size: 281 bytes)
 
 ###  Entry of File
     Int32       File size in bytes (max 2048 MBytes)
