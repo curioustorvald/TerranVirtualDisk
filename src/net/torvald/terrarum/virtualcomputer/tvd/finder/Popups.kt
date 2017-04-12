@@ -14,12 +14,16 @@ object Popups {
 
 class OptionDiskNameAndCap {
     val name = JTextField(11)
-    val capacity = JSpinner()
+    val capacity = JSpinner(SpinnerNumberModel(
+            368640L.toJavaLong(),
+            0L.toJavaLong(),
+            (1L shl 38).toJavaLong(),
+            1L.toJavaLong()
+    )) // default 360 KiB, MAX 256 GiB
     val mainPanel = JPanel()
     val settingPanel = JPanel()
 
     init {
-        capacity.model = SpinnerNumberModel(368640, 0, 2147483647, 1) // default 360 KiB, MAX 2 GiB
         mainPanel.layout = BorderLayout()
         settingPanel.layout = GridLayout(2, 2, 2, 0)
 
@@ -43,14 +47,20 @@ class OptionDiskNameAndCap {
     }
 }
 
+fun kotlin.Long.toJavaLong() = java.lang.Long(this)
+
 class OptionFileNameAndCap {
     val name = JTextField(11)
-    val capacity = JSpinner()
+    val capacity = JSpinner(SpinnerNumberModel(
+            4096L.toJavaLong(),
+            0L.toJavaLong(),
+            ((1L shl 48) - 1L).toJavaLong(),
+            1L.toJavaLong()
+    )) // default 360 KiB, MAX 256 TiB
     val mainPanel = JPanel()
     val settingPanel = JPanel()
 
     init {
-        capacity.model = SpinnerNumberModel(4096, 0, 2147483647, 1) // default 360 KiB, MAX 2 GiB
         mainPanel.layout = BorderLayout()
         settingPanel.layout = GridLayout(2, 2, 2, 0)
 
@@ -74,12 +84,15 @@ class OptionFileNameAndCap {
 }
 
 class OptionSize {
-    val capacity = JSpinner()
+    val capacity = JSpinner(SpinnerNumberModel(
+            368640L.toJavaLong(),
+            0L.toJavaLong(),
+            (1L shl 38).toJavaLong(),
+            1L.toJavaLong()
+    )) // default 360 KiB, MAX 256 GiB
     val settingPanel = JPanel()
 
     init {
-        capacity.model = SpinnerNumberModel(368640, 0, 2147483647, 1) // default 360 KiB, MAX 2 GiB
-
         settingPanel.add(JLabel("Size (bytes)"))
         settingPanel.add(capacity)
     }

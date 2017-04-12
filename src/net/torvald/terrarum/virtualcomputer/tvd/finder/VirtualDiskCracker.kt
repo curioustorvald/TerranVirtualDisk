@@ -1,6 +1,7 @@
 package net.torvald.terrarum.virtualcomputer.tvd.finder
 
 import net.torvald.terrarum.virtualcomputer.tvd.*
+import net.torvald.terrarum.virtualcomputer.tvd.VDUtil.writeBytes64
 import java.awt.BorderLayout
 import java.awt.Dimension
 import java.awt.event.KeyEvent
@@ -22,7 +23,7 @@ import javax.swing.text.DefaultCaret
  */
 class VirtualDiskCracker(val sysCharset: Charset = Charsets.UTF_8) : JFrame() {
 
-    private val PREVIEW_MAX_BYTES = 4 * 1024 // 4 kBytes
+    private val PREVIEW_MAX_BYTES = 4L * 1024 // 4 kBytes
 
     private val appName = "TerranVirtualDiskCracker"
     private val copyright = "Copyright 2017 Torvald (minjaesong). Distributed under MIT license."
@@ -91,13 +92,15 @@ class VirtualDiskCracker(val sysCharset: Charset = Charsets.UTF_8) : JFrame() {
                     currentDirectoryEntries!![row - 1].entryID
                 else
                     null // clicked ".."
+
+
                 fileDesc.text = if (selectedFile != null) {
                     getFileInfoText(vdisk!!.entries[selectedFile!!]!!)
                 }
                 else
                     ""
-                fileDesc.caretPosition = 0
 
+                fileDesc.caretPosition = 0
 
                 // double click
                 if (e.clickCount == 2) {
@@ -118,7 +121,6 @@ class VirtualDiskCracker(val sysCharset: Charset = Charsets.UTF_8) : JFrame() {
             override fun clearSelection() { } // required!
             override fun removeSelectionInterval(index0: Int, index1: Int) { } // required!
             override fun fireValueChanged(isAdjusting: Boolean) { } // required!
-
         }
         tableFiles.model = object : AbstractTableModel() {
             override fun getRowCount(): Int {
@@ -137,7 +139,6 @@ class VirtualDiskCracker(val sysCharset: Charset = Charsets.UTF_8) : JFrame() {
                 }
                 else {
                     if (vdisk != null) {
-                        updateDiskInfo()
                         val entry = currentDirectoryEntries!![rowIndex - 1]
                         return when(columnIndex) {
                             0 -> entry.getFilenameString(sysCharset)
@@ -176,7 +177,7 @@ class VirtualDiskCracker(val sysCharset: Charset = Charsets.UTF_8) : JFrame() {
 
                         if (confirmNew) {
                             vdisk = VDUtil.createNewDisk(
-                                    dialogBox.capacity.value as Int,
+                                    (dialogBox.capacity.value as Long).toLong(),
                                     dialogBox.name.text,
                                     sysCharset
                             )
@@ -259,7 +260,7 @@ class VirtualDiskCracker(val sysCharset: Charset = Charsets.UTF_8) : JFrame() {
                                 VDUtil.createNewBlankFile(
                                         vdisk!!,
                                         currentDirectory,
-                                        dialogBox.capacity.value as Int,
+                                        (dialogBox.capacity.value as Long).toLong(),
                                         dialogBox.name.text,
                                         sysCharset
                                 )
@@ -507,7 +508,7 @@ class VirtualDiskCracker(val sysCharset: Charset = Charsets.UTF_8) : JFrame() {
                                 val file = VDUtil.resolveIfSymlink(vdisk!!, file.entryID)
                                 if (file.contents is EntryFile) {
                                     fileChooser.selectedFile.createNewFile()
-                                    fileChooser.selectedFile.writeBytes(file.contents.bytes)
+                                    fileChooser.selectedFile.writeBytes64(file.contents.bytes)
                                     setStat("File exported")
                                 }
                                 else {
@@ -552,7 +553,7 @@ class VirtualDiskCracker(val sysCharset: Charset = Charsets.UTF_8) : JFrame() {
                         val dialog = OptionSize()
                         val confirmed = dialog.showDialog("Input") == JOptionPane.OK_OPTION
                         if (confirmed) {
-                            vdisk!!.capacity = dialog.capacity.value as Int
+                            vdisk!!.capacity = (dialog.capacity.value as Long).toLong()
                             updateDiskInfo()
                             setStat("Disk resized")
                         }
@@ -565,6 +566,76 @@ class VirtualDiskCracker(val sysCharset: Charset = Charsets.UTF_8) : JFrame() {
             }
         })
         menuBar.add(menuEdit)
+
+        val menuManage = JMenu("Manage")
+        menuManage.add("Report Orphans…").addMouseListener(object : MouseAdapter() {
+            override fun mousePressed(e: MouseEvent?) {
+                if (vdisk != null) {
+                    try {
+                        val reports = VDUtil.gcSearchOrphan(vdisk!!)
+                        val orphansCount = reports.size
+                        val orphansSize = reports.map { vdisk!!.entries[it]!!.contents.getSizeEntry() }.sum()
+                        val message = "Orphans count: $orphansCount\n" +
+                                "Size: ${orphansSize.bytes()}"
+                        popupMessage(message, "Orphans Report")
+                    }
+                    catch (e: Exception) {
+                        e.printStackTrace()
+                        popupError(e.toString())
+                    }
+                }
+            }
+        })
+        menuManage.add("Report Phantoms…").addMouseListener(object : MouseAdapter() {
+            override fun mousePressed(e: MouseEvent?) {
+                if (vdisk != null) {
+                    try {
+                        val reports = VDUtil.gcSearchPhantomBaby(vdisk!!)
+                        val phantomsSize = reports.size
+                        val message = "Phantoms count: $phantomsSize"
+                        popupMessage(message, "Phantoms Report")
+                    }
+                    catch (e: Exception) {
+                        e.printStackTrace()
+                        popupError(e.toString())
+                    }
+                }
+            }
+        })
+        menuEdit.addSeparator()
+        menuManage.add("Remove Orphans").addMouseListener(object : MouseAdapter() {
+            override fun mousePressed(e: MouseEvent?) {
+                if (vdisk != null) {
+                    try {
+                        val oldSize = vdisk!!.usedBytes
+                        VDUtil.gcDumpOrphans(vdisk!!)
+                        val newSize = vdisk!!.usedBytes
+                        popupMessage("Saved ${(newSize - oldSize).bytes()}", "GC Report")
+                    }
+                    catch (e: Exception) {
+                        e.printStackTrace()
+                        popupError(e.toString())
+                    }
+                }
+            }
+        })
+        menuManage.add("Full Garbage Collect").addMouseListener(object : MouseAdapter() {
+            override fun mousePressed(e: MouseEvent?) {
+                if (vdisk != null) {
+                    try {
+                        val oldSize = vdisk!!.usedBytes
+                        VDUtil.gcDumpAll(vdisk!!)
+                        val newSize = vdisk!!.usedBytes
+                        popupMessage("Saved ${(newSize - oldSize).bytes()}", "GC Report")
+                    }
+                    catch (e: Exception) {
+                        e.printStackTrace()
+                        popupError(e.toString())
+                    }
+                }
+            }
+        })
+        menuBar.add(menuManage)
 
         val menuAbout = JMenu("About")
         menuAbout.addMouseListener(object : MouseAdapter() {
@@ -657,6 +728,9 @@ class VirtualDiskCracker(val sysCharset: Charset = Charsets.UTF_8) : JFrame() {
                 null, null, null
         )
     }
+    private fun updateCurrentDirectory() {
+        currentDirectoryEntries = VDUtil.getDirectoryEntries(vdisk!!, currentDirectory)
+    }
     private fun updateDiskInfo() {
         val sb = StringBuilder()
         directoryHierarchy.forEach {
@@ -670,7 +744,8 @@ class VirtualDiskCracker(val sysCharset: Charset = Charsets.UTF_8) : JFrame() {
         tableFiles.revalidate()
         tableFiles.repaint()
 
-        currentDirectoryEntries = VDUtil.getDirectoryEntries(vdisk!!, currentDirectory)
+
+        updateCurrentDirectory()
     }
     private fun getDiskInfoText(disk: VirtualDisk): String {
         return """Name: ${String(disk.diskName, sysCharset)}
@@ -685,9 +760,9 @@ EntryID: ${file.entryID}
 ParentID: ${file.parentEntryID}""" + if (file.contents is EntryFile) """
 
 Contents:
-${String(file.contents.bytes.sliceArray(0..minOf(PREVIEW_MAX_BYTES, file.contents.bytes.size)), sysCharset)}""" else ""
+${String(file.contents.bytes.sliceArray(0L..minOf(PREVIEW_MAX_BYTES, file.contents.bytes.size)).toByteArray(), sysCharset)}""" else ""
     }
-    private fun Int.bytes() = if (this == 1) "1 byte" else "$this bytes"
+    private fun Long.bytes() = if (this == 1L) "1 byte" else "$this bytes"
     private fun Int.entries() = if (this == 1) "1 entry" else "$this entries"
     private fun DiskEntry.getEffectiveSize() = if (this.contents is EntryFile)
         this.contents.getSizePure().bytes()

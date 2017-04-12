@@ -81,9 +81,29 @@ object VDUtil {
         }
     }
 
+    fun File.writeBytes64(array: ByteArray64) {
+        array.writeToFile(this)
+    }
+
+    fun File.readBytes64(): ByteArray64 {
+        val inbytes = ByteArray64(this.length())
+        val inputStream = BufferedInputStream(FileInputStream(this))
+        var readInt = inputStream.read()
+        var readInCounter = 0L
+        while (readInt != -1) {
+            inbytes[readInCounter] = readInt.toByte()
+            readInCounter += 1
+
+            readInt = inputStream.read()
+        }
+        inputStream.close()
+
+        return inbytes
+    }
+
     fun dumpToRealMachine(disk: VirtualDisk, outfile: File) {
         if (!outfile.exists()) outfile.createNewFile()
-        outfile.writeBytes(disk.serialize().array)
+        outfile.writeBytes64(disk.serialize().array)
     }
 
     /**
@@ -92,41 +112,43 @@ object VDUtil {
      * @param crcWarnLevel Level.OFF -- no warning, Level.WARNING -- print out warning, Level.SEVERE -- throw error
      */
     fun readDiskArchive(infile: File, crcWarnLevel: Level = Level.SEVERE, warningFunc: ((String) -> Unit)? = null, charset: Charset): VirtualDisk {
-        val inbytes = infile.readBytes()
+        val inbytes = infile.readBytes64()
 
-        if (magicMismatch(VirtualDisk.MAGIC, inbytes))
+
+
+        if (magicMismatch(VirtualDisk.MAGIC, inbytes.sliceArray(0L..3L).toByteArray()))
             throw RuntimeException("Invalid Virtual Disk file!")
 
-        val diskSize = inbytes.sliceArray(4..7).toIntBig()
-        val diskName = inbytes.sliceArray(8..8 + 31)
-        val diskCRC = inbytes.sliceArray(8 + 32..8 + 32 + 3).toIntBig() // to check with completed vdisk
-        val diskSpecVersion = inbytes[8 + 32 + 4]
+        val diskSize = inbytes.sliceArray(4L..9L).toInt48Big()
+        val diskName = inbytes.sliceArray(10L..10L + 31)
+        val diskCRC = inbytes.sliceArray(10L + 32..10L + 32 + 3).toIntBig() // to check with completed vdisk
+        val diskSpecVersion = inbytes[10L + 32 + 4]
 
 
         if (diskSpecVersion != specversion)
             throw RuntimeException("Unsupported disk format version: current internal version is $specversion; the file's version is $diskSpecVersion")
 
-        val vdisk = VirtualDisk(diskSize, diskName)
+        val vdisk = VirtualDisk(diskSize, diskName.toByteArray())
 
         //println("[VDUtil] currentUnixtime = $currentUnixtime")
 
         var entryOffset = VirtualDisk.HEADER_SIZE
-        while (!Arrays.equals(inbytes.sliceArray(entryOffset..entryOffset + 3), VirtualDisk.FOOTER_START_MARK)) {
+        while (!Arrays.equals(inbytes.sliceArray(entryOffset..entryOffset + 3).toByteArray(), VirtualDisk.FOOTER_START_MARK)) {
             //println("[VDUtil] entryOffset = $entryOffset")
             // read and prepare all the shits
             val entryID = inbytes.sliceArray(entryOffset..entryOffset + 3).toIntBig()
             val entryParentID = inbytes.sliceArray(entryOffset + 4..entryOffset + 7).toIntBig()
             val entryTypeFlag = inbytes[entryOffset + 8]
-            val entryFileName = inbytes.sliceArray(entryOffset + 9..entryOffset + 9 + 255)
-            val entryCreationTime = inbytes.sliceArray(entryOffset + 265..entryOffset + 272).toLongBig()
-            val entryModifyTime = inbytes.sliceArray(entryOffset + 273..entryOffset + 280).toLongBig()
-            val entryCRC = inbytes.sliceArray(entryOffset + 281..entryOffset + 284).toIntBig() // to check with completed entry
+            val entryFileName = inbytes.sliceArray(entryOffset + 9..entryOffset + 9 + 255).toByteArray()
+            val entryCreationTime = inbytes.sliceArray(entryOffset + 265..entryOffset + 270).toInt48Big()
+            val entryModifyTime = inbytes.sliceArray(entryOffset + 271..entryOffset + 276).toInt48Big()
+            val entryCRC = inbytes.sliceArray(entryOffset + 277..entryOffset + 280).toIntBig() // to check with completed entry
 
             val entryData = when (entryTypeFlag) {
                 DiskEntry.NORMAL_FILE -> {
-                    val filesize = inbytes.sliceArray(entryOffset + DiskEntry.HEADER_SIZE..entryOffset + DiskEntry.HEADER_SIZE + 3).toIntBig()
+                    val filesize = inbytes.sliceArray(entryOffset + DiskEntry.HEADER_SIZE..entryOffset + DiskEntry.HEADER_SIZE + 5).toInt48Big()
                     //println("[VDUtil] --> is file; filesize = $filesize")
-                    inbytes.sliceArray(entryOffset + DiskEntry.HEADER_SIZE + 4..entryOffset + DiskEntry.HEADER_SIZE + 3 + filesize)
+                    inbytes.sliceArray(entryOffset + DiskEntry.HEADER_SIZE + 6..entryOffset + DiskEntry.HEADER_SIZE + 5 + filesize)
                 }
                 DiskEntry.DIRECTORY   -> {
                     val entryCount = inbytes.sliceArray(entryOffset + DiskEntry.HEADER_SIZE..entryOffset + DiskEntry.HEADER_SIZE + 1).toShortBig()
@@ -136,14 +158,14 @@ object VDUtil {
                 DiskEntry.SYMLINK     -> {
                     inbytes.sliceArray(entryOffset + DiskEntry.HEADER_SIZE..entryOffset + DiskEntry.HEADER_SIZE + 3)
                 }
-                else -> throw RuntimeException("Unknown entry with type $entryTypeFlag")
+                else -> throw RuntimeException("Unknown entry with type $entryTypeFlag at entryOffset $entryOffset")
             }
 
 
 
             // update entryOffset so that we can fetch next entry in the binary
             entryOffset += DiskEntry.HEADER_SIZE + entryData.size + when (entryTypeFlag) {
-                DiskEntry.NORMAL_FILE -> 4
+                DiskEntry.NORMAL_FILE -> 6
                 DiskEntry.DIRECTORY   -> 2
                 DiskEntry.SYMLINK     -> 0
                 else -> throw RuntimeException("Unknown entry with type $entryTypeFlag")
@@ -526,7 +548,7 @@ object VDUtil {
                 filename = file.name.toByteArray(),
                 creationDate = currentUnixtime,
                 modificationDate = currentUnixtime,
-                contents = EntryFile(file.readBytes())
+                contents = EntryFile(file.readBytes64())
         )
     }
     /**
@@ -534,7 +556,7 @@ object VDUtil {
      */
     fun exportFile(entryFile: EntryFile, outfile: File) {
         outfile.createNewFile()
-        outfile.writeBytes(entryFile.bytes)
+        outfile.writeBytes64(entryFile.bytes)
     }
 
     /**
@@ -571,7 +593,7 @@ object VDUtil {
             try {
                 deleteFile(disk2, toPath)
             }
-            catch (e: KotlinNullPointerException) { "Nothing to delete beforehand" }
+            catch (e: KotlinNullPointerException) { /* Nothing to delete beforehand */ }
 
             deleteFile(disk1, fromPath) // any uncaught no_from_file will be caught here
             try {
@@ -592,7 +614,7 @@ object VDUtil {
     /**
      * Creates new disk with given name and capacity
      */
-    fun createNewDisk(diskSize: Int, diskName: String, charset: Charset): VirtualDisk {
+    fun createNewDisk(diskSize: Long, diskName: String, charset: Charset): VirtualDisk {
         val newdisk = VirtualDisk(diskSize, diskName.toEntryName(VirtualDisk.NAME_LENGTH, charset))
         val rootDir = DiskEntry(
                 entryID = 0,
@@ -610,7 +632,7 @@ object VDUtil {
     /**
      * Creates new zero-filled file with given name and size
      */
-    fun createNewBlankFile(disk: VirtualDisk, directoryID: EntryID, fileSize: Int, filename: String, charset: Charset) {
+    fun createNewBlankFile(disk: VirtualDisk, directoryID: EntryID, fileSize: Long, filename: String, charset: Charset) {
         disk.checkReadOnly()
         disk.checkCapacity(fileSize + DiskEntry.HEADER_SIZE + 4)
 
@@ -635,29 +657,31 @@ object VDUtil {
     /**
      * Throws an exception if specified size cannot fit into the disk
      */
-    fun VirtualDisk.checkCapacity(newSize: Int) {
+    fun VirtualDisk.checkCapacity(newSize: Long) {
         if (this.usedBytes + newSize > this.capacity)
             throw IOException("Not enough space on the disk")
     }
-    fun ByteArray.toIntBig(): Int {
-        if (this.size != 4)
+    fun ByteArray64.toIntBig(): Int {
+        if (this.size != 4L)
             throw OperationNotSupportedException("ByteArray is not Int")
 
         var i = 0
-        this.forEachIndexed { index, byte -> i += byte.toUint().shl(24 - index * 8)}
+        var c = 0
+        this.forEach { byte -> i += byte.toUint().shl(24 - c * 8); c += 1 }
         return i
     }
-    fun ByteArray.toLongBig(): Long {
-        if (this.size != 8)
+    fun ByteArray64.toInt48Big(): Long {
+        if (this.size != 6L)
             throw OperationNotSupportedException("ByteArray is not Long")
 
         var i = 0L
-        this.forEachIndexed { index, byte -> i += byte.toUint().shl(56 - index * 8)}
+        var c = 0
+        this.forEach { byte -> i += byte.toUint().shl(40 - c * 8); c += 1 }
         return i
     }
-    fun ByteArray.toShortBig(): Short {
-        if (this.size != 2)
-            throw OperationNotSupportedException("ByteArray is not Long")
+    fun ByteArray64.toShortBig(): Short {
+        if (this.size != 2L)
+            throw OperationNotSupportedException("ByteArray is not Short")
 
         return (this[0].toUint().shl(256) + this[1].toUint()).toShort()
     }
@@ -701,17 +725,66 @@ object VDUtil {
             return dir.contents.entries.contains(targetID)
         }
     }
+
+    /**
+     * Searches for disconnected nodes using its parent pointer.
+     * If the parent node is invalid, the node is considered orphan, and will be added
+     * to the list this function returns.
+     *
+     * @return List of orphan entries
+     */
+    fun gcSearchOrphan(disk: VirtualDisk): List<EntryID> {
+        return disk.entries.filter { disk.entries[it.value.parentEntryID] == null }.keys.toList()
+    }
+
+    fun gcSearchPhantomBaby(disk: VirtualDisk): List<Pair<EntryID, EntryID>> {
+        // Pair<DirectoryID, ID of phantom in the directory>
+        val phantoms = ArrayList<Pair<EntryID, EntryID>>()
+        disk.entries.filter { it.value.contents is EntryDirectory }.values.forEach { directory ->
+            (directory.contents as EntryDirectory).entries.forEach { dirEntryID ->
+                if (disk.entries[dirEntryID] == null) {
+                    phantoms.add(Pair(directory.entryID, dirEntryID))
+                }
+            }
+        }
+        return phantoms
+    }
+
+    fun gcDumpOrphans(disk: VirtualDisk) {
+        try {
+            gcSearchOrphan(disk).forEach {
+                disk.entries.remove(it)
+            }
+        }
+        catch (e: Exception) {
+            throw InternalError("Aw, snap! Here's what it says:\n$e")
+        }
+    }
+
+    fun gcDumpAll(disk: VirtualDisk) {
+        try {
+            gcSearchPhantomBaby(disk).forEach {
+                getAsDirectory(disk, it.first).entries.remove(it.second)
+            }
+            gcSearchOrphan(disk).forEach {
+                disk.entries.remove(it)
+            }
+        }
+        catch (e: Exception) {
+            throw InternalError("Aw, snap! Here's what it says:\n$e")
+        }
+    }
 }
 
 fun Byte.toUint() = java.lang.Byte.toUnsignedInt(this)
 fun magicMismatch(magic: ByteArray, array: ByteArray): Boolean {
-    return !Arrays.equals(array.sliceArray(0..magic.lastIndex), magic)
+    return !Arrays.equals(array, magic)
 }
 fun String.toEntryName(length: Int, charset: Charset): ByteArray {
-    val buffer = AppendableByteBuffer(length)
+    val buffer = AppendableByteBuffer(length.toLong())
     val stringByteArray = this.toByteArray(charset)
     buffer.put(stringByteArray.sliceArray(0..minOf(length, stringByteArray.size) - 1))
-    return buffer.array
+    return buffer.array.toByteArray()
 }
 fun ByteArray.toCanonicalString(charset: Charset): String {
     var lastIndexOfRealStr = 0
@@ -724,8 +797,25 @@ fun ByteArray.toCanonicalString(charset: Charset): String {
     return String(this.sliceArray(0..lastIndexOfRealStr), charset)
 }
 
+fun ArrayList<Byte>.toByteArray64(): ByteArray64 {
+    val array = ByteArray64(this.size.toLong())
+    this.forEachIndexed { index, byte ->
+        array[index.toLong()] = byte
+    }
+    return array
+}
+fun ByteArray.toByteArray64(): ByteArray64 {
+    val array = ByteArray64(this.size.toLong())
+    this.forEachIndexed { index, byte ->
+        array[index.toLong()] = byte
+    }
+    return array
+}
+
 /**
  * Writes String to the file
+ *
+ * Note: this FileWriter cannot write more than 2 GiB
  *
  * @param fileEntry must be File, resolve symlink beforehand
  * @param mode "w" or "a"
@@ -744,8 +834,8 @@ class VDFileWriter(private val fileEntry: DiskEntry, private val append: Boolean
 
     override fun write(cbuf: CharArray, off: Int, len: Int) {
         if (!closed) {
-            val newByteArray = String(cbuf).toByteArray(charset)
-            newFileBuffer.addAll(newByteArray.asIterable())
+            val newByteArray = String(cbuf).toByteArray(charset).toByteArray64()
+            newByteArray.forEach { newFileBuffer.add(it) }
         }
         else {
             throw IOException()
@@ -757,16 +847,16 @@ class VDFileWriter(private val fileEntry: DiskEntry, private val append: Boolean
             val newByteArray = newFileBuffer.toByteArray()
 
             if (!append) {
-                (fileEntry.contents as EntryFile).bytes = newByteArray
+                (fileEntry.contents as EntryFile).bytes = newByteArray.toByteArray64()
             }
             else {
-                val oldByteArray = (fileEntry.contents as EntryFile).bytes.copyOf()
+                val oldByteArray = (fileEntry.contents as EntryFile).bytes.toByteArray().copyOf()
                 val newFileBuffer = ByteArray(oldByteArray.size + newByteArray.size)
 
                 System.arraycopy(oldByteArray, 0, newFileBuffer, 0, oldByteArray.size)
                 System.arraycopy(newByteArray, 0, newFileBuffer, oldByteArray.size, newByteArray.size)
 
-                (fileEntry.contents as EntryFile).bytes = newByteArray
+                fileEntry.contents.bytes = newByteArray.toByteArray64()
             }
 
             newFileBuffer = ArrayList<Byte>()
@@ -804,16 +894,16 @@ class VDFileOutputStream(private val fileEntry: DiskEntry, private val append: B
             val newByteArray = newFileBuffer.toByteArray()
 
             if (!append) {
-                (fileEntry.contents as EntryFile).bytes = newByteArray
+                (fileEntry.contents as EntryFile).bytes = newByteArray.toByteArray64()
             }
             else {
-                val oldByteArray = (fileEntry.contents as EntryFile).bytes.copyOf()
+                val oldByteArray = (fileEntry.contents as EntryFile).bytes.toByteArray().copyOf()
                 val newFileBuffer = ByteArray(oldByteArray.size + newByteArray.size)
 
                 System.arraycopy(oldByteArray, 0, newFileBuffer, 0, oldByteArray.size)
                 System.arraycopy(newByteArray, 0, newFileBuffer, oldByteArray.size, newByteArray.size)
 
-                (fileEntry.contents as EntryFile).bytes = newByteArray
+                fileEntry.contents.bytes = newByteArray.toByteArray64()
             }
 
             newFileBuffer = ArrayList<Byte>()
