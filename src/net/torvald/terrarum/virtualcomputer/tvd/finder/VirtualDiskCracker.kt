@@ -308,7 +308,7 @@ class VirtualDiskCracker(val sysCharset: Charset = Charsets.UTF_8) : JFrame() {
                 // delete
                 if (vdisk != null && selectedFile != null) {
                     try {
-                        VDUtil.deleteFile(vdisk!!, currentDirectory, selectedFile!!)
+                        VDUtil.deleteFile(vdisk!!, selectedFile!!)
                         updateDiskInfo()
                         setStat("File deleted")
                     }
@@ -411,7 +411,7 @@ class VirtualDiskCracker(val sysCharset: Charset = Charsets.UTF_8) : JFrame() {
             override fun mousePressed(e: MouseEvent?) {
                 if (vdisk != null && selectedFile != null) {
                     try {
-                        VDUtil.deleteFile(vdisk!!, currentDirectory, selectedFile!!)
+                        VDUtil.deleteFile(vdisk!!, selectedFile!!)
                         updateDiskInfo()
                         setStat("File deleted")
                     }
@@ -602,7 +602,7 @@ class VirtualDiskCracker(val sysCharset: Charset = Charsets.UTF_8) : JFrame() {
                 }
             }
         })
-        menuEdit.addSeparator()
+        menuManage.addSeparator()
         menuManage.add("Remove Orphans").addMouseListener(object : MouseAdapter() {
             override fun mousePressed(e: MouseEvent?) {
                 if (vdisk != null) {
@@ -760,7 +760,7 @@ EntryID: ${file.entryID}
 ParentID: ${file.parentEntryID}""" + if (file.contents is EntryFile) """
 
 Contents:
-${String(file.contents.bytes.sliceArray(0L..minOf(PREVIEW_MAX_BYTES, file.contents.bytes.size)).toByteArray(), sysCharset)}""" else ""
+${String(file.contents.bytes.sliceArray(0L..minOf(PREVIEW_MAX_BYTES, file.contents.bytes.size) - 1).toByteArray(), sysCharset)}""" else ""
     }
     private fun Long.bytes() = if (this == 1L) "1 byte" else "$this bytes"
     private fun Int.entries() = if (this == 1) "1 entry" else "$this entries"

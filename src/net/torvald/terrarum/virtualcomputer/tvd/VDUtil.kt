@@ -371,20 +371,26 @@ object VDUtil {
 
         val fileSearchResult = getFile(disk, path)!!
 
-        return deleteFile(disk, fileSearchResult.parent.entryID, fileSearchResult.file.entryID)
+        return deleteFile(disk, fileSearchResult.file.entryID)
     }
     /**
      * Deletes file on the disk safely.
      */
-    fun deleteFile(disk: VirtualDisk, parentID: EntryID, targetID: EntryID) {
+    fun deleteFile(disk: VirtualDisk, targetID: EntryID) {
         disk.checkReadOnly()
 
         val file = disk.entries[targetID]
+
+        if (file == null) {
+            throw FileNotFoundException("No such file to delete")
+        }
+
+        val parentID = file.parentEntryID
         val parentDir = disk.entries[parentID]
 
         fun rollback() {
             if (!disk.entries.contains(targetID)) {
-                disk.entries[targetID] = file!!
+                disk.entries[targetID] = file
             }
             if (!(parentDir!!.contents as EntryDirectory).entries.contains(targetID)) {
                 (parentDir.contents as EntryDirectory).entries.add(targetID)
@@ -394,14 +400,16 @@ object VDUtil {
         if (parentDir == null || parentDir.contents !is EntryDirectory) {
             throw FileNotFoundException("No such parent directory")
         }
-        else if (file == null || !directoryContains(disk, parentID, targetID)) {
+        // check if directory "parentID" has "targetID" in the first place
+        else if (!directoryContains(disk, parentID, targetID)) {
             throw FileNotFoundException("No such file to delete")
         }
         else if (targetID == 0) {
             throw IOException("Cannot delete root file system")
         }
         else if (file.contents is EntryDirectory && file.contents.entries.size > 0) {
-            throw IOException("Cannot delete directory that contains something")
+            //throw IOException("Cannot delete directory that contains something")
+            deleteDirRecurse(disk, targetID)
         }
         else {
             try {
@@ -533,6 +541,45 @@ object VDUtil {
         }
     }
 
+    fun deleteDirRecurse(disk: VirtualDisk, directoryID: EntryID) {
+        val entriesToDelete = ArrayList<EntryID>()
+
+        fun recurse1(entry: DiskEntry?) {
+            // return conditions
+            if (entry == null) return
+            if (entry.contents !is EntryDirectory) {
+                entriesToDelete.add(entry.entryID)
+                return
+            }
+            // recurse
+            else {
+                entry.contents.entries.forEach {
+                    entriesToDelete.add(entry.entryID)
+                    recurse1(disk.entries[it])
+                }
+            }
+        }
+
+        val entry = disk.entries[directoryID]
+        if (entry != null && entry.contents is EntryDirectory) {
+            entry.contents.entries.forEach {
+                entriesToDelete.add(directoryID)
+                recurse1(disk.entries[it])
+            }
+
+            // delete entries
+            entriesToDelete.forEach { disk.entries.remove(it) }
+            // GC
+            gcDumpAll(disk)
+            System.gc()
+        }
+        else if (entry == null) {
+            throw FileNotFoundException("No such directory")
+        }
+        else {
+            throw IOException("The file is not a directory")
+        }
+    }
 
     /**
      * Imports external file and returns corresponding DiskEntry.
