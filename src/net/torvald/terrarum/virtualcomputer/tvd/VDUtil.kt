@@ -784,6 +784,11 @@ object VDUtil {
         return disk.entries.filter { disk.entries[it.value.parentEntryID] == null }.keys.toList()
     }
 
+    /**
+     * Searches for null-pointing entries (phantoms) within every directory.
+     *
+     * @return List of search results, which is Pair(directory that contains null pointer, null pointer)
+     */
     fun gcSearchPhantomBaby(disk: VirtualDisk): List<Pair<EntryID, EntryID>> {
         // Pair<DirectoryID, ID of phantom in the directory>
         val phantoms = ArrayList<Pair<EntryID, EntryID>>()

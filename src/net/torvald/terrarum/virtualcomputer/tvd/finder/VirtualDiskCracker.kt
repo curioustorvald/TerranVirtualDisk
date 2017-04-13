@@ -610,7 +610,9 @@ class VirtualDiskCracker(val sysCharset: Charset = Charsets.UTF_8) : JFrame() {
                         val oldSize = vdisk!!.usedBytes
                         VDUtil.gcDumpOrphans(vdisk!!)
                         val newSize = vdisk!!.usedBytes
-                        popupMessage("Saved ${(newSize - oldSize).bytes()}", "GC Report")
+                        popupMessage("Saved ${(oldSize - newSize).bytes()}", "GC Report")
+                        updateDiskInfo()
+                        setStat("Orphan nodes removed")
                     }
                     catch (e: Exception) {
                         e.printStackTrace()
@@ -626,7 +628,9 @@ class VirtualDiskCracker(val sysCharset: Charset = Charsets.UTF_8) : JFrame() {
                         val oldSize = vdisk!!.usedBytes
                         VDUtil.gcDumpAll(vdisk!!)
                         val newSize = vdisk!!.usedBytes
-                        popupMessage("Saved ${(newSize - oldSize).bytes()}", "GC Report")
+                        popupMessage("Saved ${(oldSize - newSize).bytes()}", "GC Report")
+                        updateDiskInfo()
+                        setStat("Orphan nodes and null directory pointers removed")
                     }
                     catch (e: Exception) {
                         e.printStackTrace()
