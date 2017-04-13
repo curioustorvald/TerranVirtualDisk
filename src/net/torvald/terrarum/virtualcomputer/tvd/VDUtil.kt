@@ -267,7 +267,7 @@ object VDUtil {
      * Search a entry using path
      * @return Pair of <The file, Parent file>, or null if not found
      */
-    fun getFile(disk: VirtualDisk, path: VDPath): EntrySearchResult? {
+    fun getFile(disk: VirtualDisk, path: VDPath): DiskEntry? {
         val searchHierarchy = ArrayList<DiskEntry>()
         fun getCurrentEntry(): DiskEntry = searchHierarchy.last()
         //var currentDirectory = disk.root
@@ -276,10 +276,7 @@ object VDUtil {
 
         // path of root
         if (path.hierarchy.size == 0) {
-            return EntrySearchResult(
-                    disk.entries[0]!!,
-                    disk.entries[0]!!
-            )
+            return disk.entries[0]!!
         }
 
         try {
@@ -310,10 +307,7 @@ object VDUtil {
         }
 
         // file found
-        return EntrySearchResult(
-                searchHierarchy[searchHierarchy.lastIndex],
-                searchHierarchy[searchHierarchy.lastIndex - 1]
-        )
+        return searchHierarchy[searchHierarchy.lastIndex]
     }
 
     /**
@@ -347,7 +341,7 @@ object VDUtil {
      * Search for the file and returns a instance of normal file.
      */
     fun getAsNormalFile(disk: VirtualDisk, path: VDPath) =
-            getFile(disk, path)!!.file.getAsNormalFile(disk)
+            getFile(disk, path)!!.getAsNormalFile(disk)
     /**
      * Fetch the file and returns a instance of normal file.
      */
@@ -357,7 +351,7 @@ object VDUtil {
      * Search for the file and returns a instance of directory.
      */
     fun getAsDirectory(disk: VirtualDisk, path: VDPath) =
-            getFile(disk, path)!!.file.getAsDirectory(disk)
+            getFile(disk, path)!!.getAsDirectory(disk)
     /**
      * Fetch the file and returns a instance of directory.
      */
@@ -367,11 +361,8 @@ object VDUtil {
      * Deletes file on the disk safely.
      */
     fun deleteFile(disk: VirtualDisk, path: VDPath) {
-        disk.checkReadOnly()
-
         val fileSearchResult = getFile(disk, path)!!
-
-        return deleteFile(disk, fileSearchResult.file.entryID)
+        return deleteFile(disk, fileSearchResult.entryID)
     }
     /**
      * Deletes file on the disk safely.
@@ -386,29 +377,25 @@ object VDUtil {
         }
 
         val parentID = file.parentEntryID
-        val parentDir = disk.entries[parentID]
+        val parentDir = getAsDirectory(disk, parentID)
 
         fun rollback() {
             if (!disk.entries.contains(targetID)) {
                 disk.entries[targetID] = file
             }
-            if (!(parentDir!!.contents as EntryDirectory).entries.contains(targetID)) {
-                (parentDir.contents as EntryDirectory).entries.add(targetID)
+            if (!parentDir.entries.contains(targetID)) {
+                parentDir.entries.add(targetID)
             }
         }
 
-        if (parentDir == null || parentDir.contents !is EntryDirectory) {
-            throw FileNotFoundException("No such parent directory")
-        }
         // check if directory "parentID" has "targetID" in the first place
-        else if (!directoryContains(disk, parentID, targetID)) {
+        if (!directoryContains(disk, parentID, targetID)) {
             throw FileNotFoundException("No such file to delete")
         }
         else if (targetID == 0) {
             throw IOException("Cannot delete root file system")
         }
         else if (file.contents is EntryDirectory && file.contents.entries.size > 0) {
-            //throw IOException("Cannot delete directory that contains something")
             deleteDirRecurse(disk, targetID)
         }
         else {
@@ -416,7 +403,7 @@ object VDUtil {
                 // delete file record
                 disk.entries.remove(targetID)
                 // unlist file from parent directly
-                (disk.entries[parentID]!!.contents as EntryDirectory).entries.remove(targetID)
+                parentDir.entries.remove(targetID)
             }
             catch (e: Exception) {
                 rollback()
@@ -428,7 +415,7 @@ object VDUtil {
      * Changes the name of the entry.
      */
     fun renameFile(disk: VirtualDisk, path: VDPath, newName: String, charset: Charset) {
-        val file = getFile(disk, path)?.file
+        val file = getFile(disk, path)
 
         if (file != null) {
             file.filename = newName.sanitisePath().toEntryName(DiskEntry.NAME_LENGTH, charset)
@@ -451,23 +438,12 @@ object VDUtil {
         }
     }
     /**
-     * Add file to the specified directory. ParentID of the file will be overwritten.
+     * Add file to the specified directory.
+     * The file will get new EntryID and its ParentID will be overwritten.
      */
     fun addFile(disk: VirtualDisk, parentPath: VDPath, file: DiskEntry) {
-        disk.checkReadOnly()
-        disk.checkCapacity(file.serialisedSize)
-
-        try {
-            val parentID = getFile(disk, parentPath)!!.file.entryID
-            // add record to the directory
-            getAsDirectory(disk, parentPath).entries.add(file.entryID)
-            // add entry on the disk
-            disk.entries[file.entryID] = file
-            file.parentEntryID = parentID
-        }
-        catch (e: KotlinNullPointerException) {
-            throw FileNotFoundException("No such directory")
-        }
+        val targetDirID = getFile(disk, parentPath)!!.entryID
+        return addFile(disk, targetDirID, file)
     }
     /**
      * Add file to the specified directory. ParentID of the file will be overwritten.
@@ -477,10 +453,13 @@ object VDUtil {
         disk.checkCapacity(file.serialisedSize)
 
         try {
+            // generate new ID for the file
+            file.entryID = disk.generateUniqueID()
             // add record to the directory
             getAsDirectory(disk, directoryID).entries.add(file.entryID)
             // add entry on the disk
             disk.entries[file.entryID] = file
+            // make this boy recognise his new parent
             file.parentEntryID = directoryID
         }
         catch (e: KotlinNullPointerException) {
@@ -491,28 +470,8 @@ object VDUtil {
      * Add subdirectory to the specified directory.
      */
     fun addDir(disk: VirtualDisk, parentPath: VDPath, name: ByteArray) {
-        disk.checkReadOnly()
-        disk.checkCapacity(EntryDirectory.NEW_ENTRY_SIZE)
-
-        val newID = disk.generateUniqueID()
-
-        try {
-            val parentID = getFile(disk, parentPath)!!.file.entryID
-            // add record to the directory
-            getAsDirectory(disk, parentPath).entries.add(newID)
-            // add entry on the disk
-            disk.entries[newID] = DiskEntry(
-                    newID,
-                    parentID,
-                    name,
-                    currentUnixtime,
-                    currentUnixtime,
-                    EntryDirectory()
-            )
-        }
-        catch (e: KotlinNullPointerException) {
-            throw FileNotFoundException("No such directory")
-        }
+        val parentID = getFile(disk, parentPath)!!.entryID
+        return addDir(disk, parentID, name)
     }
     /**
      * Add file to the specified directory.
@@ -630,12 +589,10 @@ object VDUtil {
     fun moveFile(disk1: VirtualDisk, fromPath: VDPath, disk2: VirtualDisk, toPath: VDPath) {
         val file = getFile(disk1, fromPath)
 
-        if (file != null) {
-            if (file.file.contents is EntryDirectory) {
-                throw IOException("Cannot move directory")
-            }
+        // checking readOnly is redundant here
 
-            disk2.checkCapacity(file.file.contents.getSizeEntry())
+        if (file != null) {
+            disk2.checkCapacity(file.contents.getSizeEntry())
 
             try {
                 deleteFile(disk2, toPath)
@@ -644,11 +601,11 @@ object VDUtil {
 
             deleteFile(disk1, fromPath) // any uncaught no_from_file will be caught here
             try {
-                addFile(disk2, toPath.getParent(), file.file)
+                addFile(disk2, toPath.getParent(), file)
             }
             catch (e: FileNotFoundException) {
                 // roll back delete on disk1
-                addFile(disk1, file.parent.entryID, file.file)
+                addFile(disk1, file.parentEntryID, file)
                 throw FileNotFoundException("No such destination")
             }
         }
@@ -740,7 +697,6 @@ object VDUtil {
         val path1 = this.replace('\\', '/')
         return path1
     }
-    data class EntrySearchResult(val file: DiskEntry, val parent: DiskEntry)
 
     fun resolveIfSymlink(disk: VirtualDisk, indexNumber: EntryID, recurse: Boolean = false): DiskEntry {
         var entry: DiskEntry? = disk.entries[indexNumber]
