@@ -347,11 +347,6 @@ class VirtualDiskCracker(val sysCharset: Charset = Charsets.UTF_8) : JFrame() {
                     }
                 }
                 if (clipboard != null && vdisk != null) {
-                    if (clipboard!!.contents is EntryDirectory) {
-                        popupError("Cannot paste directory")
-                        return
-                    }
-
                     // check name collision. If it is, ask for new one
                     if (VDUtil.nameExists(vdisk!!, clipboard!!.getFilenameString(sysCharset), currentDirectory, sysCharset)) {
                         val newname = JOptionPane.showInputDialog("The name already exists. Enter a new name:")
