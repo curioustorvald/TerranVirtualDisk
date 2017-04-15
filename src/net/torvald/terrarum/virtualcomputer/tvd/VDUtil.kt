@@ -243,7 +243,7 @@ object VDUtil {
             throw IllegalArgumentException("The entry is not directory")
 
         val entriesList = ArrayList<DiskEntry>()
-        dirToSearch.contents.entries.forEach {
+        dirToSearch.contents.forEach {
             val entry = disk.entries[it]
             if (entry != null) entriesList.add(entry)
         }
@@ -383,8 +383,8 @@ object VDUtil {
             if (!disk.entries.contains(targetID)) {
                 disk.entries[targetID] = file
             }
-            if (!parentDir.entries.contains(targetID)) {
-                parentDir.entries.add(targetID)
+            if (!parentDir.contains(targetID)) {
+                parentDir.add(targetID)
             }
         }
 
@@ -395,7 +395,7 @@ object VDUtil {
         else if (targetID == 0) {
             throw IOException("Cannot delete root file system")
         }
-        else if (file.contents is EntryDirectory && file.contents.entries.size > 0) {
+        else if (file.contents is EntryDirectory && file.contents.entryCount > 0) {
             deleteDirRecurse(disk, targetID)
         }
         else {
@@ -403,7 +403,7 @@ object VDUtil {
                 // delete file record
                 disk.entries.remove(targetID)
                 // unlist file from parent directly
-                parentDir.entries.remove(targetID)
+                parentDir.remove(targetID)
             }
             catch (e: Exception) {
                 rollback()
@@ -456,7 +456,7 @@ object VDUtil {
             // generate new ID for the file
             file.entryID = disk.generateUniqueID()
             // add record to the directory
-            getAsDirectory(disk, directoryID).entries.add(file.entryID)
+            getAsDirectory(disk, directoryID).add(file.entryID)
             // add entry on the disk
             disk.entries[file.entryID] = file
             // make this boy recognise his new parent
@@ -484,7 +484,7 @@ object VDUtil {
 
         try {
             // add record to the directory
-            getAsDirectory(disk, directoryID).entries.add(newID)
+            getAsDirectory(disk, directoryID).add(newID)
             // add entry on the disk
             disk.entries[newID] = DiskEntry(
                     newID,
@@ -512,7 +512,7 @@ object VDUtil {
             }
             // recurse
             else {
-                entry.contents.entries.forEach {
+                entry.contents.forEach {
                     entriesToDelete.add(entry.entryID)
                     recurse1(disk.entries[it])
                 }
@@ -521,7 +521,7 @@ object VDUtil {
 
         val entry = disk.entries[directoryID]
         if (entry != null && entry.contents is EntryDirectory) {
-            entry.contents.entries.forEach {
+            entry.contents.forEach {
                 entriesToDelete.add(directoryID)
                 recurse1(disk.entries[it])
             }
@@ -725,7 +725,7 @@ object VDUtil {
             throw FileNotFoundException("Not a directory")
         }
         else {
-            return dir.contents.entries.contains(targetID)
+            return dir.contents.contains(targetID)
         }
     }
 
@@ -749,7 +749,7 @@ object VDUtil {
         // Pair<DirectoryID, ID of phantom in the directory>
         val phantoms = ArrayList<Pair<EntryID, EntryID>>()
         disk.entries.filter { it.value.contents is EntryDirectory }.values.forEach { directory ->
-            (directory.contents as EntryDirectory).entries.forEach { dirEntryID ->
+            (directory.contents as EntryDirectory).forEach { dirEntryID ->
                 if (disk.entries[dirEntryID] == null) {
                     phantoms.add(Pair(directory.entryID, dirEntryID))
                 }
@@ -772,7 +772,7 @@ object VDUtil {
     fun gcDumpAll(disk: VirtualDisk) {
         try {
             gcSearchPhantomBaby(disk).forEach {
-                getAsDirectory(disk, it.first).entries.remove(it.second)
+                getAsDirectory(disk, it.first).remove(it.second)
             }
             gcSearchOrphan(disk).forEach {
                 disk.entries.remove(it)

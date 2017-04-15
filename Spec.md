@@ -8,6 +8,7 @@ current specversion number: 0x01
 - 48-Bit filesize and timestamp (Max 256 TiB / 8.9 million years)
 
 ### 0x01
+**Note: this version were never released in public**
 - Doubly Linked List instead of Singly
 
 
