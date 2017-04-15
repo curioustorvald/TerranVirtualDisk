@@ -188,7 +188,7 @@ class EntryDirectory(private val entries: ArrayList<EntryID> = ArrayList<EntryID
     override fun getSizePure() = entries.size * 4L
     override fun getSizeEntry() = getSizePure() + 2
     private fun checkCapacity(toAdd: Int = 1) {
-        if (entries.size >= 65535 + toAdd)
+        if (entries.size + toAdd > 65535)
             throw IOException("Directory entries limit exceeded.")
     }
 

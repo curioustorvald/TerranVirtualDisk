@@ -771,7 +771,7 @@ ${String(file.contents.bytes.sliceArray(0L..minOf(PREVIEW_MAX_BYTES, file.conten
     private fun DiskEntry.getEffectiveSize() = if (this.contents is EntryFile)
         this.contents.getSizePure().bytes()
     else if (this.contents is EntryDirectory)
-        this.contents.entries.size.entries()
+        this.contents.entryCount.entries()
     else if (this.contents is EntrySymlink)
         "(symlink)"
     else
