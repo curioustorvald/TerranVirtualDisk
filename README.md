@@ -22,10 +22,10 @@ Run the .jar file to launch the Finder.
 - Each file or the capacity of the disk can be no larger than 256 TiB.
 - Name of the file/directory is limited to 256 bytes
 - Name of the disk is limited to 32 bytes
-- Total number of entries cannot exceed 4 294 967 294 (you will run out of disk capacity before reach this number)
+- Total number of entries cannot exceed 4 294 967 294 (you will most likely run out of disk space before reach this number)
 - Timestamp will overflow after [8.9 million years](https://www.wolframalpha.com/input/?i=unix+epoch+%2B+2%5E48+seconds)
 
 ## Documentation
 
-- Specifications: read ```Spec.md```
+- Specifications: read [```Spec.md```](Spec.md)
 - Javadoc: TBA

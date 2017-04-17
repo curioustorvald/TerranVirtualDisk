@@ -602,6 +602,33 @@ object VDUtil {
         outfile.writeBytes64(entryFile.bytes)
     }
 
+    fun exportDirRecurse(disk: VirtualDisk, parentDir: EntryID, outfile: File, charset: Charset) {
+        fun recurse1(file: DiskEntry, dir: File) {
+            // return conditions
+            if (file.contents is EntryFile) {
+                // if not a directory, write as file
+                val newFile = File(dir, file.getFilenameString(charset))
+                newFile.writeBytes64(file.contents.bytes)
+                return
+            }
+            // recurse
+            else if (file.contents is EntryDirectory) {
+                // mkdir
+                val newDir = File(dir, file.getFilenameString(charset))
+                newDir.mkdir()
+                // for entries in this fileDirectory...
+                file.contents.forEach { recurse1(disk.entries[it]!!, newDir) }
+            }
+        }
+
+
+        // mkdir to superNode
+        val newDir = File(outfile, disk.entries[parentDir]!!.getFilenameString(charset))
+        newDir.mkdir()
+        // for entries in this fileDirectory...
+        getDirectoryEntries(disk, parentDir).forEach { recurse1(it, newDir) }
+    }
+
     /**
      * Check for name collision in specified directory.
      */

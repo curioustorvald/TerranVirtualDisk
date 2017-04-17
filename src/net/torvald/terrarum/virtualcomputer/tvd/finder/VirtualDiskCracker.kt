@@ -503,34 +503,31 @@ class VirtualDiskCracker(val sysCharset: Charset = Charsets.UTF_8) : JFrame() {
                 }
             }
         })
-        menuEdit.add("Export File…").addMouseListener(object : MouseAdapter() {
+        menuEdit.add("Export…").addMouseListener(object : MouseAdapter() {
             override fun mousePressed(e: MouseEvent?) {
-                if (vdisk != null && selectedFile != null) {
-                    val file = vdisk!!.entries[selectedFile!!]!!
+                if (vdisk != null) {
+                    val file = vdisk!!.entries[selectedFile ?: currentDirectory]!!
 
-                    if (file.contents is EntryFile || file.contents is EntrySymlink) {
-                        val fileChooser = JFileChooser()
-                        fileChooser.showOpenDialog(null)
-                        if (fileChooser.selectedFile != null) {
-                            try {
-                                val file = VDUtil.resolveIfSymlink(vdisk!!, file.entryID)
-                                if (file.contents is EntryFile) {
-                                    fileChooser.selectedFile.createNewFile()
-                                    fileChooser.selectedFile.writeBytes64(file.contents.bytes)
-                                    setStat("File exported")
-                                }
-                                else {
-                                    popupError("Cannot export directory")
-                                }
+                    val fileChooser = JFileChooser()
+                    fileChooser.fileSelectionMode = JFileChooser.DIRECTORIES_ONLY
+                    fileChooser.isMultiSelectionEnabled = false
+                    fileChooser.showOpenDialog(null)
+                    if (fileChooser.selectedFile != null) {
+                        try {
+                            val file = VDUtil.resolveIfSymlink(vdisk!!, file.entryID)
+                            if (file.contents is EntryFile) {
+                                VDUtil.exportFile(file.contents, fileChooser.selectedFile)
+                                setStat("File exported")
                             }
-                            catch (e: Exception) {
-                                e.printStackTrace()
-                                popupError(e.toString())
+                            else {
+                                VDUtil.exportDirRecurse(vdisk!!, file.entryID, fileChooser.selectedFile, sysCharset)
+                                setStat("Files exported")
                             }
                         }
-                    }
-                    else if (file.contents is EntryDirectory) {
-                        popupError("Cannot export directory")
+                        catch (e: Exception) {
+                            e.printStackTrace()
+                            popupError(e.toString())
+                        }
                     }
                 }
             }
