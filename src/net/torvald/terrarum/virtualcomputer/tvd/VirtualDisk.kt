@@ -28,7 +28,7 @@ class VirtualDisk(
 
 
     private fun serializeEntriesOnly(): ByteArray64 {
-        val bufferList = ArrayList<Byte>()
+        val bufferList = ArrayList<Byte>() // FIXME this part would take up excessive memory for large files
         entries.forEach {
             val serialised = it.value.serialize()
             serialised.forEach { bufferList.add(it) }

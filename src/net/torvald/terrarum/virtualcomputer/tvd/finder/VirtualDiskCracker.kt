@@ -227,7 +227,7 @@ class VirtualDiskCracker(val sysCharset: Charset = Charsets.UTF_8) : JFrame() {
             override fun mousePressed(e: MouseEvent?) {
                 if (vdisk != null) {
                     val fileChooser = JFileChooser()
-                    fileChooser.showOpenDialog(null)
+                    fileChooser.showSaveDialog(null)
                     if (fileChooser.selectedFile != null) {
                         try {
                             VDUtil.dumpToRealMachine(vdisk!!, fileChooser.selectedFile)
@@ -511,7 +511,7 @@ class VirtualDiskCracker(val sysCharset: Charset = Charsets.UTF_8) : JFrame() {
                     val fileChooser = JFileChooser()
                     fileChooser.fileSelectionMode = JFileChooser.DIRECTORIES_ONLY
                     fileChooser.isMultiSelectionEnabled = false
-                    fileChooser.showOpenDialog(null)
+                    fileChooser.showSaveDialog(null)
                     if (fileChooser.selectedFile != null) {
                         try {
                             val file = VDUtil.resolveIfSymlink(vdisk!!, file.entryID)
@@ -636,6 +636,22 @@ class VirtualDiskCracker(val sysCharset: Charset = Charsets.UTF_8) : JFrame() {
                         popupMessage("Saved ${(oldSize - newSize).bytes()}", "GC Report")
                         updateDiskInfo()
                         setStat("Orphan nodes and null directory pointers removed")
+                    }
+                    catch (e: Exception) {
+                        e.printStackTrace()
+                        popupError(e.toString())
+                    }
+                }
+            }
+        })
+        menuManage.addSeparator()
+        menuManage.add("Estimate Compressed Size").addMouseListener(object : MouseAdapter() {
+            override fun mousePressed(e: MouseEvent?) {
+                if (vdisk != null && selectedFile != null && VDUtil.isFile(vdisk!!, selectedFile!!)) {
+                    try {
+                        popupMessage("Estimated size: ${
+                        DeflateUtil.estimate(VDUtil.getAsNormalFile(vdisk!!, selectedFile!!).bytes)
+                                .bytes()}")
                     }
                     catch (e: Exception) {
                         e.printStackTrace()
@@ -769,7 +785,7 @@ EntryID: ${file.entryID}
 ParentID: ${file.parentEntryID}""" + if (file.contents is EntryFile) """
 
 Contents:
-${String(file.contents.bytes.sliceArray(0L..minOf(PREVIEW_MAX_BYTES, file.contents.bytes.size) - 1).toByteArray(), sysCharset)}""" else ""
+${String(file.contents.bytes.sliceArray64(0L..minOf(PREVIEW_MAX_BYTES, file.contents.bytes.size) - 1).toByteArray(), sysCharset)}""" else ""
     }
     private fun Long.bytes() = if (this == 1L) "1 byte" else "$this bytes"
     private fun Int.entries() = if (this == 1) "1 entry" else "$this entries"

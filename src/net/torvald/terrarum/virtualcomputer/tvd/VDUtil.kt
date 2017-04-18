@@ -116,12 +116,12 @@ object VDUtil {
 
 
 
-        if (magicMismatch(VirtualDisk.MAGIC, inbytes.sliceArray(0L..3L).toByteArray()))
+        if (magicMismatch(VirtualDisk.MAGIC, inbytes.sliceArray64(0L..3L).toByteArray()))
             throw RuntimeException("Invalid Virtual Disk file!")
 
-        val diskSize = inbytes.sliceArray(4L..9L).toInt48Big()
-        val diskName = inbytes.sliceArray(10L..10L + 31)
-        val diskCRC = inbytes.sliceArray(10L + 32..10L + 32 + 3).toIntBig() // to check with completed vdisk
+        val diskSize = inbytes.sliceArray64(4L..9L).toInt48Big()
+        val diskName = inbytes.sliceArray64(10L..10L + 31)
+        val diskCRC = inbytes.sliceArray64(10L + 32..10L + 32 + 3).toIntBig() // to check with completed vdisk
         val diskSpecVersion = inbytes[10L + 32 + 4]
 
 
@@ -133,30 +133,30 @@ object VDUtil {
         //println("[VDUtil] currentUnixtime = $currentUnixtime")
 
         var entryOffset = VirtualDisk.HEADER_SIZE
-        while (!Arrays.equals(inbytes.sliceArray(entryOffset..entryOffset + 3).toByteArray(), VirtualDisk.FOOTER_START_MARK)) {
+        while (!Arrays.equals(inbytes.sliceArray64(entryOffset..entryOffset + 3).toByteArray(), VirtualDisk.FOOTER_START_MARK)) {
             //println("[VDUtil] entryOffset = $entryOffset")
             // read and prepare all the shits
-            val entryID = inbytes.sliceArray(entryOffset..entryOffset + 3).toIntBig()
-            val entryParentID = inbytes.sliceArray(entryOffset + 4..entryOffset + 7).toIntBig()
+            val entryID = inbytes.sliceArray64(entryOffset..entryOffset + 3).toIntBig()
+            val entryParentID = inbytes.sliceArray64(entryOffset + 4..entryOffset + 7).toIntBig()
             val entryTypeFlag = inbytes[entryOffset + 8]
-            val entryFileName = inbytes.sliceArray(entryOffset + 9..entryOffset + 9 + 255).toByteArray()
-            val entryCreationTime = inbytes.sliceArray(entryOffset + 265..entryOffset + 270).toInt48Big()
-            val entryModifyTime = inbytes.sliceArray(entryOffset + 271..entryOffset + 276).toInt48Big()
-            val entryCRC = inbytes.sliceArray(entryOffset + 277..entryOffset + 280).toIntBig() // to check with completed entry
+            val entryFileName = inbytes.sliceArray64(entryOffset + 9..entryOffset + 9 + 255).toByteArray()
+            val entryCreationTime = inbytes.sliceArray64(entryOffset + 265..entryOffset + 270).toInt48Big()
+            val entryModifyTime = inbytes.sliceArray64(entryOffset + 271..entryOffset + 276).toInt48Big()
+            val entryCRC = inbytes.sliceArray64(entryOffset + 277..entryOffset + 280).toIntBig() // to check with completed entry
 
             val entryData = when (entryTypeFlag) {
                 DiskEntry.NORMAL_FILE -> {
-                    val filesize = inbytes.sliceArray(entryOffset + DiskEntry.HEADER_SIZE..entryOffset + DiskEntry.HEADER_SIZE + 5).toInt48Big()
+                    val filesize = inbytes.sliceArray64(entryOffset + DiskEntry.HEADER_SIZE..entryOffset + DiskEntry.HEADER_SIZE + 5).toInt48Big()
                     //println("[VDUtil] --> is file; filesize = $filesize")
-                    inbytes.sliceArray(entryOffset + DiskEntry.HEADER_SIZE + 6..entryOffset + DiskEntry.HEADER_SIZE + 5 + filesize)
+                    inbytes.sliceArray64(entryOffset + DiskEntry.HEADER_SIZE + 6..entryOffset + DiskEntry.HEADER_SIZE + 5 + filesize)
                 }
                 DiskEntry.DIRECTORY   -> {
-                    val entryCount = inbytes.sliceArray(entryOffset + DiskEntry.HEADER_SIZE..entryOffset + DiskEntry.HEADER_SIZE + 1).toShortBig()
+                    val entryCount = inbytes.sliceArray64(entryOffset + DiskEntry.HEADER_SIZE..entryOffset + DiskEntry.HEADER_SIZE + 1).toShortBig()
                     //println("[VDUtil] --> is directory; entryCount = $entryCount")
-                    inbytes.sliceArray(entryOffset + DiskEntry.HEADER_SIZE + 2..entryOffset + DiskEntry.HEADER_SIZE + 1 + entryCount * 4)
+                    inbytes.sliceArray64(entryOffset + DiskEntry.HEADER_SIZE + 2..entryOffset + DiskEntry.HEADER_SIZE + 1 + entryCount * 4)
                 }
                 DiskEntry.SYMLINK     -> {
-                    inbytes.sliceArray(entryOffset + DiskEntry.HEADER_SIZE..entryOffset + DiskEntry.HEADER_SIZE + 3)
+                    inbytes.sliceArray64(entryOffset + DiskEntry.HEADER_SIZE..entryOffset + DiskEntry.HEADER_SIZE + 3)
                 }
                 else -> throw RuntimeException("Unknown entry with type $entryTypeFlag at entryOffset $entryOffset")
             }
@@ -185,7 +185,7 @@ object VDUtil {
                     else if (entryTypeFlag == DiskEntry.DIRECTORY) {
                         val entryList = ArrayList<EntryID>()
                         (0..entryData.size / 4 - 1).forEach {
-                            entryList.add(entryData.sliceArray(4 * it..4 * it + 3).toIntBig())
+                            entryList.add(entryData.sliceArray64(4 * it..4 * it + 3).toIntBig())
                         }
 
                         EntryDirectory(entryList)
@@ -234,6 +234,10 @@ object VDUtil {
         return vdisk
     }
 
+
+    fun isFile(disk: VirtualDisk, entryID: EntryID) = disk.entries[entryID]?.contents is EntryFile
+    fun isDirectory(disk: VirtualDisk, entryID: EntryID) = disk.entries[entryID]?.contents is EntryDirectory
+    fun isSymlink(disk: VirtualDisk, entryID: EntryID) = disk.entries[entryID]?.contents is EntrySymlink
 
     /**
      * Get list of entries of directory.
