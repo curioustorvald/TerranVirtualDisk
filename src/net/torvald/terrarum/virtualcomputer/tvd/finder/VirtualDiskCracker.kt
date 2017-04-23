@@ -570,6 +570,22 @@ class VirtualDiskCracker(val sysCharset: Charset = Charsets.UTF_8) : JFrame() {
                 }
             }
         })
+        menuEdit.addSeparator()
+        menuEdit.add("Set/Unset Write Protection").addMouseListener(object : MouseAdapter() {
+            override fun mousePressed(e: MouseEvent?) {
+                if (vdisk != null) {
+                    try {
+                        vdisk!!.isReadOnly = vdisk!!.isReadOnly.not()
+                        updateDiskInfo()
+                        setStat("Disk write protection ${if (vdisk!!.isReadOnly) "" else "dis"}engaged")
+                    }
+                    catch (e: Exception) {
+                        e.printStackTrace()
+                        popupError(e.toString())
+                    }
+                }
+            }
+        })
         menuBar.add(menuEdit)
 
         val menuManage = JMenu("Manage")
@@ -636,22 +652,6 @@ class VirtualDiskCracker(val sysCharset: Charset = Charsets.UTF_8) : JFrame() {
                         popupMessage("Saved ${(oldSize - newSize).bytes()}", "GC Report")
                         updateDiskInfo()
                         setStat("Orphan nodes and null directory pointers removed")
-                    }
-                    catch (e: Exception) {
-                        e.printStackTrace()
-                        popupError(e.toString())
-                    }
-                }
-            }
-        })
-        menuManage.addSeparator()
-        menuManage.add("Estimate Compressed Size").addMouseListener(object : MouseAdapter() {
-            override fun mousePressed(e: MouseEvent?) {
-                if (vdisk != null && selectedFile != null && VDUtil.isFile(vdisk!!, selectedFile!!)) {
-                    try {
-                        popupMessage("Estimated size: ${
-                        DeflateUtil.estimate(VDUtil.getAsNormalFile(vdisk!!, selectedFile!!).bytes)
-                                .bytes()}")
                     }
                     catch (e: Exception) {
                         e.printStackTrace()
@@ -774,8 +774,14 @@ class VirtualDiskCracker(val sysCharset: Charset = Charsets.UTF_8) : JFrame() {
     }
     private fun getDiskInfoText(disk: VirtualDisk): String {
         return """Name: ${String(disk.diskName, sysCharset)}
-Capacity: ${disk.capacity} bytes (${disk.usedBytes} bytes used, ${disk.capacity - disk.usedBytes} bytes free)"""
+Capacity: ${disk.capacity} bytes (${disk.usedBytes} bytes used, ${disk.capacity - disk.usedBytes} bytes free)
+Write protected: ${disk.isReadOnly.toEnglish()}"""
     }
+
+
+    private fun Boolean.toEnglish() = if (this) "Yes" else "No"
+
+
     private fun getFileInfoText(file: DiskEntry): String {
         return """Name: ${file.getFilenameString(sysCharset)}
 Size: ${file.getEffectiveSize()}

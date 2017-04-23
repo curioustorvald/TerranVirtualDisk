@@ -6,6 +6,7 @@ current specversion number: 0x02
 
 ### 0x02
 - 48-Bit filesize and timestamp (Max 256 TiB / 8.9 million years)
+- 8 Reserved footer
 
 ### 0x01
 **Note: this version were never released in public**
@@ -91,5 +92,11 @@ current specversion number: 0x02
 
 ## Footer
     Uint8[4]    0xFE 0xFE 0xFE 0xFE (footer marker)
+    Int8        Disk properties flag 1
+                0b 7 6 5 4 3 2 1 0
+                
+                0th bit: Readonly
+                
+    Int8[7]     Reserved, should be filled with zero
     <optional footer if present>
     Uint8[2]    0xFF 0x19 (EOF mark)

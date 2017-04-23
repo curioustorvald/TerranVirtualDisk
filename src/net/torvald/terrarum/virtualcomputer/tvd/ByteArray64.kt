@@ -18,7 +18,7 @@ class ByteArray64(val size: Long) {
     private val data: Array<ByteArray>
 
     init {
-        if (size <= 0)
+        if (size < 0)
             throw IllegalArgumentException("Invalid array size!")
 
         val requiredBanks: Int = 1 + ((size - 1) / bankSize).toInt()

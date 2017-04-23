@@ -133,6 +133,7 @@ object VDUtil {
         //println("[VDUtil] currentUnixtime = $currentUnixtime")
 
         var entryOffset = VirtualDisk.HEADER_SIZE
+        // not footer, entries
         while (!Arrays.equals(inbytes.sliceArray64(entryOffset..entryOffset + 3).toByteArray(), VirtualDisk.FOOTER_START_MARK)) {
             //println("[VDUtil] entryOffset = $entryOffset")
             // read and prepare all the shits
@@ -214,6 +215,15 @@ object VDUtil {
 
             // add entry to disk
             vdisk.entries[entryID] = diskEntry
+        }
+        // entries ends, footers are to be read
+        run {
+            entryOffset += 4 // skip footer marker
+
+            val footerSize = inbytes.size - entryOffset - VirtualDisk.EOF_MARK.size
+            if (footerSize > 0) {
+                vdisk.__internalSetFooter__(inbytes.sliceArray64(entryOffset..entryOffset + footerSize - 1))
+            }
         }
 
 
