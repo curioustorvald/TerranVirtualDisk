@@ -1,8 +1,11 @@
 # Terran Virtual Disk Image Format Specification
 
-current specversion number: 0x02
+current specversion number: 0x03
 
 ## Changes
+
+### 0x03
+- Option to compress file entry
 
 ### 0x02
 - 48-Bit filesize and timestamp (Max 256 TiB / 8.9 million years)
@@ -63,6 +66,7 @@ current specversion number: 0x02
     Int32       EntryID of parent directory
     Int8        Flag for file or directory or symlink (cannot be negative)
                 0x01: Normal file, 0x02: Directory list, 0x03: Symlink
+                0x11: Compressed normal file
     Uint8[256]  File name in UTF-8
     Int48       Creation date in real-life UNIX timestamp
     Int48       Last modification date in real-life UNIX timestamp
@@ -70,11 +74,18 @@ current specversion number: 0x02
 
     (Header size: 281 bytes)
 
-###  Entry of File
+###  Entry of File (Uncompressed)
     Int48       File size in bytes (max 256 TiB)
     <Bytes>     Actual Contents
     
     (Header size: 6 bytes)
+
+###  Entry of File (Compressed)
+    Int48       Size of compressed payload (max 256 TiB)
+    Int48       Size of uncompressed file (max 256 TiB)
+    <Bytes>     Actual Contents, DEFLATEd payload
+    
+    (Header size: 12 bytes)
 
 ###  Entry of Directory
     Uint16      Number of entries (normal files, other directories, symlinks)

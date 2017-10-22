@@ -13,7 +13,7 @@ import kotlin.experimental.or
 
 typealias EntryID = Int
 
-val specversion = 0x02.toByte()
+val specversion = 0x03.toByte()
 
 class VirtualDisk(
         /** capacity of 0 makes the disk read-only */
@@ -134,6 +134,8 @@ class DiskEntry(
         val NORMAL_FILE = 1.toByte()
         val DIRECTORY =   2.toByte()
         val SYMLINK =     3.toByte()
+        val COMPRESSED_FILE = 0x11.toByte()
+
         private fun DiskEntryContent.getTypeFlag() =
                 if      (this is EntryFile)      NORMAL_FILE
                 else if (this is EntryDirectory) DIRECTORY
@@ -185,7 +187,7 @@ interface DiskEntryContent {
  * Do not retrieve bytes directly from this! Use VDUtil.retrieveFile(DiskEntry)
  * And besides, the bytes could be compressed.
  */
-class EntryFile(internal var bytes: ByteArray64) : DiskEntryContent {
+open class EntryFile(internal var bytes: ByteArray64) : DiskEntryContent {
 
     override fun getSizePure() = bytes.size
     override fun getSizeEntry() = getSizePure() + 6
@@ -196,6 +198,21 @@ class EntryFile(internal var bytes: ByteArray64) : DiskEntryContent {
     override fun serialize(): AppendableByteBuffer {
         val buffer = AppendableByteBuffer(getSizeEntry())
         buffer.put(getSizePure().toInt48())
+        buffer.put(bytes)
+        return buffer
+    }
+}
+class EntryFileCompressed(internal var uncompressedSize: Long, bytes: ByteArray64) : EntryFile(bytes) {
+
+    override fun getSizePure() = bytes.size
+    override fun getSizeEntry() = getSizePure() + 12
+
+    /* No new blank file for the compressed */
+
+    override fun serialize(): AppendableByteBuffer {
+        val buffer = AppendableByteBuffer(getSizeEntry())
+        buffer.put(getSizePure().toInt48())
+        buffer.put(uncompressedSize.toInt48())
         buffer.put(bytes)
         return buffer
     }

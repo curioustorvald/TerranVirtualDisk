@@ -23,10 +23,19 @@ import javax.swing.text.DefaultCaret
  */
 class VirtualDiskCracker(val sysCharset: Charset = Charsets.UTF_8) : JFrame() {
 
+
+    private val annoyHackers = true // Jar build settings. Intended for Terrarum proj.
+
+
     private val PREVIEW_MAX_BYTES = 4L * 1024 // 4 kBytes
 
     private val appName = "TerranVirtualDiskCracker"
     private val copyright = "Copyright 2017 Torvald (minjaesong). Distributed under MIT license."
+
+    private val magicOpen = "I solemnly swear that I am up to no good."
+    private val magicSave = "Mischief managed."
+    private val annoyWhenLaunchMsg = "Type in following to get started:\n$magicOpen"
+    private val annoyWhenSaveMsg = "Type in following to save:\n$magicSave"
 
     private val panelMain = JPanel()
     private val menuBar = JMenuBar()
@@ -77,6 +86,16 @@ class VirtualDiskCracker(val sysCharset: Charset = Charsets.UTF_8) : JFrame() {
     val tableParentRecord = arrayOf(arrayOf("..", "", ""))
 
     init {
+
+        if (annoyHackers) {
+            val mantra = JOptionPane.showInputDialog(annoyWhenLaunchMsg)
+            if (mantra != magicOpen) {
+                System.exit(1)
+            }
+        }
+
+
+
         panelMain.layout = BorderLayout()
         this.defaultCloseOperation = JFrame.EXIT_ON_CLOSE
 
@@ -226,6 +245,18 @@ class VirtualDiskCracker(val sysCharset: Charset = Charsets.UTF_8) : JFrame() {
         menuFile.add("Save Disk as…").addMouseListener(object : MouseAdapter() {
             override fun mousePressed(e: MouseEvent?) {
                 if (vdisk != null) {
+
+
+                    if (annoyHackers) {
+                        val mantra = JOptionPane.showInputDialog(annoyWhenSaveMsg)
+                        if (mantra != magicSave) {
+                            popupError("Nope!")
+                            return
+                        }
+                    }
+
+
+
                     val fileChooser = JFileChooser()
                     fileChooser.showSaveDialog(null)
                     if (fileChooser.selectedFile != null) {

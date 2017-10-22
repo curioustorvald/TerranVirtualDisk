@@ -4,6 +4,7 @@ import java.io.*
 import java.nio.charset.Charset
 import java.util.*
 import java.util.logging.Level
+import java.util.zip.DeflaterOutputStream
 import javax.naming.OperationNotSupportedException
 import kotlin.collections.ArrayList
 
@@ -166,9 +167,10 @@ object VDUtil {
 
             // update entryOffset so that we can fetch next entry in the binary
             entryOffset += DiskEntry.HEADER_SIZE + entryData.size + when (entryTypeFlag) {
-                DiskEntry.NORMAL_FILE -> 6
-                DiskEntry.DIRECTORY   -> 2
-                DiskEntry.SYMLINK     -> 0
+                DiskEntry.COMPRESSED_FILE -> 12 // PLEASE DO REFER TO Spec.md
+                DiskEntry.NORMAL_FILE -> 6      // PLEASE DO REFER TO Spec.md
+                DiskEntry.DIRECTORY   -> 2      // PLEASE DO REFER TO Spec.md
+                DiskEntry.SYMLINK     -> 0      // PLEASE DO REFER TO Spec.md
                 else -> throw RuntimeException("Unknown entry with type $entryTypeFlag")
             }
 
@@ -246,6 +248,7 @@ object VDUtil {
 
 
     fun isFile(disk: VirtualDisk, entryID: EntryID) = disk.entries[entryID]?.contents is EntryFile
+    fun isCompressedFile(disk: VirtualDisk, entryID: EntryID) = disk.entries[entryID]?.contents is EntryFileCompressed
     fun isDirectory(disk: VirtualDisk, entryID: EntryID) = disk.entries[entryID]?.contents is EntryDirectory
     fun isSymlink(disk: VirtualDisk, entryID: EntryID) = disk.entries[entryID]?.contents is EntrySymlink
 
@@ -455,14 +458,16 @@ object VDUtil {
      * Add file to the specified directory.
      * The file will get new EntryID and its ParentID will be overwritten.
      */
-    fun addFile(disk: VirtualDisk, parentPath: VDPath, file: DiskEntry) {
+    fun addFile(disk: VirtualDisk, parentPath: VDPath, file: DiskEntry, compress: Boolean = false) {
         val targetDirID = getFile(disk, parentPath)!!.entryID
-        return addFile(disk, targetDirID, file)
+        return addFile(disk, targetDirID, file, compress)
     }
     /**
      * Add file to the specified directory. ParentID of the file will be overwritten.
+     *
+     * @param compressTheFile Used to compress un-compressed file. Will be ignored if the entry is Dir, Symlink or EntryFileCompressed
      */
-    fun addFile(disk: VirtualDisk, directoryID: EntryID, file: DiskEntry) {
+    fun addFile(disk: VirtualDisk, directoryID: EntryID, file: DiskEntry, compressTheFile: Boolean = false) {
         disk.checkReadOnly()
         disk.checkCapacity(file.serialisedSize)
 
@@ -471,8 +476,22 @@ object VDUtil {
             file.entryID = disk.generateUniqueID()
             // add record to the directory
             getAsDirectory(disk, directoryID).add(file.entryID)
-            // add entry on the disk
-            disk.entries[file.entryID] = file
+
+            // DEFLATE fat boy if marked as
+            if (compressTheFile && file.contents is EntryFile) {
+                /*DeflaterOutputStream()
+
+                val newContent = EntryFileCompressed(file.contents.bytes.size, )
+                val newEntry = DiskEntry(
+                        file.entryID, file.parentEntryID, file.filename, file.creationDate, file.modificationDate,
+                        newContent
+                )*/
+            }
+            // just the add the boy to the house
+            else {
+                disk.entries[file.entryID] = file
+            }
+
             // make this boy recognise his new parent
             file.parentEntryID = directoryID
         }
