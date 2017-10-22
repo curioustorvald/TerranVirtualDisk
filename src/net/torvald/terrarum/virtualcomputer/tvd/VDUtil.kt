@@ -5,6 +5,9 @@ import java.nio.charset.Charset
 import java.util.*
 import java.util.logging.Level
 import java.util.zip.DeflaterOutputStream
+import java.util.zip.GZIPInputStream
+import java.util.zip.GZIPOutputStream
+import java.util.zip.InflaterOutputStream
 import javax.naming.OperationNotSupportedException
 import kotlin.collections.ArrayList
 
@@ -462,6 +465,18 @@ object VDUtil {
         val targetDirID = getFile(disk, parentPath)!!.entryID
         return addFile(disk, targetDirID, file, compress)
     }
+
+    fun randomBase62(length: Int): String {
+        val glyphs = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890"
+        val sb = StringBuilder()
+
+        kotlin.repeat(length) {
+            sb.append(glyphs[(Math.random() * glyphs.length).toInt()])
+        }
+
+        return sb.toString()
+    }
+
     /**
      * Add file to the specified directory. ParentID of the file will be overwritten.
      *
@@ -479,13 +494,44 @@ object VDUtil {
 
             // DEFLATE fat boy if marked as
             if (compressTheFile && file.contents is EntryFile) {
-                /*DeflaterOutputStream()
+                val filename = "./tmp_" + randomBase62(10)
 
-                val newContent = EntryFileCompressed(file.contents.bytes.size, )
+                // dump the deflated bytes to disk
+                file.contents.bytes.forEachBanks {
+                    val fos = BufferedOutputStream(FileOutputStream(filename))
+                    val deflater = DeflaterOutputStream(fos, true)
+
+                    deflater.write(it)
+                    deflater.flush()
+                    deflater.close()
+                }
+
+
+                // read back deflated bytes untouched and store it
+                val tempFile = File(filename)
+                val tempFileFIS = FileInputStream(tempFile)
+                val readBytes = ByteArray64(tempFile.length())
+
+                var c = 0L
+
+                while (true) {
+                    val r = tempFileFIS.read()
+                    if (r == -1) break
+                    else         readBytes[c] = r.toByte()
+
+                    c++
+                }
+
+                tempFileFIS.close()
+
+
+                val newContent = EntryFileCompressed(file.contents.bytes.size, readBytes)
                 val newEntry = DiskEntry(
                         file.entryID, file.parentEntryID, file.filename, file.creationDate, file.modificationDate,
                         newContent
-                )*/
+                )
+
+                disk.entries[file.entryID] = newEntry
             }
             // just the add the boy to the house
             else {
@@ -632,7 +678,20 @@ object VDUtil {
      */
     fun exportFile(entryFile: EntryFile, outfile: File) {
         outfile.createNewFile()
-        outfile.writeBytes64(entryFile.bytes)
+
+        if (entryFile is EntryFileCompressed) {
+            entryFile.bytes.forEachBanks {
+                val fos = FileOutputStream(outfile)
+                val inflater = InflaterOutputStream(fos)
+
+                inflater.write(it)
+                inflater.flush()
+                inflater.close()
+            }
+        }
+        else {
+            outfile.writeBytes64(entryFile.bytes)
+        }
     }
 
     fun exportDirRecurse(disk: VirtualDisk, parentDir: EntryID, outfile: File, charset: Charset) {

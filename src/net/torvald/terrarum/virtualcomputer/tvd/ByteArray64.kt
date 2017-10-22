@@ -14,7 +14,10 @@ import java.io.InputStream
  * Created by Minjaesong on 2017-04-12.
  */
 class ByteArray64(val size: Long) {
-    private val bankSize: Int = 8192
+    companion object {
+        val bankSize: Int = 8192
+    }
+
     private val data: Array<ByteArray>
 
     init {
@@ -96,6 +99,7 @@ class ByteArray64(val size: Long) {
 
     fun forEach(consumer: (Byte) -> Unit) = iterator().forEach { consumer(it) }
     fun forEachInt32(consumer: (Int) -> Unit) = iteratorChoppedToInt().forEach { consumer(it) }
+    fun forEachBanks(consumer: (ByteArray) -> Unit) = data.forEach(consumer)
 
     fun sliceArray64(range: LongRange): ByteArray64 {
         val newarr = ByteArray64(range.last - range.first + 1)
