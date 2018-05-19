@@ -943,6 +943,7 @@ object VDUtil {
 }
 
 fun Byte.toUint() = java.lang.Byte.toUnsignedInt(this)
+fun Byte.toUlong() = java.lang.Byte.toUnsignedLong(this)
 fun magicMismatch(magic: ByteArray, array: ByteArray): Boolean {
     return !Arrays.equals(array, magic)
 }

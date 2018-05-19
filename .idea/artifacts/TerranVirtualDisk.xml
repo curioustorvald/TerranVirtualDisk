@@ -1,6 +1,6 @@
 <component name="ArtifactManager">
   <artifact name="TerranVirtualDisk">
-    <output-path>$PROJECT_DIR$/out/artifacts/TerranVirtualDisk</output-path>
+    <output-path>$PROJECT_DIR$/TerranVirtualDisk</output-path>
     <root id="root">
       <element id="archive" name="TerranVirtualDisk.jar">
         <element id="module-output" name="TerranVDImg" />

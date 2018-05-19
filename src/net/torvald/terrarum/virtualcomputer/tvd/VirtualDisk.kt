@@ -187,7 +187,7 @@ interface DiskEntryContent {
  * Do not retrieve bytes directly from this! Use VDUtil.retrieveFile(DiskEntry)
  * And besides, the bytes could be compressed.
  */
-open class EntryFile(internal var bytes: ByteArray64) : DiskEntryContent {
+open class EntryFile(var bytes: ByteArray64) : DiskEntryContent {
 
     override fun getSizePure() = bytes.size
     override fun getSizeEntry() = getSizePure() + 6
@@ -202,7 +202,7 @@ open class EntryFile(internal var bytes: ByteArray64) : DiskEntryContent {
         return buffer
     }
 }
-class EntryFileCompressed(internal var uncompressedSize: Long, bytes: ByteArray64) : EntryFile(bytes) {
+class EntryFileCompressed(var uncompressedSize: Long, bytes: ByteArray64) : EntryFile(bytes) {
 
     override fun getSizePure() = bytes.size
     override fun getSizeEntry() = getSizePure() + 12
