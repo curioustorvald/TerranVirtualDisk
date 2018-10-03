@@ -1,4 +1,4 @@
-package net.torvald.terrarum.virtualcomputer.tvd
+package net.torvald.terrarum.modulecomputers.virtualcomputer.tvd
 
 import java.io.*
 import java.nio.charset.Charset
@@ -12,7 +12,7 @@ import javax.naming.OperationNotSupportedException
 import kotlin.collections.ArrayList
 
 /**
- * Created by SKYHi14 on 2017-04-01.
+ * Created by minjaesong on 2017-04-01.
  */
 object VDUtil {
     class VDPath() {
@@ -85,12 +85,12 @@ object VDUtil {
         }
     }
 
-    fun File.writeBytes64(array: ByteArray64) {
+    fun File.writeBytes64(array: net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.ByteArray64) {
         array.writeToFile(this)
     }
 
-    fun File.readBytes64(): ByteArray64 {
-        val inbytes = ByteArray64(this.length())
+    fun File.readBytes64(): net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.ByteArray64 {
+        val inbytes = net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.ByteArray64(this.length())
         val inputStream = BufferedInputStream(FileInputStream(this))
         var readInt = inputStream.read()
         var readInCounter = 0L
@@ -510,7 +510,7 @@ object VDUtil {
                 // read back deflated bytes untouched and store it
                 val tempFile = File(filename)
                 val tempFileFIS = FileInputStream(tempFile)
-                val readBytes = ByteArray64(tempFile.length())
+                val readBytes = net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.ByteArray64(tempFile.length())
 
                 var c = 0L
 
@@ -810,6 +810,7 @@ object VDUtil {
         return newEntry.entryID
     }
 
+
     /**
      * Throws an exception if the disk is read-only
      */
@@ -824,7 +825,7 @@ object VDUtil {
         if (this.usedBytes + newSize > this.capacity)
             throw IOException("Not enough space on the disk")
     }
-    fun ByteArray64.toIntBig(): Int {
+    fun net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.ByteArray64.toIntBig(): Int {
         if (this.size != 4L)
             throw OperationNotSupportedException("ByteArray is not Int")
 
@@ -833,7 +834,7 @@ object VDUtil {
         this.forEach { byte -> i += byte.toUint().shl(24 - c * 8); c += 1 }
         return i
     }
-    fun ByteArray64.toInt48Big(): Long {
+    fun net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.ByteArray64.toInt48Big(): Long {
         if (this.size != 6L)
             throw OperationNotSupportedException("ByteArray is not Long")
 
@@ -842,7 +843,7 @@ object VDUtil {
         this.forEach { byte -> i += byte.toUint().shl(40 - c * 8); c += 1 }
         return i
     }
-    fun ByteArray64.toShortBig(): Short {
+    fun net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.ByteArray64.toShortBig(): Short {
         if (this.size != 2L)
             throw OperationNotSupportedException("ByteArray is not Short")
 
@@ -967,15 +968,15 @@ fun ByteArray.toCanonicalString(charset: Charset): String {
     return String(this.sliceArray(0..lastIndexOfRealStr), charset)
 }
 
-fun ArrayList<Byte>.toByteArray64(): ByteArray64 {
-    val array = ByteArray64(this.size.toLong())
+fun ArrayList<Byte>.toByteArray64(): net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.ByteArray64 {
+    val array = net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.ByteArray64(this.size.toLong())
     this.forEachIndexed { index, byte ->
         array[index.toLong()] = byte
     }
     return array
 }
-fun ByteArray.toByteArray64(): ByteArray64 {
-    val array = ByteArray64(this.size.toLong())
+fun ByteArray.toByteArray64(): net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.ByteArray64 {
+    val array = net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.ByteArray64(this.size.toLong())
     this.forEachIndexed { index, byte ->
         array[index.toLong()] = byte
     }

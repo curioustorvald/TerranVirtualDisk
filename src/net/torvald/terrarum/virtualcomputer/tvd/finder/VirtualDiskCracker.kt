@@ -1,7 +1,6 @@
-package net.torvald.terrarum.virtualcomputer.tvd.finder
+package net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.finder
 
-import net.torvald.terrarum.virtualcomputer.tvd.*
-import net.torvald.terrarum.virtualcomputer.tvd.VDUtil.writeBytes64
+import net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.*
 import java.awt.BorderLayout
 import java.awt.Dimension
 import java.awt.event.KeyEvent
