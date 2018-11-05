@@ -18,6 +18,10 @@ class ByteArray64(val size: Long) {
         val bankSize: Int = 8192
     }
 
+    /**
+     * Byte size is guaraeteed to be equal to the val size.
+     * In other words, endmost ByteArray can be smaller than the banksize
+     */
     private val data: Array<ByteArray>
 
     init {
@@ -26,19 +30,13 @@ class ByteArray64(val size: Long) {
 
         val requiredBanks: Int = 1 + ((size - 1) / bankSize).toInt()
 
-        data = Array<ByteArray>(
-                requiredBanks,
-                { bankIndex ->
-                    kotlin.ByteArray(
-                            if (bankIndex == requiredBanks - 1)
-                                size.toBankOffset()
-                            else
-                                bankSize,
+        data = Array<ByteArray>(requiredBanks) { bankIndex ->
+            kotlin.ByteArray(if (bankIndex == requiredBanks - 1)
+                size.toBankOffset()
+            else bankSize, { 0.toByte() }
+            )
+        }
 
-                            { 0.toByte() }
-                    )
-                }
-        )
     }
 
     private fun Long.toBankNumber(): Int = (this / bankSize).toInt()

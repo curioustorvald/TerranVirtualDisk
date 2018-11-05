@@ -1,16 +1,13 @@
 package net.torvald.terrarum.modulecomputers.virtualcomputer.tvd
 
-import net.torvald.terrarum.serialise.toLittleInt
-import java.io.File
-import java.io.FileInputStream
-import java.io.InputStream
+import java.io.*
 
 /**
  * Creates entry-to-offset tables to allow streaming from the disk, without storing whole VD file to the memory.
  *
  * Created by minjaesong on 2017-11-17.
  */
-class DiskSkimmer(private val diskFile: File) {
+class DiskSkimmer(private var diskFile: File) {
 
 
     /**
@@ -18,7 +15,11 @@ class DiskSkimmer(private val diskFile: File) {
      *
      * Offset is where the header begins, so first 4 bytes are exactly the same as the EntryID.
      */
-    val entryToOffsetTable = HashMap<EntryID, Long>()
+    var entryToOffsetTable = HashMap<EntryID, Long>()
+    var footerPosition: Long = 0L
+
+    val footerSize: Int
+        get() = (diskFile.length() - footerPosition).toInt()
 
 
     init {
@@ -66,7 +67,10 @@ class DiskSkimmer(private val diskFile: File) {
             val entryID = readIntBig()
 
             // footer
-            if (entryID == 0xFEFEFEFE.toInt()) break
+            if (entryID == 0xFEFEFEFE.toInt()) {
+                footerPosition = currentPosition
+                break
+            }
 
 
             // fill up table
@@ -93,6 +97,9 @@ class DiskSkimmer(private val diskFile: File) {
         }
     }
 
+    //////////////////////////////////////////////////
+    // THESE ARE METHODS TO SUPPORT ON-LINE READING //
+    //////////////////////////////////////////////////
 
     /**
      * Using entryToOffsetTable, composes DiskEntry on the fly upon request.
@@ -106,14 +113,14 @@ class DiskSkimmer(private val diskFile: File) {
             else {
                 val fis = FileInputStream(diskFile)
                 fis.skip(offset + 4) // get to the EntryHeader's parent directory area
-                val parent = fis.read(4).toLittleInt()
+                val parent = fis.read(4).toIntBig()
                 val fileFlag = fis.read(1)[0]
                 val filename = fis.read(256)
                 val creationTime = fis.read(6).toInt48()
                 val modifyTime = fis.read(6).toInt48()
                 val skip_crc = fis.read(4)
 
-                // get entry size     // TODO future me, does this kind of comment helpful or redundant?
+                // get entry size     // TODO future me, is this kind of comment helpful or redundant?
                 val entrySize = when (fileFlag) {
                     DiskEntry.NORMAL_FILE -> {
                         fis.read(6).toInt48()
@@ -159,6 +166,117 @@ class DiskSkimmer(private val diskFile: File) {
             }
         }
     }
+
+    ///////////////////////////////////////////////////////
+    // THESE ARE METHODS TO SUPPORT ON-LINE MODIFICATION //
+    ///////////////////////////////////////////////////////
+
+    fun appendEntry(entry: DiskEntry) = appendEntries(listOf(entry))
+
+    fun appendEntries(entries: List<DiskEntry>): Boolean {
+        // FIXME untested
+
+        // buffer the footer
+        // define newFooterPos = 0
+        // define newEntryOffsetTable = entryToOffsetTable.clone()
+        // make new diskFile_tmp such that:
+        //      try :
+        //          copy (0 until footerPosition) bytes to the tmpfile -> throws IOException
+        //          serialise newly adding entries -> throws IOException
+        //          update newEntryOffsetTable
+        //          copy (footerPosition until file.length) bytes to the tmpfile -> throws IOException
+        //          set newFooterPos
+        //      catch IOException:
+        //          return false
+        // try:
+        //      move diskFile to diskFile_old -> throws IOException
+        //      move diskFile_tmp to diskFile -> throws IOException
+        //      delete diskFile_old -> throws IOException
+        // catch IOException:
+        //      try:
+        //          if (diskFile_old) exists, rename diskFile_old to diskFile -> throws IOException
+        //      catch IOException:
+        //          do nothing
+        //      return false
+        // footerPosition = newFooterPos
+        // entryToOffsetTable = newEntryOffsetTable
+        // return true
+
+
+        var newFooterPos = 0L
+        val originalFile = diskFile.absoluteFile
+        val newEntryOffsetTable = entryToOffsetTable.clone() as HashMap<EntryID, Long>
+        val tmpFile = File(originalFile.absolutePath + "_tmp")
+        val oldFile = File(originalFile.absolutePath + "_old")
+
+
+        // buffer the footer
+        val fis = FileInputStream(diskFile)
+        fis.skip(footerPosition)
+        val footerBytes = fis.read(footerSize)
+        fis.close()
+
+
+        // make tmpfile
+        try {
+            val tmpOut = BufferedOutputStream(FileOutputStream(tmpFile))
+            val oldIn = BufferedInputStream(FileInputStream(diskFile))
+            var entryCounter = footerPosition
+            for (c in 0 until footerPosition) {
+                tmpOut.write(oldIn.read())
+            }
+            entries.forEach { entry ->
+                val bytes = entry.serialize().array
+
+                // update newEntryOffsetTable
+                newEntryOffsetTable[entry.entryID] = entryCounter
+
+                // actually copy the bytes
+                bytes.forEachBanks { tmpOut.write(it) }
+
+                // update counter
+                entryCounter += bytes.size
+            }
+            tmpOut.write(footerBytes)
+
+            tmpOut.flush(); tmpOut.close()
+            oldIn.close()
+
+            // at this point, entryCounter should rightfully point the new footer position
+            newFooterPos = entryCounter
+        }
+        catch (e: IOException) {
+            return false
+        }
+
+        // replace tmpFile with original file
+        try {
+            oldFile.delete()
+            val suc1 = diskFile.renameTo(oldFile)
+            val suc2 = tmpFile.renameTo(originalFile)
+            if (!suc1 or !suc2) return false
+
+            diskFile = tmpFile
+        }
+        catch (e: IOException) {
+            // try to recover from failure
+            try {
+                if (oldFile.exists()) {
+                    oldFile.renameTo(originalFile)
+                }
+            }
+            catch (e: Throwable) {  }
+            return false
+        }
+
+
+        footerPosition = newFooterPos
+        entryToOffsetTable = newEntryOffsetTable
+        return true
+
+    }
+
+
 
     companion object {
         fun InputStream.read(size: Int): ByteArray {
