@@ -25,3 +25,7 @@ hs_err_pid*
 
 /out/
 /.idea/workspace.xml
+
+# artifacts build directory
+
+/TerranVirtualDisk/

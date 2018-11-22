@@ -29,7 +29,7 @@ class VirtualDiskCracker(val sysCharset: Charset = Charsets.UTF_8) : JFrame() {
     private val PREVIEW_MAX_BYTES = 4L * 1024 // 4 kBytes
 
     private val appName = "TerranVirtualDiskCracker"
-    private val copyright = "Copyright 2017 Torvald (minjaesong). Distributed under MIT license."
+    private val copyright = "Copyright 2017-18 Torvald (minjaesong). Distributed under MIT license."
 
     private val magicOpen = "I solemnly swear that I am up to no good."
     private val magicSave = "Mischief managed."
