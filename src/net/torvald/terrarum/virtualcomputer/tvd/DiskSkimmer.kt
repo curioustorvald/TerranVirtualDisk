@@ -13,7 +13,7 @@ import java.nio.charset.Charset
  *
  * Created by minjaesong on 2017-11-17.
  */
-class DiskSkimmer(private var diskFile: File) {
+class DiskSkimmer(private var diskFile: File, val charset: Charset = Charset.defaultCharset()) {
 
 
     /**
@@ -63,6 +63,12 @@ class DiskSkimmer(private var diskFile: File) {
             currentPosition += readStatus
             return readStatus
         }
+        fun readUshortBig(): Int {
+            val buffer = ByteArray(2)
+            val readStatus = readBytes(buffer)
+            if (readStatus != 2) throw InternalError("Unexpected error -- EOF reached? (expected 4, got $readStatus)")
+            return buffer.toUint16()
+        }
         fun readIntBig(): Int {
             val buffer = ByteArray(4)
             val readStatus = readBytes(buffer)
@@ -95,7 +101,7 @@ class DiskSkimmer(private var diskFile: File) {
             val nameBytes = ByteArray(256); readBytes(nameBytes) // read and store to the bytearray
 
             // fill up the tree's edges table
-            directoryStruct.add(DirectoryEdge(parentID, entryID, entryType, nameBytes.toString(Charset.defaultCharset())))
+            directoryStruct.add(DirectoryEdge(parentID, entryID, entryType, nameBytes.toCanonicalString(charset)))
 
             skipRead(6 + 6 + 4) // skips rest of the header
 
@@ -104,35 +110,26 @@ class DiskSkimmer(private var diskFile: File) {
             val entrySize: Long = when(entryType) {
                 0x01.toByte() -> readInt48()
                 0x11.toByte() -> readInt48() + 6 // size of compressed payload + 6 (header elem for uncompressed size)
-                0x02.toByte() -> readIntBig().shl(16).toLong() * 4 - 2 // #entris is 2 bytes, we read 4 bytes, so we subtract 2
+                0x02.toByte() -> readUshortBig() * 4L
                 0x03.toByte() -> 4 // symlink
                 else -> throw InternalError("Unknown entry type: ${entryType.toUint()}")
             }
 
 
             skipRead(entrySize) // skips rest of the entry's actual contents
+
+            println("[DiskSkimmer] successfully read the entry $entryID (name: ${nameBytes.toCanonicalString(charset)})")
         }
 
 
         // construct directory tree from the edges
 
-        /* https://stackoverflow.com/questions/11741825/build-tree-from-edges#11861492
-        initially construct a hash map to store elements that are there in tree : H, add the root (null in your case/
-        or anything that represent that root)
-
-        taking the pair (_child, _parent)
-
-            1. loop through the whole list. in the list. (each pair is the element)
-
-            2. for each pair, see if the _child and _parent is there in the hash map H, if you dont find, create the
-               tree node for the missing ones and add them to H , and link them with the parent child relationship.
-
-            3. you will be left with the tree at the end of iteration.
+        /*
          */
 
         val nodes = HashSet<DirectoryNode>()
         directoryStruct.forEach {
-
+            // TODO
         }
     }
 
@@ -145,13 +142,12 @@ class DiskSkimmer(private var diskFile: File) {
      * @return DiskEntry if the entry exists on the disk, `null` otherwise.
      */
     fun requestFile(entryID: EntryID): DiskEntry? {
-        // FIXME untested
         entryToOffsetTable[entryID].let { offset ->
             if (offset == null)
                 return null
             else {
                 val fis = FileInputStream(diskFile)
-                fis.skip(offset + 4) // get to the EntryHeader's parent directory area
+                fis.skip(offset) // get to the EntryHeader's parent directory area
                 val parent = fis.read(4).toIntBig()
                 val fileFlag = fis.read(1)[0]
                 val filename = fis.read(256)
@@ -206,8 +202,30 @@ class DiskSkimmer(private var diskFile: File) {
         }
     }
 
+    /**
+     * Try to find a file with given path (which uses '/' as a separator). Is search is failed for whatever reason,
+     * `null` is returned.
+     *
+     * @param path A path to the file from the root, directory separated with '/' (and not '\')
+     * @return DiskEntry if the search was successful, `null` otherwise
+     */
     fun requestFile(path: String): DiskEntry? {
+        val path = path.split('/')
 
+        var traversedDir = 0 // entry ID
+        path.forEachIndexed { index, dirName ->
+            val dirFile = requestFile(traversedDir)
+            if (dirFile == null) return null // outright null
+            if (dirFile.contents !is EntryDirectory && index < path.lastIndex) // unexpectedly encountered non-directory
+                return null // because other than the last path, everything should be directory (think about it!)
+            if (index == path.lastIndex) return dirFile // reached the end of the search strings
+
+            // still got more paths behind to traverse
+            (dirFile.contents as EntryDirectory)
+        }
+
+        // TODO
+        return null
     }
 
     ///////////////////////////////////////////////////////

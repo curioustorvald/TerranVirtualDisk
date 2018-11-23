@@ -1,6 +1,7 @@
 package net.torvald.terrarum.virtualcomputer.tvd
 
 import java.io.File
+import java.nio.charset.Charset
 
 object DiskSkimmerTest {
 
@@ -35,7 +36,14 @@ Mischief Managed.
         val skimmer = DiskSkimmer(infile)
 
         // step 0
-        skimmer.
-    }
+        val testfile = skimmer.requestFile(1403168679)!!
+        println((testfile.contents as EntryFile).bytes.toByteArray().toString(Charset.defaultCharset()))
 
+        val testfile2 = skimmer.requestFile(-1483001307)!!
+        println((testfile2.contents as EntryFile).bytes.toByteArray().toString(Charset.defaultCharset()))
+    }
+}
+
+fun main(args: Array<String>) {
+    DiskSkimmerTest()
 }
