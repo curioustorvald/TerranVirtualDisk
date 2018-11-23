@@ -1,6 +1,6 @@
-package net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.finder
+package net.torvald.terrarum.virtualcomputer.tvd.finder
 
-import net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.*
+import net.torvald.terrarum.virtualcomputer.tvd.*
 import java.awt.BorderLayout
 import java.awt.Dimension
 import java.awt.event.KeyEvent
@@ -480,7 +480,7 @@ class VirtualDiskCracker(val sysCharset: Charset = Charsets.UTF_8) : JFrame() {
 
         })
         menuEdit.addSeparator()
-        menuEdit.add("Import…").addMouseListener(object : MouseAdapter() {
+        menuEdit.add("Import Files/Folders…").addMouseListener(object : MouseAdapter() {
             override fun mousePressed(e: MouseEvent?) {
                 if (vdisk != null) {
                     val fileChooser = JFileChooser()

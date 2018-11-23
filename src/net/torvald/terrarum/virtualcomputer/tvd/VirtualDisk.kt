@@ -1,4 +1,4 @@
-package net.torvald.terrarum.modulecomputers.virtualcomputer.tvd
+package net.torvald.terrarum.virtualcomputer.tvd
 
 import java.io.IOException
 import java.nio.charset.Charset
@@ -19,9 +19,9 @@ class VirtualDisk(
         /** capacity of 0 makes the disk read-only */
         var capacity: Long,
         var diskName: ByteArray = ByteArray(NAME_LENGTH),
-        footer: net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.ByteArray64 = net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.ByteArray64(8) // default to mandatory 8-byte footer
+        footer: ByteArray64 = ByteArray64(8) // default to mandatory 8-byte footer
 ) {
-    var footerBytes: net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.ByteArray64 = footer
+    var footerBytes: ByteArray64 = footer
         private set
     val entries = HashMap<EntryID, DiskEntry>()
     var isReadOnly: Boolean
@@ -34,18 +34,18 @@ class VirtualDisk(
 
     private fun Boolean.toBit() = if (this) 1.toByte() else 0.toByte()
 
-    internal fun __internalSetFooter__(footer: net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.ByteArray64) {
+    internal fun __internalSetFooter__(footer: ByteArray64) {
         footerBytes = footer
     }
 
-    private fun serializeEntriesOnly(): net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.ByteArray64 {
+    private fun serializeEntriesOnly(): ByteArray64 {
         val bufferList = ArrayList<Byte>() // FIXME this part would take up excessive memory for large files
         entries.forEach {
             val serialised = it.value.serialize()
             serialised.forEach { bufferList.add(it) }
         }
 
-        val byteArray = net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.ByteArray64(bufferList.size.toLong())
+        val byteArray = ByteArray64(bufferList.size.toLong())
         bufferList.forEachIndexed { index, byte -> byteArray[index.toLong()] = byte }
         return byteArray
     }
@@ -187,13 +187,13 @@ interface DiskEntryContent {
  * Do not retrieve bytes directly from this! Use VDUtil.retrieveFile(DiskEntry)
  * And besides, the bytes could be compressed.
  */
-open class EntryFile(internal var bytes: net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.ByteArray64) : DiskEntryContent {
+open class EntryFile(internal var bytes: ByteArray64) : DiskEntryContent {
 
     override fun getSizePure() = bytes.size
     override fun getSizeEntry() = getSizePure() + 6
 
     /** Create new blank file */
-    constructor(size: Long): this(net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.ByteArray64(size))
+    constructor(size: Long): this(ByteArray64(size))
 
     override fun serialize(): AppendableByteBuffer {
         val buffer = AppendableByteBuffer(getSizeEntry())
@@ -202,7 +202,7 @@ open class EntryFile(internal var bytes: net.torvald.terrarum.modulecomputers.vi
         return buffer
     }
 }
-class EntryFileCompressed(internal var uncompressedSize: Long, bytes: net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.ByteArray64) : EntryFile(bytes) {
+class EntryFileCompressed(internal var uncompressedSize: Long, bytes: ByteArray64) : EntryFile(bytes) {
 
     override fun getSizePure() = bytes.size
     override fun getSizeEntry() = getSizePure() + 12
@@ -285,10 +285,10 @@ fun AppendableByteBuffer.getCRC32(): Int {
     return crc.value.toInt()
 }
 class AppendableByteBuffer(val size: Long) {
-    val array = net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.ByteArray64(size)
+    val array = ByteArray64(size)
     private var offset = 0L
 
-    fun put(byteArray64: net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.ByteArray64): AppendableByteBuffer {
+    fun put(byteArray64: ByteArray64): AppendableByteBuffer {
         // it's slow but works
         // can't do system.arrayCopy directly
         byteArray64.forEach { put(it) }
