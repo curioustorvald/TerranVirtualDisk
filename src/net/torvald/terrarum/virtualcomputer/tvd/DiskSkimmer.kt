@@ -1,9 +1,15 @@
 package net.torvald.terrarum.virtualcomputer.tvd
 
 import java.io.*
+import java.nio.charset.Charset
 
 /**
  * Creates entry-to-offset tables to allow streaming from the disk, without storing whole VD file to the memory.
+ *
+ * Skimming is only useful for limited applications, reading/adding/removing one or two files occasionally.
+ *
+ * IO Operation using the skimmer has huge overheads for every operation. For large operations, use VDUtil to load the
+ * entire disk onto the memory and modify the disk as much as you want, then export the changes as a new file.
  *
  * Created by minjaesong on 2017-11-17.
  */
@@ -15,12 +21,20 @@ class DiskSkimmer(private var diskFile: File) {
      *
      * Offset is where the header begins, so first 4 bytes are exactly the same as the EntryID.
      */
-    var entryToOffsetTable = HashMap<EntryID, Long>()
-    var footerPosition: Long = 0L
+    private var entryToOffsetTable = HashMap<EntryID, Long>()
+    private var footerPosition: Long = 0L
 
-    val footerSize: Int
+    private val footerSize: Int
         get() = (diskFile.length() - footerPosition).toInt()
 
+    /** temporary storage to store tree edges */
+    private var directoryStruct = ArrayList<DirectoryEdge>()
+
+    /** root node of the directory tree */
+    private var directory = DirectoryNode(0, null, DiskEntry.DIRECTORY, "")
+
+    private data class DirectoryEdge(val nodeParent: EntryID, val node: EntryID, val type: Byte, val name: String)
+    private data class DirectoryNode(var nodeThis: EntryID, val nodeParent: EntryID?, var type: Byte, var name: String)
 
     init {
         val fis = FileInputStream(diskFile)
@@ -73,14 +87,17 @@ class DiskSkimmer(private var diskFile: File) {
             }
 
 
-            // fill up table
+            // fill up the offset table
             entryToOffsetTable[entryID] = currentPosition
 
-            skipRead(4) // skip entryID of parent
-
+            val parentID = readIntBig()
             val entryType = readByte()
+            val nameBytes = ByteArray(256); readBytes(nameBytes) // read and store to the bytearray
 
-            skipRead(256 + 6 + 6 + 4) // skips rest of the header
+            // fill up the tree's edges table
+            directoryStruct.add(DirectoryEdge(parentID, entryID, entryType, nameBytes.toString(Charset.defaultCharset())))
+
+            skipRead(6 + 6 + 4) // skips rest of the header
 
 
             // figure out the entry size so that we can skip
@@ -94,6 +111,28 @@ class DiskSkimmer(private var diskFile: File) {
 
 
             skipRead(entrySize) // skips rest of the entry's actual contents
+        }
+
+
+        // construct directory tree from the edges
+
+        /* https://stackoverflow.com/questions/11741825/build-tree-from-edges#11861492
+        initially construct a hash map to store elements that are there in tree : H, add the root (null in your case/
+        or anything that represent that root)
+
+        taking the pair (_child, _parent)
+
+            1. loop through the whole list. in the list. (each pair is the element)
+
+            2. for each pair, see if the _child and _parent is there in the hash map H, if you dont find, create the
+               tree node for the missing ones and add them to H , and link them with the parent child relationship.
+
+            3. you will be left with the tree at the end of iteration.
+         */
+
+        val nodes = HashSet<DirectoryNode>()
+        directoryStruct.forEach {
+
         }
     }
 
@@ -165,6 +204,10 @@ class DiskSkimmer(private var diskFile: File) {
                 return DiskEntry(entryID, parent, filename, creationTime, modifyTime, entryContent)
             }
         }
+    }
+
+    fun requestFile(path: String): DiskEntry? {
+
     }
 
     ///////////////////////////////////////////////////////
@@ -275,7 +318,6 @@ class DiskSkimmer(private var diskFile: File) {
         return true
 
     }
-
 
 
     companion object {
