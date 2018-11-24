@@ -724,7 +724,7 @@ class VirtualDiskCracker(val sysCharset: Charset = Charsets.UTF_8) : JFrame() {
         panelFileDesc.add(fileDescScroll, BorderLayout.CENTER)
 
         val filesSplit = JSplitPane(JSplitPane.HORIZONTAL_SPLIT, panelFinder, panelFileDesc)
-        filesSplit.resizeWeight = 0.714285
+        filesSplit.resizeWeight = 0.571428
 
 
         val panelDiskOp = JPanel(BorderLayout(2, 2))

@@ -37,6 +37,8 @@ class DiskSkimmer(private var diskFile: File, val charset: Charset = Charset.def
     private data class DirectoryNode(var nodeThis: EntryID, val nodeParent: EntryID?, var type: Byte, var name: String)
 
     init {
+        println("[DiskSkimmer] loading the diskfile ${diskFile.canonicalPath}")
+
         val fis = FileInputStream(diskFile)
         var currentPosition = fis.skip(47) // skip disk header
 
@@ -211,21 +213,42 @@ class DiskSkimmer(private var diskFile: File, val charset: Charset = Charset.def
      */
     fun requestFile(path: String): DiskEntry? {
         val path = path.split('/')
+        //println(path)
 
+        // bunch-of-io-access approach (for reading)
         var traversedDir = 0 // entry ID
+        var dirFile: DiskEntry? = null
         path.forEachIndexed { index, dirName ->
-            val dirFile = requestFile(traversedDir)
+            dirFile = requestFile(traversedDir)
             if (dirFile == null) return null // outright null
-            if (dirFile.contents !is EntryDirectory && index < path.lastIndex) // unexpectedly encountered non-directory
+            if (dirFile!!.contents !is EntryDirectory && index < path.lastIndex) // unexpectedly encountered non-directory
                 return null // because other than the last path, everything should be directory (think about it!)
-            if (index == path.lastIndex) return dirFile // reached the end of the search strings
+            //if (index == path.lastIndex) return dirFile // reached the end of the search strings
 
             // still got more paths behind to traverse
-            (dirFile.contents as EntryDirectory)
+            var dirGotcha = false
+            var gotNull = false
+            // loop for current dir contents
+            (dirFile!!.contents as EntryDirectory).forEach {
+                if (!dirGotcha) { // alternative impl of 'break' as it's not allowed
+                    // get name of the file
+                    val childDirFile = requestFile(it)
+                    if (childDirFile == null) {
+                        dirGotcha = true
+                        gotNull = true
+                    }
+                    else if (childDirFile.filename.toCanonicalString(charset) == dirName) {
+                        //println("[DiskSkimmer] found, $traversedDir -> $it")
+                        dirGotcha = true
+                        traversedDir = it
+                    }
+                }
+            }
+
+            if (gotNull) return null
         }
 
-        // TODO
-        return null
+        return requestFile(traversedDir)
     }
 
     ///////////////////////////////////////////////////////

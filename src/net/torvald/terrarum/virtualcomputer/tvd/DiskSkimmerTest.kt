@@ -2,6 +2,8 @@ package net.torvald.terrarum.virtualcomputer.tvd
 
 import java.io.File
 import java.nio.charset.Charset
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
 
 object DiskSkimmerTest {
 
@@ -17,8 +19,10 @@ object DiskSkimmerTest {
      * Testing of DiskSkimmer
      */
     fun invoke00() {
-        val infile = File("./test-assets/tevd-test-suite-00.tevd")
+        val _infile = File("./test-assets/tevd-test-suite-00.tevd")
         val outfile = File("./test-assets/tevd-test-suite-00_results.tevd")
+
+        Files.copy(_infile.toPath(), outfile.toPath(), StandardCopyOption.REPLACE_EXISTING)
 
 /*
 Copied from instruction.txt
@@ -33,7 +37,7 @@ Expected console output:
 
 Mischief Managed.
  */
-        val skimmer = DiskSkimmer(infile)
+        val skimmer = DiskSkimmer(outfile)
 
         // step 0
         val testfile = skimmer.requestFile(1403168679)!!
@@ -41,6 +45,14 @@ Mischief Managed.
 
         val testfile2 = skimmer.requestFile(-1483001307)!!
         println((testfile2.contents as EntryFile).bytes.toByteArray().toString(Charset.defaultCharset()))
+
+        val testfile3 = skimmer.requestFile("01_preamble/append-after-me")!!
+        println((testfile3.contents as EntryFile).bytes.toByteArray().toString(Charset.defaultCharset()))
+
+
+        println("=============================")
+
+        // step 1
     }
 }
 
