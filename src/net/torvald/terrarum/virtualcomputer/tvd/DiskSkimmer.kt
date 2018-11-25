@@ -2,6 +2,8 @@ package net.torvald.terrarum.virtualcomputer.tvd
 
 import java.io.*
 import java.nio.charset.Charset
+import java.util.*
+import kotlin.collections.HashMap
 
 /**
  * Creates entry-to-offset tables to allow streaming from the disk, without storing whole VD file to the memory.
@@ -35,6 +37,9 @@ class DiskSkimmer(private var diskFile: File, val charset: Charset = Charset.def
 
     private data class DirectoryEdge(val nodeParent: EntryID, val node: EntryID, val type: Byte, val name: String)
     private data class DirectoryNode(var nodeThis: EntryID, val nodeParent: EntryID?, var type: Byte, var name: String)
+
+    private val dirDelim = Regex("""[\\/]""")
+    private val DIR = "/"
 
     init {
         println("[DiskSkimmer] loading the diskfile ${diskFile.canonicalPath}")
@@ -212,7 +217,7 @@ class DiskSkimmer(private var diskFile: File, val charset: Charset = Charset.def
      * @return DiskEntry if the search was successful, `null` otherwise
      */
     fun requestFile(path: String): DiskEntry? {
-        val path = path.split('/')
+        val path = path.split(dirDelim)
         //println(path)
 
         // bunch-of-io-access approach (for reading)
@@ -295,20 +300,18 @@ class DiskSkimmer(private var diskFile: File, val charset: Charset = Charset.def
 
 
         // buffer the footer
-        val fis = FileInputStream(diskFile)
-        fis.skip(footerPosition)
-        val footerBytes = fis.read(footerSize)
-        fis.close()
+        val footerBytes = fetchFooterBytes(diskFile)
 
 
         // make tmpfile
         try {
             val tmpOut = BufferedOutputStream(FileOutputStream(tmpFile))
             val oldIn = BufferedInputStream(FileInputStream(diskFile))
-            var entryCounter = footerPosition
-            for (c in 0 until footerPosition) {
-                tmpOut.write(oldIn.read())
-            }
+            var entryCounter = footerPosition // a counter to set new footer position
+            // copy old bytes minus the footer
+            byteByByteCopy(footerPosition, oldIn, tmpOut)
+
+
             entries.forEach { entry ->
                 val bytes = entry.serialize().array
 
@@ -333,7 +336,271 @@ class DiskSkimmer(private var diskFile: File, val charset: Charset = Charset.def
             return false
         }
 
+
         // replace tmpFile with original file
+        if (!replaceTempFileWithOriginal(oldFile, originalFile, tmpFile)) return false
+        // if TRUE is retuned, ignore the return value
+
+
+        footerPosition = newFooterPos
+        entryToOffsetTable = newEntryOffsetTable
+        return true
+
+    }
+
+    fun deleteEntry(entry: EntryID) = deleteEntries(listOf(entry))
+
+    fun deleteEntries(entries: List<EntryID>): Boolean {
+        // FIXME untested
+
+        // buffer the footer
+        // define newFooterPos = 0
+        // define newEntryOffsetTable = entryToOffsetTable.clone()
+        // make new diskFile_tmp such that:
+        //      try :
+        //          copy header into the tmpfile -> throws IOException
+        //          copy all the surviving entries ONE BY ONE into the tmpfile -> throws IOException
+        //          update newEntryOffsetTable
+        //          copy (footerPosition until file.length) bytes to the tmpfile -> throws IOException
+        //      catch IOException:
+        //          return false
+        // try:
+        //      move diskFile to diskFile_old -> throws IOException
+        //      move diskFile_tmp to diskFile -> throws IOException
+        //      delete diskFile_old -> throws IOException
+        // catch IOException:
+        //      try:
+        //          if (diskFile_old) exists, rename diskFile_old to diskFile -> throws IOException
+        //      catch IOException:
+        //          do nothing
+        //      return false
+        // footerPosition = newFooterPos
+        // entryToOffsetTable = newEntryOffsetTable
+        // return true
+
+        var newFooterPos = VirtualDisk.HEADER_SIZE
+        val originalFile = diskFile.absoluteFile
+        val newEntryOffsetTable = entryToOffsetTable.clone() as HashMap<EntryID, Long>
+        val tmpFile = File(originalFile.absolutePath + "_tmp")
+        val oldFile = File(originalFile.absolutePath + "_old")
+
+        // buffer the footer
+        val footerBytes = fetchFooterBytes(diskFile)
+
+
+        // make tmpfile
+        try {
+            val tmpOut = BufferedOutputStream(FileOutputStream(tmpFile))
+            val oldIn = BufferedInputStream(FileInputStream(diskFile))
+
+            oldIn.mark(-1) // mark at pos zero
+
+            // copy header
+            tmpOut.write(oldIn.read(VirtualDisk.HEADER_SIZE.toInt()))
+
+            // copy entries one by one //
+
+            //// construct new offset table that excludes to-be-deleted entries
+            entries.forEach { newEntryOffsetTable.remove(it) }
+
+            // copy root entry (the root entry has fixed position on the disk)
+            val rootSize = getEntryBlockSize(0)!!
+            byteByByteCopy(rootSize, oldIn, tmpOut)
+            // update footer position
+            newFooterPos += rootSize
+
+            // copy non-root entry
+            newEntryOffsetTable.forEach { id, offset ->
+                if (id != 0) { // remember, the root entry has fixed position!
+                    val size = getEntryBlockSize(id)!!
+                    oldIn.reset() // return to pos zero
+                    oldIn.skip(offset)
+                    byteByByteCopy(size, oldIn, tmpOut)
+
+                    // update footer position
+                    newFooterPos += size
+                }
+            }
+
+            // update offset table
+            entryToOffsetTable = newEntryOffsetTable
+
+            // write footer
+            tmpOut.write(footerBytes)
+
+            tmpOut.flush()
+            tmpOut.close()
+            oldIn.close()
+        }
+        catch (e: IOException) {
+            return false
+        }
+
+
+        // replace tmpFile with original file
+        if (!replaceTempFileWithOriginal(oldFile, originalFile, tmpFile)) return false
+        // if TRUE is retuned, ignore the return value
+
+
+        footerPosition = newFooterPos
+        entryToOffsetTable = newEntryOffsetTable
+        return true
+    }
+
+    /**
+     * Creates a new file. Nonexisting directories will be automatically constructed.
+     * The path cannot contain any symlinks.
+     *
+     * Also cannot create a directory with this.
+     *
+     * @return newly created entry's ID
+     */
+    fun createNewFile(fullPath: String, bytes: ByteArray64, overwriteExisting: Boolean = false): EntryID {
+        val path = fullPath.split(dirDelim)
+
+        // figure out number of nonexisting dirs PLUS ONE (for the file itself)
+        // the number is equivalent to nonexisting portion of "tails" of the path
+        var nonTails = 0 // zero: the file already exists; non-zero: at least the target file does not exist
+        var appendParent = 0 // add nonexisting "tails" after this entry; if (nonTails == 0), the value is the conflicting file
+        for (i in path.lastIndex downTo 0) { // 0: a random directory inside of root; lastIndex: a file we're going to create
+            val searchPath = path.subList(0, i + 1).joinToString(DIR)
+            val searchResult = requestFile(searchPath)
+            if (searchResult != null) {
+                appendParent = searchResult.entryID
+                break
+            }
+            else {
+                nonTails += 1
+            }
+        }
+
+        // construct nonexisting entries
+        if (nonTails != 0) {
+            // traverse backwards:
+            //     file
+            //     newdir : file
+            //     newdir : newdir : file
+            //     (you get the idea)
+
+            var bottomupFile = DiskEntry(
+                    generateUniqueID(),
+                    if (nonTails == 1) appendParent else generateUniqueID(),
+                    path.last().toEntryName(256, charset),
+                    VDUtil.currentUnixtime,
+                    VDUtil.currentUnixtime,
+                    EntryFile(bytes)
+            )
+            val returnEntryID = bottomupFile.entryID
+            val entriesToWrite = ArrayList<DiskEntry>()
+            path.takeLast(nonTails).reversed().forEachIndexed { index, s ->
+                // a file
+                if (index == 0) {
+                    /*bottomupFile = DiskEntry(
+                            generateUniqueID(),
+                            generateUniqueID(),
+                            path[path.lastIndex - index].toByteArray(charset),
+                            VDUtil.currentUnixtime,
+                            VDUtil.currentUnixtime,
+                            EntryFile(bytes)
+                    )*/ // NOP; already made in the init portion
+                }
+                // a directory
+                else {
+                    bottomupFile = DiskEntry(
+                            bottomupFile.parentEntryID,
+                            // if it's the beginning of the "tail", use appendParent
+                            if (index + 1 == nonTails) appendParent else generateUniqueID(),
+                            path[path.lastIndex - index].toEntryName(256, charset),
+                            VDUtil.currentUnixtime,
+                            VDUtil.currentUnixtime,
+                            EntryDirectory(arrayListOf(bottomupFile.entryID)) // put child file in (yet overwritten 'bottomupFile')
+                    )
+                }
+
+                entriesToWrite.add(bottomupFile)
+            }
+
+            //appendEntries(entriesToWrite) // commented; will write everything in one-go
+
+
+            // at this point, the link (appendParent) -> (bottomupFile) has not yet constructed
+            // (the opposite link should be there)
+            // we add this missing link
+
+            val parentFile = requestFile(appendParent)
+
+            if (parentFile == null) {
+                throw InternalError()
+            }
+            else {
+                if (parentFile.contents !is EntryDirectory)
+                    throw IOException("The disk entry $appendParent (${parentFile.filename.toCanonicalString(charset)}) is not a directory")
+
+                (parentFile.contents as EntryDirectory).add(bottomupFile.entryID)
+
+                // the entry INSTANCE is now updated, now commit the change to the disk file
+                // do it by removing old one in the archive then add a new one
+                deleteEntry(appendParent)
+
+
+                //appendEntry(parentFile) // commented; will write everything in one-go
+                entriesToWrite.add(parentFile)
+
+                // write everything needed in one-go
+                appendEntries(entriesToWrite)
+            }
+
+
+            return returnEntryID
+        }
+        else {
+            if (!overwriteExisting) throw IOException("The file already exists")
+
+            // at this point, 'appendParent' is the conflicting file
+
+            val oldFile = requestFile(appendParent)
+            if (oldFile == null) {
+                throw InternalError()
+            }
+            else {
+                val newFile = DiskEntry(
+                        oldFile.entryID,
+                        oldFile.parentEntryID,
+                        path.last().toEntryName(256, charset),
+                        oldFile.creationDate,
+                        VDUtil.currentUnixtime,
+                        EntryFile(bytes)
+                )
+
+                // commit change by removing the old and adding the new
+                deleteEntry(oldFile.entryID)
+                appendEntry(newFile)
+
+
+                return newFile.entryID
+            }
+        }
+    }
+
+
+
+    companion object {
+        fun InputStream.read(size: Int): ByteArray {
+            val ba = ByteArray(size)
+            this.read(ba)
+            return ba
+        }
+    }
+
+    private fun generateUniqueID(): Int {
+        var id: Int
+        do {
+            id = Random().nextInt()
+        } while (entryToOffsetTable.containsKey(id) || id == VirtualDisk.FOOTER_MARKER)
+        return id
+    }
+
+    private fun replaceTempFileWithOriginal(oldFile: File, originalFile: File, tmpFile: File): Boolean {
         try {
             oldFile.delete()
             val suc1 = diskFile.renameTo(oldFile)
@@ -353,19 +620,55 @@ class DiskSkimmer(private var diskFile: File, val charset: Charset = Charset.def
             return false
         }
 
-
-        footerPosition = newFooterPos
-        entryToOffsetTable = newEntryOffsetTable
         return true
-
     }
 
+    private fun fetchFooterBytes(diskFile: File): ByteArray {
+        val fis = FileInputStream(diskFile)
+        fis.skip(footerPosition)
+        val footerBytes = fis.read(footerSize)
+        fis.close()
 
-    companion object {
-        fun InputStream.read(size: Int): ByteArray {
-            val ba = ByteArray(size)
-            this.read(ba)
-            return ba
+        return footerBytes
+    }
+
+    /**
+     * total size of the entry block. This size includes that of the header
+     */
+    private fun getEntryBlockSize(id: EntryID): Long? {
+        val offset = entryToOffsetTable[id] ?: return null
+
+        val HEADER_SIZE = DiskEntry.HEADER_SIZE
+
+        val fis = FileInputStream(diskFile)
+        fis.skip(offset + 8)
+        val type = fis.read().toByte()
+        fis.skip(272) // skip name, timestamp and CRC
+
+
+        val ret: Long
+        when (type) {
+            DiskEntry.NORMAL_FILE -> {
+                ret = fis.read(6).toInt48() + HEADER_SIZE + 6
+            }
+            DiskEntry.COMPRESSED_FILE -> {
+                ret = fis.read(6).toInt48() + HEADER_SIZE + 12
+            }
+            DiskEntry.DIRECTORY -> {
+                ret = fis.read(2).toIntBig() * 4 + HEADER_SIZE + 2
+            }
+            DiskEntry.SYMLINK -> { ret = 4 }
+            else -> throw UnsupportedOperationException("Unknown entry type $type")
+        }
+
+        fis.close()
+
+        return ret
+    }
+
+    private fun byteByByteCopy(size: Long, `in`: InputStream, out: OutputStream) {
+        for (i in 0L until size) {
+            out.write(`in`.read())
         }
     }
 
