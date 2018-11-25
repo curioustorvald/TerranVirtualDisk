@@ -201,6 +201,7 @@ class VirtualDiskCracker(val sysCharset: Charset = Charsets.UTF_8) : JFrame() {
                             )
                             gotoRoot()
                             updateDiskInfo()
+                            setWindowTitleWithName(dialogBox.name.text)
                             setStat("Disk created")
                         }
                     }
@@ -229,6 +230,7 @@ class VirtualDiskCracker(val sysCharset: Charset = Charsets.UTF_8) : JFrame() {
                             if (vdisk != null) {
                                 gotoRoot()
                                 updateDiskInfo()
+                                setWindowTitleWithName(fileChooser.selectedFile.canonicalPath)
                                 setStat("Disk loaded")
                             }
                         }
@@ -823,6 +825,10 @@ ParentID: ${file.parentEntryID}""" + if (file.contents is EntryFile) """
 Contents:
 ${String(file.contents.bytes.sliceArray64(0L..minOf(PREVIEW_MAX_BYTES, file.contents.bytes.size) - 1).toByteArray(), sysCharset)}""" else ""
     }
+    private fun setWindowTitleWithName(name: String) {
+        this.title = "$appName - $name"
+    }
+
     private fun Long.bytes() = if (this == 1L) "1 byte" else "$this bytes"
     private fun Int.entries() = if (this == 1) "1 entry" else "$this entries"
     private fun DiskEntry.getEffectiveSize() = if (this.contents is EntryFile)
