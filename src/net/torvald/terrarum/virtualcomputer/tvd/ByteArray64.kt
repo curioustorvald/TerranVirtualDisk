@@ -16,6 +16,12 @@ import java.io.InputStream
 class ByteArray64(val size: Long) {
     companion object {
         val bankSize: Int = 8192
+
+        fun fromByteArray(byteArray: ByteArray): ByteArray64 {
+            val ba64 = ByteArray64(byteArray.size.toLong())
+            byteArray.forEachIndexed { i, byte -> ba64[i.toLong()] = byte }
+            return ba64
+        }
     }
 
     /**

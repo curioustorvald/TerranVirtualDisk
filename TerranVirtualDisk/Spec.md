@@ -60,6 +60,11 @@ current specversion number: 0x03
     <Entry Header>
     <Actual Entry>
 
+NOTES:
+- entries are not guaranteed to be sorted, even though the disk cracker will make it sorted.
+- Root entry (ID=0) however, must be the first entry that comes right after the header.
+- Name of the root entry is undefined, the DiskCracker defaults it as "(root)", but it can be anything.
+
 ###  Entry Header
     Int32       EntryID (random Integer). This act as "jump" position for directory listing.
                 NOTE: Index 0 must be a root "Directory"; 0xFEFEFEFE is invalid (used as footer marker)

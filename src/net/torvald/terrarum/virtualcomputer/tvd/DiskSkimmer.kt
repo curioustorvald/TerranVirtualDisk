@@ -74,7 +74,7 @@ class DiskSkimmer(private var diskFile: File, val charset: Charset = Charset.def
             val buffer = ByteArray(2)
             val readStatus = readBytes(buffer)
             if (readStatus != 2) throw InternalError("Unexpected error -- EOF reached? (expected 4, got $readStatus)")
-            return buffer.toUint16()
+            return buffer.toShortBig()
         }
         fun readIntBig(): Int {
             val buffer = ByteArray(4)
@@ -91,17 +91,17 @@ class DiskSkimmer(private var diskFile: File, val charset: Charset = Charset.def
 
 
         while (true) {
-            val entryID = readIntBig()
+            val entryID = readIntBig() // at this point, cursor is 4 bytes past to the entry head
 
             // footer
             if (entryID == 0xFEFEFEFE.toInt()) {
-                footerPosition = currentPosition
+                footerPosition = currentPosition - 4
                 break
             }
 
 
             // fill up the offset table
-            entryToOffsetTable[entryID] = currentPosition
+            entryToOffsetTable[entryID] = currentPosition - 4
 
             val parentID = readIntBig()
             val entryType = readByte()
@@ -150,11 +150,13 @@ class DiskSkimmer(private var diskFile: File, val charset: Charset = Charset.def
      */
     fun requestFile(entryID: EntryID): DiskEntry? {
         entryToOffsetTable[entryID].let { offset ->
-            if (offset == null)
+            if (offset == null) {
+                println("[DiskSkimmer.requestFile] entry $entryID does not exist on the table")
                 return null
+            }
             else {
                 val fis = FileInputStream(diskFile)
-                fis.skip(offset) // get to the EntryHeader's parent directory area
+                fis.skip(offset + 4) // get to the EntryHeader's parent directory area
                 val parent = fis.read(4).toIntBig()
                 val fileFlag = fis.read(1)[0]
                 val filename = fis.read(256)
@@ -168,7 +170,7 @@ class DiskSkimmer(private var diskFile: File, val charset: Charset = Charset.def
                         fis.read(6).toInt48()
                     }
                     DiskEntry.DIRECTORY -> {
-                        fis.read(2).toUint16().toLong()
+                        fis.read(2).toShortBig().toLong()
                     }
                     DiskEntry.SYMLINK -> 4L
                     else -> throw UnsupportedOperationException("Unsupported entry type: $fileFlag") // FIXME no support for compressed file
@@ -217,6 +219,8 @@ class DiskSkimmer(private var diskFile: File, val charset: Charset = Charset.def
      * @return DiskEntry if the search was successful, `null` otherwise
      */
     fun requestFile(path: String): DiskEntry? {
+        // fixme untested
+
         val path = path.split(dirDelim)
         //println(path)
 
@@ -224,25 +228,26 @@ class DiskSkimmer(private var diskFile: File, val charset: Charset = Charset.def
         var traversedDir = 0 // entry ID
         var dirFile: DiskEntry? = null
         path.forEachIndexed { index, dirName ->
+            println("[DiskSkimmer.requestFile] $index\t$dirName, traversedDir = $traversedDir")
+
             dirFile = requestFile(traversedDir)
-            if (dirFile == null) return null // outright null
-            if (dirFile!!.contents !is EntryDirectory && index < path.lastIndex) // unexpectedly encountered non-directory
+            if (dirFile == null) {
+                println("[DiskSkimmer.requestFile] requestFile($traversedDir) came up null")
+                return null
+            } // outright null
+            if (dirFile!!.contents !is EntryDirectory && index < path.lastIndex) { // unexpectedly encountered non-directory
                 return null // because other than the last path, everything should be directory (think about it!)
+            }
             //if (index == path.lastIndex) return dirFile // reached the end of the search strings
 
             // still got more paths behind to traverse
             var dirGotcha = false
-            var gotNull = false
             // loop for current dir contents
             (dirFile!!.contents as EntryDirectory).forEach {
                 if (!dirGotcha) { // alternative impl of 'break' as it's not allowed
                     // get name of the file
-                    val childDirFile = requestFile(it)
-                    if (childDirFile == null) {
-                        dirGotcha = true
-                        gotNull = true
-                    }
-                    else if (childDirFile.filename.toCanonicalString(charset) == dirName) {
+                    val childDirFile = requestFile(it)!!
+                    if (childDirFile.filename.toCanonicalString(charset) == dirName) {
                         //println("[DiskSkimmer] found, $traversedDir -> $it")
                         dirGotcha = true
                         traversedDir = it
@@ -250,7 +255,7 @@ class DiskSkimmer(private var diskFile: File, val charset: Charset = Charset.def
                 }
             }
 
-            if (gotNull) return null
+            if (!dirGotcha) return null // got null || directory empty ||
         }
 
         return requestFile(traversedDir)
@@ -380,7 +385,8 @@ class DiskSkimmer(private var diskFile: File, val charset: Charset = Charset.def
 
         var newFooterPos = VirtualDisk.HEADER_SIZE
         val originalFile = diskFile.absoluteFile
-        val newEntryOffsetTable = entryToOffsetTable.clone() as HashMap<EntryID, Long>
+        val cleanedOffsetTable = entryToOffsetTable.clone() as HashMap<EntryID, Long>
+        val newOffsetTable = HashMap<EntryID, Long>()
         val tmpFile = File(originalFile.absolutePath + "_tmp")
         val oldFile = File(originalFile.absolutePath + "_old")
 
@@ -400,19 +406,21 @@ class DiskSkimmer(private var diskFile: File, val charset: Charset = Charset.def
 
             // copy entries one by one //
 
-            //// construct new offset table that excludes to-be-deleted entries
-            entries.forEach { newEntryOffsetTable.remove(it) }
+            //// construct iteration offset table that excludes to-be-deleted entries
+            entries.forEach { cleanedOffsetTable.remove(it) }
 
             // copy root entry (the root entry has fixed position on the disk)
             val rootSize = getEntryBlockSize(0)!!
+            newOffsetTable[0] = newFooterPos // write in new offset to the offsetTable
             byteByByteCopy(rootSize, oldIn, tmpOut)
             // update footer position
             newFooterPos += rootSize
 
             // copy non-root entry
-            newEntryOffsetTable.forEach { id, offset ->
+            cleanedOffsetTable.forEach { id, offset ->
                 if (id != 0) { // remember, the root entry has fixed position!
                     val size = getEntryBlockSize(id)!!
+                    newOffsetTable[id] = newFooterPos // write in new offset to the offsetTable
                     oldIn.reset() // return to pos zero
                     oldIn.skip(offset)
                     byteByByteCopy(size, oldIn, tmpOut)
@@ -421,9 +429,6 @@ class DiskSkimmer(private var diskFile: File, val charset: Charset = Charset.def
                     newFooterPos += size
                 }
             }
-
-            // update offset table
-            entryToOffsetTable = newEntryOffsetTable
 
             // write footer
             tmpOut.write(footerBytes)
@@ -443,7 +448,7 @@ class DiskSkimmer(private var diskFile: File, val charset: Charset = Charset.def
 
 
         footerPosition = newFooterPos
-        entryToOffsetTable = newEntryOffsetTable
+        entryToOffsetTable = newOffsetTable
         return true
     }
 
@@ -464,6 +469,7 @@ class DiskSkimmer(private var diskFile: File, val charset: Charset = Charset.def
         var appendParent = 0 // add nonexisting "tails" after this entry; if (nonTails == 0), the value is the conflicting file
         for (i in path.lastIndex downTo 0) { // 0: a random directory inside of root; lastIndex: a file we're going to create
             val searchPath = path.subList(0, i + 1).joinToString(DIR)
+            println("[DiskSkimmer.createNewFile] search path: $searchPath")
             val searchResult = requestFile(searchPath)
             if (searchResult != null) {
                 appendParent = searchResult.entryID
@@ -473,6 +479,9 @@ class DiskSkimmer(private var diskFile: File, val charset: Charset = Charset.def
                 nonTails += 1
             }
         }
+
+        println(appendParent)
+        println(nonTails)
 
         // construct nonexisting entries
         if (nonTails != 0) {
@@ -640,6 +649,8 @@ class DiskSkimmer(private var diskFile: File, val charset: Charset = Charset.def
 
         val HEADER_SIZE = DiskEntry.HEADER_SIZE
 
+        println("[DiskSkimmer.getEntryBlockSize] offset for entry $id = $offset")
+
         val fis = FileInputStream(diskFile)
         fis.skip(offset + 8)
         val type = fis.read().toByte()
@@ -655,10 +666,10 @@ class DiskSkimmer(private var diskFile: File, val charset: Charset = Charset.def
                 ret = fis.read(6).toInt48() + HEADER_SIZE + 12
             }
             DiskEntry.DIRECTORY -> {
-                ret = fis.read(2).toIntBig() * 4 + HEADER_SIZE + 2
+                ret = fis.read(2).toShortBig() * 4 + HEADER_SIZE + 2
             }
             DiskEntry.SYMLINK -> { ret = 4 }
-            else -> throw UnsupportedOperationException("Unknown entry type $type")
+            else -> throw UnsupportedOperationException("Unknown type $type for entry $id")
         }
 
         fis.close()
@@ -672,7 +683,7 @@ class DiskSkimmer(private var diskFile: File, val charset: Charset = Charset.def
         }
     }
 
-    private fun ByteArray.toUint16(): Int {
+    private fun ByteArray.toShortBig(): Int {
         return  this[0].toUint().shl(8) or
                 this[1].toUint()
     }
