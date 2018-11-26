@@ -15,7 +15,7 @@ import kotlin.collections.HashMap
  *
  * Created by minjaesong on 2017-11-17.
  */
-class DiskSkimmer(private var diskFile: File, val charset: Charset = Charset.defaultCharset()) {
+class DiskSkimmer(private val diskFile: File, val charset: Charset = Charset.defaultCharset()) {
 
 
     /**
@@ -269,6 +269,7 @@ class DiskSkimmer(private var diskFile: File, val charset: Charset = Charset.def
 
     fun appendEntries(entries: List<DiskEntry>): Boolean {
         // FIXME untested
+        // FIXME dir: files were added but files count was not updated
 
         // buffer the footer
         // define newFooterPos = 0
@@ -357,6 +358,7 @@ class DiskSkimmer(private var diskFile: File, val charset: Charset = Charset.def
 
     fun deleteEntries(entries: List<EntryID>): Boolean {
         // FIXME untested
+        // FIXME dir: files were removed but files count was not updated
 
         // buffer the footer
         // define newFooterPos = 0
@@ -612,22 +614,16 @@ class DiskSkimmer(private var diskFile: File, val charset: Charset = Charset.def
     private fun replaceTempFileWithOriginal(oldFile: File, originalFile: File, tmpFile: File): Boolean {
         try {
             oldFile.delete()
-            val suc1 = diskFile.renameTo(oldFile)
-            val suc2 = tmpFile.renameTo(originalFile)
-            if (!suc1 or !suc2) return false
 
-            diskFile = tmpFile
+            val suc1 = diskFile.renameTo(oldFile)
+            if (!suc1) return false
+
+            tmpFile.copyTo(diskFile)
+
+            val suc2 = tmpFile.delete()
+            if (!suc2) return false
         }
-        catch (e: IOException) {
-            // try to recover from failure
-            try {
-                if (oldFile.exists()) {
-                    oldFile.renameTo(originalFile)
-                }
-            }
-            catch (e: Throwable) {  }
-            return false
-        }
+        catch (e: IOException) { return false }
 
         return true
     }
