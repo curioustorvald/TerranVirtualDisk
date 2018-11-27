@@ -64,6 +64,7 @@ NOTES:
 - entries are not guaranteed to be sorted, even though the disk cracker will make it sorted.
 - Root entry (ID=0) however, must be the first entry that comes right after the header.
 - Name of the root entry is undefined, the DiskCracker defaults it as "(root)", but it can be anything.
+- Parent node of the root is undefined; do not make an assume that root node's parent is 0.
 
 ###  Entry Header
     Int32       EntryID (random Integer). This act as "jump" position for directory listing.

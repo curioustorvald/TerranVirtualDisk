@@ -219,7 +219,7 @@ class DiskSkimmer(private val diskFile: File, val charset: Charset = Charset.def
      * @return DiskEntry if the search was successful, `null` otherwise
      */
     fun requestFile(path: String): DiskEntry? {
-        // fixme untested
+        // fixme pretty much untested
 
         val path = path.split(dirDelim)
         //println(path)
@@ -335,16 +335,19 @@ class DiskSkimmer(private val diskFile: File, val charset: Charset = Charset.def
             tmpOut.flush(); tmpOut.close()
             oldIn.close()
 
+            fixEntryCountUsingActualContents(originalFile, tmpFile)
+
             // at this point, entryCounter should rightfully point the new footer position
             newFooterPos = entryCounter
         }
-        catch (e: IOException) {
+        catch (e: Exception) {
+            e.printStackTrace()
             return false
         }
 
 
         // replace tmpFile with original file
-        if (!replaceTempFileWithOriginal(oldFile, originalFile, tmpFile)) return false
+        if (!replaceTempFileWithOriginal(oldFile, tmpFile)) return false
         // if TRUE is retuned, ignore the return value
 
 
@@ -438,14 +441,17 @@ class DiskSkimmer(private val diskFile: File, val charset: Charset = Charset.def
             tmpOut.flush()
             tmpOut.close()
             oldIn.close()
+
+            fixEntryCountUsingActualContents(originalFile, tmpFile)
         }
-        catch (e: IOException) {
+        catch (e: Exception) {
+            e.printStackTrace()
             return false
         }
 
 
         // replace tmpFile with original file
-        if (!replaceTempFileWithOriginal(oldFile, originalFile, tmpFile)) return false
+        if (!replaceTempFileWithOriginal(oldFile, tmpFile)) return false
         // if TRUE is retuned, ignore the return value
 
 
@@ -593,6 +599,76 @@ class DiskSkimmer(private val diskFile: File, val charset: Charset = Charset.def
         }
     }
 
+    /**
+     * Make sure none of the files are opened by other streams
+     */
+    fun fixEntryCountUsingActualContents(originalFile: File, tmpFile: File) {
+        // scan through every entries for a kind of census
+        val censusChild = HashMap<EntryID, Int>() // key: entryID (directory), value: number of childs
+
+        val fis = BufferedInputStream(FileInputStream(originalFile)) // bufferd, in order to use markings
+        val fos = FileOutputStream(tmpFile)
+
+        fis.mark(-1) // mark at zero
+
+        // start scanning
+        entryToOffsetTable.forEach { t, u ->
+            if (t != 0) {
+                fis.reset(); fis.skip(u + 4) // skip right into the parentID sect
+                val parentID = fis.read(4).toIntBig()
+
+                // append to census results
+                if (censusChild.containsKey(parentID)) {
+                    censusChild[parentID] = censusChild[parentID]!! + 1
+                }
+                else {
+                    censusChild[parentID] = 1
+                }
+            }
+        }
+
+        // write to temp file
+        fis.reset()
+        val writePositions = HashMap(censusChild.map { (entryToOffsetTable[it.key]!! + DiskEntry.HEADER_SIZE) to it.value }.toMap())
+
+        println("fixentry writepositions: $writePositions")
+
+        // key: write position that points to Uint16, value: what to write (in Int)
+        var readCtr = 0L
+        do {
+            val byte = fis.read(); readCtr += 1
+
+            if (writePositions.containsKey(readCtr)) {
+                val newChildCnt = writePositions[readCtr]!!
+                val upperByte = newChildCnt.toInt().and(0xF0).ushr(8)
+                val lowerByte = newChildCnt.toInt().and(0xF)
+
+                println("ub: $upperByte, lb: $lowerByte")
+
+                // trying to bypass:
+                // FIXME when I tell it to write '00 03', it actually writes '03 03'
+
+                //fos.write(upperByte)
+                //fos.write(lowerByte)
+
+                // FIXME even the following does not work -- something must be wrong in my part duh
+                val outBytes = byteArrayOf(upperByte.toByte(), lowerByte.toByte())
+                fos.write(outBytes)
+
+                fis.read(); readCtr += 1 // null read just to increment fis's internal counter by 1
+            }
+            else {
+                fos.write(byte)
+            }
+
+        } while (readCtr < originalFile.length())
+
+
+        fos.flush()
+        fos.close()
+        fis.close()
+    }
+
 
 
     companion object {
@@ -611,7 +687,7 @@ class DiskSkimmer(private val diskFile: File, val charset: Charset = Charset.def
         return id
     }
 
-    private fun replaceTempFileWithOriginal(oldFile: File, originalFile: File, tmpFile: File): Boolean {
+    private fun replaceTempFileWithOriginal(oldFile: File, tmpFile: File): Boolean {
         try {
             oldFile.delete()
 
