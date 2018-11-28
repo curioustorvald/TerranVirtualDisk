@@ -335,8 +335,6 @@ class DiskSkimmer(private val diskFile: File, val charset: Charset = Charset.def
             tmpOut.flush(); tmpOut.close()
             oldIn.close()
 
-            fixEntryCountUsingActualContents(originalFile, tmpFile)
-
             // at this point, entryCounter should rightfully point the new footer position
             newFooterPos = entryCounter
         }
@@ -347,7 +345,7 @@ class DiskSkimmer(private val diskFile: File, val charset: Charset = Charset.def
 
 
         // replace tmpFile with original file
-        if (!replaceTempFileWithOriginal(oldFile, tmpFile)) return false
+        if (!commitTempfileChange(oldFile, tmpFile)) return false
         // if TRUE is retuned, ignore the return value
 
 
@@ -441,8 +439,6 @@ class DiskSkimmer(private val diskFile: File, val charset: Charset = Charset.def
             tmpOut.flush()
             tmpOut.close()
             oldIn.close()
-
-            fixEntryCountUsingActualContents(originalFile, tmpFile)
         }
         catch (e: Exception) {
             e.printStackTrace()
@@ -451,7 +447,7 @@ class DiskSkimmer(private val diskFile: File, val charset: Charset = Charset.def
 
 
         // replace tmpFile with original file
-        if (!replaceTempFileWithOriginal(oldFile, tmpFile)) return false
+        if (!commitTempfileChange(oldFile, tmpFile)) return false
         // if TRUE is retuned, ignore the return value
 
 
@@ -492,6 +488,7 @@ class DiskSkimmer(private val diskFile: File, val charset: Charset = Charset.def
         println(nonTails)
 
         // construct nonexisting entries
+        println("[DiskSkimmer.createNewFile] nonTails = $nonTails")
         if (nonTails != 0) {
             // traverse backwards:
             //     file
@@ -509,6 +506,9 @@ class DiskSkimmer(private val diskFile: File, val charset: Charset = Charset.def
             )
             val returnEntryID = bottomupFile.entryID
             val entriesToWrite = ArrayList<DiskEntry>()
+
+            println("[DiskSkimmer.createNewFile] bottomupFile0: $bottomupFile")
+
             path.takeLast(nonTails).reversed().forEachIndexed { index, s ->
                 // a file
                 if (index == 0) {
@@ -532,6 +532,8 @@ class DiskSkimmer(private val diskFile: File, val charset: Charset = Charset.def
                             VDUtil.currentUnixtime,
                             EntryDirectory(arrayListOf(bottomupFile.entryID)) // put child file in (yet overwritten 'bottomupFile')
                     )
+
+                    println("[DiskSkimmer.createNewFile] bottomupFile$index: $bottomupFile")
                 }
 
                 entriesToWrite.add(bottomupFile)
@@ -553,12 +555,12 @@ class DiskSkimmer(private val diskFile: File, val charset: Charset = Charset.def
                 if (parentFile.contents !is EntryDirectory)
                     throw IOException("The disk entry $appendParent (${parentFile.filename.toCanonicalString(charset)}) is not a directory")
 
-                (parentFile.contents as EntryDirectory).add(bottomupFile.entryID)
+                parentFile.contents.add(bottomupFile.entryID)
 
                 // the entry INSTANCE is now updated, now commit the change to the disk file
                 // do it by removing old one in the archive then add a new one
-                deleteEntry(appendParent)
 
+                deleteEntry(appendParent)
 
                 //appendEntry(parentFile) // commented; will write everything in one-go
                 entriesToWrite.add(parentFile)
@@ -580,6 +582,7 @@ class DiskSkimmer(private val diskFile: File, val charset: Charset = Charset.def
                 throw InternalError()
             }
             else {
+
                 val newFile = DiskEntry(
                         oldFile.entryID,
                         oldFile.parentEntryID,
@@ -588,6 +591,8 @@ class DiskSkimmer(private val diskFile: File, val charset: Charset = Charset.def
                         VDUtil.currentUnixtime,
                         EntryFile(bytes)
                 )
+
+                println("[DiskSkimmer.createNewFile] overwriting file: $newFile")
 
                 // commit change by removing the old and adding the new
                 deleteEntry(oldFile.entryID)
@@ -629,7 +634,13 @@ class DiskSkimmer(private val diskFile: File, val charset: Charset = Charset.def
 
         // write to temp file
         fis.reset()
-        val writePositions = HashMap(censusChild.map { (entryToOffsetTable[it.key]!! + DiskEntry.HEADER_SIZE) to it.value }.toMap())
+        val writePositions = HashMap<Long, Int>()
+        censusChild.forEach { censusee ->
+            // ignore orphans by ignoring null offsets
+            entryToOffsetTable[censusee.key]?.let { offset ->
+                writePositions[offset] = censusee.value
+            }
+        }
 
         println("fixentry writepositions: $writePositions")
 
@@ -679,19 +690,47 @@ class DiskSkimmer(private val diskFile: File, val charset: Charset = Charset.def
         return id
     }
 
-    private fun replaceTempFileWithOriginal(oldFile: File, tmpFile: File): Boolean {
+    fun fixEntryCount() {
+
+    }
+
+    private fun commitTempfileChange(oldFile: File, tmpFile: File): Boolean {
         try {
+            // fix before actual commit
+            //fixEntryCountUsingActualContents(tmpFile, tmpFile)
+
+
+            // the actual commit
             oldFile.delete()
 
+            // fix commit using tmp2
+            val tmpFile2 = File(tmpFile.absolutePath + "2")
+            fixEntryCountUsingActualContents(tmpFile, tmpFile2)
+
             val suc1 = diskFile.renameTo(oldFile)
-            if (!suc1) return false
+            if (!suc1) {
+                throw RuntimeException("Renaming ${diskFile.canonicalPath} to ${oldFile.canonicalPath} failed")
+                return false
+            }
 
-            tmpFile.copyTo(diskFile)
+            tmpFile2.copyTo(diskFile)
 
-            val suc2 = tmpFile.delete()
-            if (!suc2) return false
+            val suc2 = tmpFile2.delete()
+            if (!suc2) {
+                throw RuntimeException("Removing tempfile ${tmpFile2.canonicalPath} faild")
+                return false
+            }
+
+            val suc3 = tmpFile.delete()
+            if (!suc3) {
+                throw RuntimeException("Removing tempfile ${tmpFile.canonicalPath} faild")
+                return false
+            }
         }
-        catch (e: IOException) { return false }
+        catch (e: Exception) {
+            e.printStackTrace()
+            return false
+        }
 
         return true
     }

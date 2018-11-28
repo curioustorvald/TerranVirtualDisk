@@ -170,7 +170,7 @@ class DiskEntry(
 
     override fun equals(other: Any?) = if (other == null) false else this.hashCode() == other.hashCode()
 
-    override fun toString() = "DiskEntry(name: ${getFilenameString(Charsets.UTF_8)}, index: $entryID, type: ${contents.getTypeFlag()}, crc: ${hashCode().toHex()})"
+    override fun toString() = "DiskEntry(name: ${getFilenameString(Charsets.UTF_8)}, ID: $entryID, parent: $parentEntryID, type: ${contents.getTypeFlag()}, crc: ${hashCode().toHex()})"
 }
 
 

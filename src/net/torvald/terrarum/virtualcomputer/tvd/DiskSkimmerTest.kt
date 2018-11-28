@@ -39,27 +39,23 @@ Mischief Managed.
  */
         val skimmer = DiskSkimmer(outfile)
 
-        // step 0
-        val testfile = skimmer.requestFile(1403168679)!!
-        println((testfile.contents as EntryFile).bytes.toByteArray().toString(Charset.defaultCharset()))
-
-        val testfile2 = skimmer.requestFile(-1483001307)!!
-        println((testfile2.contents as EntryFile).bytes.toByteArray().toString(Charset.defaultCharset()))
-
-        val testfile3 = skimmer.requestFile("01_preamble/append-after-me")!!
-        println((testfile3.contents as EntryFile).bytes.toByteArray().toString(Charset.defaultCharset()))
-
 
         println("=============================")
 
+        // step 0
+        val minimalTestFile = ByteArray64.fromByteArray("THIS IS A TEST OF THE TEISRTNYUFRNTYRFDYUBTLUAWHFYLFHUPLFRHPULAWN\nTHIS IS ONLY A TEST !!!".toByteArray())
+        skimmer.createNewFile("01_preamble/aaaaa/bbbbb/ccccc/ddddd/test.txt", minimalTestFile)
+        // fixme doing this against not-root directory causes aftermentioned "census" garbage data
+
         // step 1
-        val worldFile = ByteArray64.fromByteArray("sure, whatevs".toByteArray())
+        /*val worldFile = ByteArray64.fromByteArray("sure, whatevs".toByteArray())
         skimmer.createNewFile("World!.txt", worldFile)
 
         // step 2
-        /*val appendFile = skimmer.requestFile("01_preamble/append-after-me")!!
+        val appendFile = skimmer.requestFile("01_preamble/append-after-me")!!
         val newText = (appendFile.contents as EntryFile).bytes.toByteArray() + "This is not SimCity 3k".toByteArray()
         skimmer.createNewFile("01_preamble/append-after-me", ByteArray64.fromByteArray(newText), true)*/
+        // fixme PLEASE CHECK: during the test, it was discovered that "census" is getting garbage numbers
 
         // step 3
         /*val deleteFile = skimmer.requestFile("01_preamble/deleteme")!!
