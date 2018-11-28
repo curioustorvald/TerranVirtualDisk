@@ -57,9 +57,9 @@ Mischief Managed.
         skimmer.createNewFile("World!.txt", worldFile)
 
         // step 2
-        val appendFile = skimmer.requestFile("01_preamble/append-after-me")!!
+        /*val appendFile = skimmer.requestFile("01_preamble/append-after-me")!!
         val newText = (appendFile.contents as EntryFile).bytes.toByteArray() + "This is not SimCity 3k".toByteArray()
-        skimmer.createNewFile("01_preamble/append-after-me", ByteArray64.fromByteArray(newText), true)
+        skimmer.createNewFile("01_preamble/append-after-me", ByteArray64.fromByteArray(newText), true)*/
 
         // step 3
         /*val deleteFile = skimmer.requestFile("01_preamble/deleteme")!!

@@ -634,7 +634,8 @@ class DiskSkimmer(private val diskFile: File, val charset: Charset = Charset.def
         println("fixentry writepositions: $writePositions")
 
         // key: write position that points to Uint16, value: what to write (in Int)
-        var readCtr = 0L
+        var readCtr = -1L // it seems do-while loop shifts thing by one, :\
+                         // test this behaviour by writing FF FF to the file.
         do {
             val byte = fis.read(); readCtr += 1
 
@@ -643,17 +644,8 @@ class DiskSkimmer(private val diskFile: File, val charset: Charset = Charset.def
                 val upperByte = newChildCnt.toInt().and(0xF0).ushr(8)
                 val lowerByte = newChildCnt.toInt().and(0xF)
 
-                println("ub: $upperByte, lb: $lowerByte")
-
-                // trying to bypass:
-                // FIXME when I tell it to write '00 03', it actually writes '03 03'
-
-                //fos.write(upperByte)
-                //fos.write(lowerByte)
-
-                // FIXME even the following does not work -- something must be wrong in my part duh
-                val outBytes = byteArrayOf(upperByte.toByte(), lowerByte.toByte())
-                fos.write(outBytes)
+                fos.write(upperByte)
+                fos.write(lowerByte)
 
                 fis.read(); readCtr += 1 // null read just to increment fis's internal counter by 1
             }
@@ -661,7 +653,7 @@ class DiskSkimmer(private val diskFile: File, val charset: Charset = Charset.def
                 fos.write(byte)
             }
 
-        } while (readCtr < originalFile.length())
+        } while (readCtr < originalFile.length() - 1)
 
 
         fos.flush()
