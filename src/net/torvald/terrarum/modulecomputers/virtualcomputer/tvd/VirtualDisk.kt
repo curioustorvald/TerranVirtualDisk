@@ -1,4 +1,4 @@
-package net.torvald.terrarum.virtualcomputer.tvd
+package net.torvald.terrarum.modulecomputers.virtualcomputer.tvd
 
 import java.io.IOException
 import java.nio.charset.Charset

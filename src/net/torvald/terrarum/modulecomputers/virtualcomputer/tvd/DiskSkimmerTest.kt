@@ -1,7 +1,6 @@
-package net.torvald.terrarum.virtualcomputer.tvd
+package net.torvald.terrarum.modulecomputers.virtualcomputer.tvd
 
 import java.io.File
-import java.nio.charset.Charset
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
 

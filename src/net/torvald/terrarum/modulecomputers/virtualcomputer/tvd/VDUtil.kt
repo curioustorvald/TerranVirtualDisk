@@ -1,12 +1,10 @@
-package net.torvald.terrarum.virtualcomputer.tvd
+package net.torvald.terrarum.modulecomputers.virtualcomputer.tvd
 
 import java.io.*
 import java.nio.charset.Charset
 import java.util.*
 import java.util.logging.Level
 import java.util.zip.DeflaterOutputStream
-import java.util.zip.GZIPInputStream
-import java.util.zip.GZIPOutputStream
 import java.util.zip.InflaterOutputStream
 import javax.naming.OperationNotSupportedException
 import kotlin.collections.ArrayList
@@ -85,12 +83,12 @@ object VDUtil {
         }
     }
 
-    fun File.writeBytes64(array: net.torvald.terrarum.virtualcomputer.tvd.ByteArray64) {
+    fun File.writeBytes64(array: net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.ByteArray64) {
         array.writeToFile(this)
     }
 
-    fun File.readBytes64(): net.torvald.terrarum.virtualcomputer.tvd.ByteArray64 {
-        val inbytes = net.torvald.terrarum.virtualcomputer.tvd.ByteArray64(this.length())
+    fun File.readBytes64(): net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.ByteArray64 {
+        val inbytes = net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.ByteArray64(this.length())
         val inputStream = BufferedInputStream(FileInputStream(this))
         var readInt = inputStream.read()
         var readInCounter = 0L
@@ -475,6 +473,19 @@ object VDUtil {
         }
 
         return sb.toString()
+    }
+
+    /**
+     * Add fully qualified DiskEntry to the disk, using file's own and its parent entryID.
+     *
+     * It's your job to ensure no ID collision.
+     */
+    fun registerFile(disk: VirtualDisk, file: DiskEntry) {
+        disk.checkReadOnly()
+        disk.checkCapacity(file.serialisedSize)
+
+        VDUtil.getAsDirectory(disk, file.parentEntryID).add(file.entryID)
+        disk.entries[file.entryID] = file
     }
 
     /**

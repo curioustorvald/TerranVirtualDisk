@@ -1,9 +1,6 @@
-package net.torvald.terrarum.virtualcomputer.tvd
+package net.torvald.terrarum.modulecomputers.virtualcomputer.tvd
 
-import java.io.BufferedOutputStream
-import java.io.File
-import java.io.FileOutputStream
-import java.io.InputStream
+import java.io.*
 
 
 /**
@@ -24,11 +21,7 @@ class ByteArray64(val size: Long) {
         }
     }
 
-    /**
-     * Byte size is guaraeteed to be equal to the val size.
-     * In other words, endmost ByteArray can be smaller than the banksize
-     */
-    private val data: Array<ByteArray>
+    internal val __data: Array<ByteArray>
 
     init {
         if (size < 0)
@@ -36,13 +29,19 @@ class ByteArray64(val size: Long) {
 
         val requiredBanks: Int = 1 + ((size - 1) / bankSize).toInt()
 
-        data = Array<ByteArray>(requiredBanks) { bankIndex ->
-            kotlin.ByteArray(if (bankIndex == requiredBanks - 1)
-                size.toBankOffset()
-            else bankSize, { 0.toByte() }
-            )
-        }
+        __data = Array<ByteArray>(
+                requiredBanks,
+                { bankIndex ->
+                    kotlin.ByteArray(
+                            if (bankIndex == requiredBanks - 1)
+                                size.toBankOffset()
+                            else
+                                bankSize,
 
+                            { 0.toByte() }
+                    )
+                }
+        )
     }
 
     private fun Long.toBankNumber(): Int = (this / bankSize).toInt()
@@ -52,14 +51,14 @@ class ByteArray64(val size: Long) {
         if (index < 0 || index >= size)
             throw ArrayIndexOutOfBoundsException("size $size, index $index")
 
-        data[index.toBankNumber()][index.toBankOffset()] = value
+        __data[index.toBankNumber()][index.toBankOffset()] = value
     }
 
     operator fun get(index: Long): Byte {
         if (index < 0 || index >= size)
             throw ArrayIndexOutOfBoundsException("size $size, index $index")
 
-        return data[index.toBankNumber()][index.toBankOffset()]
+        return __data[index.toBankNumber()][index.toBankOffset()]
     }
 
     operator fun iterator(): ByteIterator {
@@ -103,7 +102,7 @@ class ByteArray64(val size: Long) {
 
     fun forEach(consumer: (Byte) -> Unit) = iterator().forEach { consumer(it) }
     fun forEachInt32(consumer: (Int) -> Unit) = iteratorChoppedToInt().forEach { consumer(it) }
-    fun forEachBanks(consumer: (ByteArray) -> Unit) = data.forEach(consumer)
+    fun forEachBanks(consumer: (ByteArray) -> Unit) = __data.forEach(consumer)
 
     fun sliceArray64(range: LongRange): ByteArray64 {
         val newarr = ByteArray64(range.last - range.first + 1)
@@ -130,14 +129,14 @@ class ByteArray64(val size: Long) {
 
     fun writeToFile(file: File) {
         var fos = FileOutputStream(file, false)
-        fos.write(data[0])
+        fos.write(__data[0])
         fos.flush()
         fos.close()
 
-        if (data.size > 1) {
+        if (__data.size > 1) {
             fos = FileOutputStream(file, true)
-            for (i in 1..data.lastIndex) {
-                fos.write(data[i])
+            for (i in 1..__data.lastIndex) {
+                fos.write(__data[i])
                 fos.flush()
             }
             fos.close()
@@ -145,8 +144,8 @@ class ByteArray64(val size: Long) {
     }
 }
 
-class ByteArray64InputStream(val byteArray64: ByteArray64): InputStream() {
-    private var readCounter = 0L
+open class ByteArray64InputStream(val byteArray64: ByteArray64): InputStream() {
+    protected open var readCounter = 0L
 
     override fun read(): Int {
         readCounter += 1
@@ -157,5 +156,65 @@ class ByteArray64InputStream(val byteArray64: ByteArray64): InputStream() {
         catch (e: ArrayIndexOutOfBoundsException) {
             -1
         }
+    }
+}
+
+/** Static ByteArray OutputStream. Less leeway, more stable. */
+open class ByteArray64OutputStream(val byteArray64: ByteArray64): OutputStream() {
+    protected open var writeCounter = 0L
+
+    override fun write(b: Int) {
+        try {
+            writeCounter += 1
+
+            byteArray64[writeCounter - 1] = b.toByte()
+        }
+        catch (e: ArrayIndexOutOfBoundsException) {
+            throw IOException(e)
+        }
+    }
+}
+
+/** Just like Java's ByteArrayOutputStream, except its size grows if you exceed the initial size
+ * // FIXME untested
+ * */
+open class ByteArray64GrowableOutputStream(val size: Long = ByteArray64.bankSize.toLong()): OutputStream() {
+    protected open var buf = ByteArray64(size)
+    protected open var count = 0L
+
+    override fun write(b: Int) {
+        ensureCapacity(count + 1)
+        buf[count] = b.toByte()
+        count += 1
+    }
+
+    private fun ensureCapacity(minCapacity: Long) {
+        // overflow-conscious code
+        if (minCapacity - buf.size > 0)
+            grow(minCapacity)
+    }
+
+    private fun grow(minCapacity: Long) {
+        // overflow-conscious code
+        val oldCapacity = buf.size
+        var newCapacity = oldCapacity shl 1
+        if (newCapacity - minCapacity < 0)
+            newCapacity = minCapacity
+
+        val newBuffer = ByteArray64(newCapacity)
+        buf.__data.forEachIndexed { index, bytes ->
+            System.arraycopy(
+                    buf.__data[index], 0,
+                    newBuffer.__data[index], 0, buf.__data.size
+            )
+        }
+        buf = newBuffer
+        System.gc()
+    }
+
+    /** Unlike Java's, this does NOT create a copy of the internal buffer; this just returns its internal. */
+    @Synchronized
+    fun toByteArray64(): ByteArray64 {
+        return buf
     }
 }
