@@ -10,7 +10,10 @@ import java.io.*
  *
  * Created by Minjaesong on 2017-04-12.
  */
-class ByteArray64(val size: Long) {
+class ByteArray64(arraySize: Long) {
+    var size: Long = arraySize
+        internal set
+
     companion object {
         val bankSize: Int = 8192
 
@@ -21,7 +24,7 @@ class ByteArray64(val size: Long) {
         }
     }
 
-    internal val __data: Array<ByteArray>
+    internal val __data: ArrayList<ByteArray>
 
     init {
         if (size < 0)
@@ -29,15 +32,8 @@ class ByteArray64(val size: Long) {
 
         val requiredBanks: Int = 1 + ((size - 1) / bankSize).toInt()
 
-        __data = Array<ByteArray>(requiredBanks) { bankIndex ->
-            kotlin.ByteArray(
-                    if (bankIndex == requiredBanks - 1)
-                        if (size.toBankOffset() == 0) bankSize
-                        else size.toBankOffset()
-                    else
-                        bankSize
-            ) { 0.toByte() }
-        }
+        __data = ArrayList<ByteArray>(requiredBanks)
+        repeat((arraySize).toBankNumber().coerceIn(1, 2147483647)) { __data.add(ByteArray(bankSize)) }
     }
 
     private fun Long.toBankNumber(): Int = (this / bankSize).toInt()
@@ -55,6 +51,16 @@ class ByteArray64(val size: Long) {
             throw ArrayIndexOutOfBoundsException("size $size, index $index")
 
         return __data[index.toBankNumber()][index.toBankOffset()]
+    }
+
+    internal fun doubleTheSize() {
+        val newSize = size * 2
+        val banksToAdd = 1 + ((newSize - 1 - (bankSize * __data.size)) / bankSize).toInt()
+
+        if (banksToAdd > 0) {
+            repeat(banksToAdd) { __data.add(ByteArray(bankSize)) }
+        }
+        size = newSize
     }
 
     operator fun iterator(): ByteIterator {
@@ -120,7 +126,7 @@ class ByteArray64(val size: Long) {
         if (this.size > Integer.MAX_VALUE - 8) // according to OpenJDK; the size itself is VM-dependent
             throw TypeCastException("Impossible cast; too large to fit")
 
-        return ByteArray(this.size.toInt(), { this[it.toLong()] })
+        return ByteArray(this.size.toInt()) { this[it.toLong()] }
     }
 
     fun writeToFile(file: File) {
@@ -172,45 +178,48 @@ open class ByteArray64OutputStream(val byteArray64: ByteArray64): OutputStream()
 }
 
 /** Just like Java's ByteArrayOutputStream, except its size grows if you exceed the initial size
- * // FIXME untested
- * */
-open class ByteArray64GrowableOutputStream(val size: Long = ByteArray64.bankSize.toLong()): OutputStream() {
+ */
+open class ByteArray64GrowableOutputStream(size: Long = ByteArray64.bankSize.toLong()): OutputStream() {
     protected open var buf = ByteArray64(size)
     protected open var count = 0L
 
+    private var finalised = false
+
+    init {
+        if (size <= 0L) throw IllegalArgumentException("Illegal array size: $size")
+    }
+
     override fun write(b: Int) {
-        ensureCapacity(count + 1)
-        buf[count] = b.toByte()
-        count += 1
+        if (finalised) {
+            throw IllegalStateException("This output stream is finalised and cannot be modified.")
+        }
+        else {
+            ensureCapacity(count + 1)
+            buf[count] = b.toByte()
+            count += 1
+        }
     }
 
     private fun ensureCapacity(minCapacity: Long) {
         // overflow-conscious code
-        if (minCapacity - buf.size > 0)
+        if (minCapacity > buf.size)
             grow(minCapacity)
     }
 
     private fun grow(minCapacity: Long) {
         // overflow-conscious code
-        val oldCapacity = buf.size
-        var newCapacity = oldCapacity shl 1
-        if (newCapacity - minCapacity < 0)
-            newCapacity = minCapacity
-
-        val newBuffer = ByteArray64(newCapacity)
-        buf.__data.forEachIndexed { index, bytes ->
-            System.arraycopy(
-                    buf.__data[index], 0,
-                    newBuffer.__data[index], 0, buf.__data.size
-            )
-        }
-        buf = newBuffer
-        System.gc()
+        buf.doubleTheSize()
     }
 
-    /** Unlike Java's, this does NOT create a copy of the internal buffer; this just returns its internal. */
+    /** Unlike Java's, this does NOT create a copy of the internal buffer; this just returns its internal.
+     * This method also "finalises" the buffer inside of the output stream, making further modification impossible.
+     *
+     * The output stream must be flushed and closed, warning you of closing the stream is not possible.
+     */
     @Synchronized
     fun toByteArray64(): ByteArray64 {
+        finalised = true
+        buf.size = count
         return buf
     }
 }
