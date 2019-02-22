@@ -205,10 +205,13 @@ object VDUtil {
             if (crcWarnLevel == Level.SEVERE || crcWarnLevel == Level.WARNING) {
                 val calculatedCRC = diskEntry.hashCode()
 
-                val crcMsg = "CRC failed: expected ${entryCRC.toHex()}, got ${calculatedCRC.toHex()}\n" +
+                val crcMsg = "CRC failed: stored value is ${entryCRC.toHex()}, but calculated value is ${calculatedCRC.toHex()}\n" +
                         "at file \"${diskEntry.getFilenameString(charset)}\" (entry ID ${diskEntry.entryID})"
 
                 if (calculatedCRC != entryCRC) {
+
+                    println("CRC failed; entry info:\n$diskEntry")
+
                     if (crcWarnLevel == Level.SEVERE)
                         throw IOException(crcMsg)
                     else if (warningFunc != null)
@@ -979,13 +982,6 @@ fun ByteArray.toCanonicalString(charset: Charset): String {
     return String(this.sliceArray(0..lastIndexOfRealStr), charset)
 }
 
-fun ArrayList<Byte>.toByteArray64(): ByteArray64 {
-    val array = ByteArray64(this.size.toLong())
-    this.forEachIndexed { index, byte ->
-        array[index.toLong()] = byte
-    }
-    return array
-}
 fun ByteArray.toByteArray64(): ByteArray64 {
     val array = ByteArray64(this.size.toLong())
     this.forEachIndexed { index, byte ->

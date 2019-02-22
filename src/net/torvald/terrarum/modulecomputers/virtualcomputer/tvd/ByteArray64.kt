@@ -8,10 +8,17 @@ import java.io.*
  *
  * Works kind of like Bank Switching of old game console's cartridges which does same thing.
  *
+ * Note that this class is just a fancy ArrayList. Internal size will grow accordingly
+ *
+ * @param initialSize Initial size of the array. If it's not specified, 8192 will be used instead.
+ *
  * Created by Minjaesong on 2017-04-12.
  */
-class ByteArray64(arraySize: Long) {
-    var size: Long = arraySize
+class ByteArray64(initialSize: Long = bankSize.toLong()) {
+    var internalCapacity: Long = initialSize
+        private set
+
+    var size = 0L
         internal set
 
     companion object {
@@ -27,41 +34,69 @@ class ByteArray64(arraySize: Long) {
     internal val __data: ArrayList<ByteArray>
 
     init {
-        if (size < 0)
-            throw IllegalArgumentException("Invalid array size!")
+        if (internalCapacity < 0)
+            throw IllegalArgumentException("Invalid array size: $internalCapacity")
+        else if (internalCapacity == 0L) // signalling empty array
+            internalCapacity = bankSize.toLong()
 
-        val requiredBanks: Int = 1 + ((size - 1) / bankSize).toInt()
+        val requiredBanks: Int = (initialSize - 1).toBankNumber() + 1
 
         __data = ArrayList<ByteArray>(requiredBanks)
-        repeat((arraySize).toBankNumber().coerceIn(1, 2147483647)) { __data.add(ByteArray(bankSize)) }
+        repeat(requiredBanks) { __data.add(ByteArray(bankSize)) }
     }
 
     private fun Long.toBankNumber(): Int = (this / bankSize).toInt()
     private fun Long.toBankOffset(): Int = (this % bankSize).toInt()
 
     operator fun set(index: Long, value: Byte) {
-        if (index < 0 || index >= size)
-            throw ArrayIndexOutOfBoundsException("size $size, index $index")
+        ensureCapacity(index + 1)
 
-        __data[index.toBankNumber()][index.toBankOffset()] = value
+        try {
+            __data[index.toBankNumber()][index.toBankOffset()] = value
+            size = maxOf(size, index + 1)
+        }
+        catch (e: IndexOutOfBoundsException) {
+            val msg = "index: $index -> bank ${index.toBankNumber()} offset ${index.toBankOffset()}\n" +
+                    "But the array only contains ${__data.size} banks.\n" +
+                    "InternalCapacity = $internalCapacity, Size = $size"
+            throw IndexOutOfBoundsException(msg)
+        }
     }
+
+    fun add(value: Byte) = set(size, value)
 
     operator fun get(index: Long): Byte {
         if (index < 0 || index >= size)
             throw ArrayIndexOutOfBoundsException("size $size, index $index")
 
-        return __data[index.toBankNumber()][index.toBankOffset()]
-    }
-
-    internal fun doubleTheSize() {
-        val newSize = size * 2
-        val banksToAdd = 1 + ((newSize - 1 - (bankSize * __data.size)) / bankSize).toInt()
-
-        if (banksToAdd > 0) {
-            repeat(banksToAdd) { __data.add(ByteArray(bankSize)) }
+        try {
+            val r = __data[index.toBankNumber()][index.toBankOffset()]
+            return  r
         }
-        size = newSize
+        catch (e: IndexOutOfBoundsException) {
+            System.err.println("index: $index -> bank ${index.toBankNumber()} offset ${index.toBankOffset()}")
+            System.err.println("But the array only contains ${__data.size} banks.")
+
+            throw e
+        }
     }
+
+    private fun doubleTheCapacity() {
+        val oldSize = __data.size
+        repeat(oldSize) { __data.add(ByteArray(bankSize)) }
+
+        internalCapacity = __data.size * bankSize.toLong()
+    }
+
+    /**
+     * Increases the capacity of it, if necessary, to ensure that it can hold at least the number of elements specified by the minimum capacity argument.
+     */
+    fun ensureCapacity(minCapacity: Long) {
+        while (minCapacity > internalCapacity) {
+            doubleTheCapacity()
+        }
+    }
+
 
     operator fun iterator(): ByteIterator {
         return object : ByteIterator() {
@@ -131,7 +166,8 @@ class ByteArray64(arraySize: Long) {
 
     fun writeToFile(file: File) {
         var fos = FileOutputStream(file, false)
-        fos.write(__data[0])
+        // following code writes in-chunk basis
+        /*fos.write(__data[0])
         fos.flush()
         fos.close()
 
@@ -142,7 +178,13 @@ class ByteArray64(arraySize: Long) {
                 fos.flush()
             }
             fos.close()
+        }*/
+
+        forEach {
+            fos.write(it.toInt())
         }
+        fos.flush()
+        fos.close()
     }
 }
 
@@ -194,21 +236,9 @@ open class ByteArray64GrowableOutputStream(size: Long = ByteArray64.bankSize.toL
             throw IllegalStateException("This output stream is finalised and cannot be modified.")
         }
         else {
-            ensureCapacity(count + 1)
             buf[count] = b.toByte()
             count += 1
         }
-    }
-
-    private fun ensureCapacity(minCapacity: Long) {
-        // overflow-conscious code
-        if (minCapacity > buf.size)
-            grow(minCapacity)
-    }
-
-    private fun grow(minCapacity: Long) {
-        // overflow-conscious code
-        buf.doubleTheSize()
     }
 
     /** Unlike Java's, this does NOT create a copy of the internal buffer; this just returns its internal.

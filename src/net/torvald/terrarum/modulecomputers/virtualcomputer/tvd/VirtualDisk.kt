@@ -39,15 +39,13 @@ class VirtualDisk(
     }
 
     private fun serializeEntriesOnly(): ByteArray64 {
-        val bufferList = ArrayList<Byte>() // FIXME this part would take up excessive memory for large files
+        val buffer = ByteArray64()
         entries.forEach {
             val serialised = it.value.serialize()
-            serialised.forEach { bufferList.add(it) }
+            serialised.forEach { buffer.add(it) }
         }
 
-        val byteArray = ByteArray64(bufferList.size.toLong())
-        bufferList.forEachIndexed { index, byte -> byteArray[index.toLong()] = byte }
-        return byteArray
+        return buffer
     }
 
     fun serialize(): AppendableByteBuffer {
@@ -170,7 +168,7 @@ class DiskEntry(
 
     override fun equals(other: Any?) = if (other == null) false else this.hashCode() == other.hashCode()
 
-    override fun toString() = "DiskEntry(name: ${getFilenameString(Charsets.UTF_8)}, ID: $entryID, parent: $parentEntryID, type: ${contents.getTypeFlag()}, crc: ${hashCode().toHex()})"
+    override fun toString() = "DiskEntry(name: ${getFilenameString(Charsets.UTF_8)}, ID: $entryID, parent: $parentEntryID, type: ${contents.getTypeFlag()}, contents size: ${contents.getSizeEntry()}, crc: ${hashCode().toHex()})"
 }
 
 
