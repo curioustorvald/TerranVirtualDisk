@@ -29,19 +29,15 @@ class ByteArray64(val size: Long) {
 
         val requiredBanks: Int = 1 + ((size - 1) / bankSize).toInt()
 
-        __data = Array<ByteArray>(
-                requiredBanks,
-                { bankIndex ->
-                    kotlin.ByteArray(
-                            if (bankIndex == requiredBanks - 1)
-                                size.toBankOffset()
-                            else
-                                bankSize,
-
-                            { 0.toByte() }
-                    )
-                }
-        )
+        __data = Array<ByteArray>(requiredBanks) { bankIndex ->
+            kotlin.ByteArray(
+                    if (bankIndex == requiredBanks - 1)
+                        if (size.toBankOffset() == 0) bankSize
+                        else size.toBankOffset()
+                    else
+                        bankSize
+            ) { 0.toByte() }
+        }
     }
 
     private fun Long.toBankNumber(): Int = (this / bankSize).toInt()
