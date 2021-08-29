@@ -1,6 +1,4 @@
 Manifest-Version: 1.0
-Class-Path: ./kotlin-reflect.jar ./kotlin-stdlib-jdk7.jar ./kotlin-std
- lib-jdk8.jar ./kotlin-stdlib.jar
-Main-Class: net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.finder.VirtualDis
- kCrackerKt
+Main-Class: net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.fin
+ der.VirtualDiskCrackerKt
 

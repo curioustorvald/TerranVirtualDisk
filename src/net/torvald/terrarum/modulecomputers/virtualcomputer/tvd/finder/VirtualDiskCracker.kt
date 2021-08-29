@@ -222,7 +222,7 @@ class VirtualDiskCracker(val sysCharset: Charset = Charsets.UTF_8) : JFrame() {
                     makeNewDisk = true
                 }
                 if (makeNewDisk) {
-                    val fileChooser = JFileChooser()
+                    val fileChooser = JFileChooser("./")
                     fileChooser.showOpenDialog(null)
                     if (fileChooser.selectedFile != null) {
                         try {
@@ -258,7 +258,7 @@ class VirtualDiskCracker(val sysCharset: Charset = Charsets.UTF_8) : JFrame() {
 
 
 
-                    val fileChooser = JFileChooser()
+                    val fileChooser = JFileChooser("./")
                     fileChooser.showSaveDialog(null)
                     if (fileChooser.selectedFile != null) {
                         try {
@@ -485,7 +485,7 @@ class VirtualDiskCracker(val sysCharset: Charset = Charsets.UTF_8) : JFrame() {
         menuEdit.add("Import Files/Folders…").addMouseListener(object : MouseAdapter() {
             override fun mousePressed(e: MouseEvent?) {
                 if (vdisk != null) {
-                    val fileChooser = JFileChooser()
+                    val fileChooser = JFileChooser("./")
                     fileChooser.fileSelectionMode = JFileChooser.FILES_AND_DIRECTORIES
                     fileChooser.isMultiSelectionEnabled = true
                     fileChooser.showOpenDialog(null)
@@ -540,7 +540,7 @@ class VirtualDiskCracker(val sysCharset: Charset = Charsets.UTF_8) : JFrame() {
                 if (vdisk != null) {
                     val file = vdisk!!.entries[selectedFile ?: currentDirectory]!!
 
-                    val fileChooser = JFileChooser()
+                    val fileChooser = JFileChooser("./")
                     fileChooser.fileSelectionMode = JFileChooser.DIRECTORIES_ONLY
                     fileChooser.isMultiSelectionEnabled = false
                     fileChooser.showSaveDialog(null)

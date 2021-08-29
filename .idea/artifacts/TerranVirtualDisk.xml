@@ -5,12 +5,16 @@
       <element id="file-copy" path="$PROJECT_DIR$/LICENSE.md" />
       <element id="file-copy" path="$PROJECT_DIR$/README.md" />
       <element id="file-copy" path="$PROJECT_DIR$/Spec.md" />
-      <element id="library" level="project" name="KotlinJavaRuntime" />
       <element id="archive" name="TerranVirtualDisk.jar">
         <element id="directory" name="META-INF">
           <element id="file-copy" path="$PROJECT_DIR$/src/META-INF/MANIFEST.MF" />
         </element>
         <element id="module-output" name="TerranVDImg" />
+        <element id="extracted-dir" path="$PROJECT_DIR$/lib/kotlin-reflect.jar" path-in-jar="/" />
+        <element id="extracted-dir" path="$PROJECT_DIR$/lib/kotlin-stdlib-jdk7.jar" path-in-jar="/" />
+        <element id="extracted-dir" path="$PROJECT_DIR$/lib/kotlin-stdlib-jdk8.jar" path-in-jar="/" />
+        <element id="extracted-dir" path="$PROJECT_DIR$/lib/kotlin-stdlib.jar" path-in-jar="/" />
+        <element id="extracted-dir" path="$PROJECT_DIR$/lib/kotlin-test.jar" path-in-jar="/" />
       </element>
       <element id="archive" name="TerranVirtualDisk-src.jar">
         <element id="dir-copy" path="$PROJECT_DIR$/src/net" />
