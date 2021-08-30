@@ -4,12 +4,12 @@ import java.io.*
 import java.nio.charset.Charset
 import java.util.*
 import java.util.logging.Level
-import java.util.zip.DeflaterOutputStream
-import java.util.zip.InflaterOutputStream
 import javax.naming.OperationNotSupportedException
 import kotlin.collections.ArrayList
 
 /**
+ * Temporarily disabling on-disk compression; it somehow does not work, compress the files by yourself!
+ *
  * Created by minjaesong on 2017-04-01.
  */
 object VDUtil {
@@ -252,7 +252,7 @@ object VDUtil {
 
 
     fun isFile(disk: VirtualDisk, entryID: EntryID) = disk.entries[entryID]?.contents is EntryFile
-    fun isCompressedFile(disk: VirtualDisk, entryID: EntryID) = disk.entries[entryID]?.contents is EntryFileCompressed
+    //fun isCompressedFile(disk: VirtualDisk, entryID: EntryID) = disk.entries[entryID]?.contents is EntryFileCompressed
     fun isDirectory(disk: VirtualDisk, entryID: EntryID) = disk.entries[entryID]?.contents is EntryDirectory
     fun isSymlink(disk: VirtualDisk, entryID: EntryID) = disk.entries[entryID]?.contents is EntrySymlink
 
@@ -462,9 +462,9 @@ object VDUtil {
      * Add file to the specified directory.
      * The file will get new EntryID and its ParentID will be overwritten.
      */
-    fun addFile(disk: VirtualDisk, parentPath: VDPath, file: DiskEntry, compress: Boolean = false) {
+    fun addFile(disk: VirtualDisk, parentPath: VDPath, file: DiskEntry) {//}, compress: Boolean = false) {
         val targetDirID = getFile(disk, parentPath)!!.entryID
-        return addFile(disk, targetDirID, file, compress)
+        return addFile(disk, targetDirID, file)//, compress)
     }
 
     fun randomBase62(length: Int): String {
@@ -493,10 +493,8 @@ object VDUtil {
 
     /**
      * Add file to the specified directory. ParentID of the file will be overwritten.
-     *
-     * @param compressTheFile Used to compress un-compressed file. Will be ignored if the entry is Dir, Symlink or EntryFileCompressed
      */
-    fun addFile(disk: VirtualDisk, directoryID: EntryID, file: DiskEntry, compressTheFile: Boolean = false) {
+    fun addFile(disk: VirtualDisk, directoryID: EntryID, file: DiskEntry) {//}, compressTheFile: Boolean = false) {
         disk.checkReadOnly()
         disk.checkCapacity(file.serialisedSize)
 
@@ -506,40 +504,18 @@ object VDUtil {
             // add record to the directory
             getAsDirectory(disk, directoryID).add(file.entryID)
 
-            // DEFLATE fat boy if marked as
-            if (compressTheFile && file.contents is EntryFile) {
-                val filename = "./tmp_" + randomBase62(10)
+            // Gzip fat boy if marked as
+            /*if (compressTheFile && file.contents is EntryFile) {
+                val bo = ByteArray64GrowableOutputStream()
+                val zo = GZIPOutputStream(bo)
 
-                // dump the deflated bytes to disk
-                file.contents.bytes.forEachBanks {
-                    val fos = BufferedOutputStream(FileOutputStream(filename))
-                    val deflater = DeflaterOutputStream(fos, true)
-
-                    deflater.write(it)
-                    deflater.flush()
-                    deflater.close()
+                // zip
+                file.contents.bytes.forEach {
+                    zo.write(it.toInt())
                 }
+                zo.flush(); zo.close()
 
-
-                // read back deflated bytes untouched and store it
-                val tempFile = File(filename)
-                val tempFileFIS = FileInputStream(tempFile)
-                val readBytes = ByteArray64(tempFile.length())
-
-                var c = 0L
-
-                while (true) {
-                    val r = tempFileFIS.read()
-                    if (r == -1) break
-                    else         readBytes[c] = r.toByte()
-
-                    c++
-                }
-
-                tempFileFIS.close()
-
-
-                val newContent = EntryFileCompressed(file.contents.bytes.size, readBytes)
+                val newContent = EntryFileCompressed(file.contents.bytes.size, bo.toByteArray64())
                 val newEntry = DiskEntry(
                         file.entryID, file.parentEntryID, file.filename, file.creationDate, file.modificationDate,
                         newContent
@@ -548,9 +524,8 @@ object VDUtil {
                 disk.entries[file.entryID] = newEntry
             }
             // just the add the boy to the house
-            else {
+            else*/
                 disk.entries[file.entryID] = file
-            }
 
             // make this boy recognise his new parent
             file.parentEntryID = directoryID
@@ -693,7 +668,7 @@ object VDUtil {
     fun exportFile(entryFile: EntryFile, outfile: File) {
         outfile.createNewFile()
 
-        if (entryFile is EntryFileCompressed) {
+        /*if (entryFile is EntryFileCompressed) {
             entryFile.bytes.forEachBanks {
                 val fos = FileOutputStream(outfile)
                 val inflater = InflaterOutputStream(fos)
@@ -703,9 +678,8 @@ object VDUtil {
                 inflater.close()
             }
         }
-        else {
+        else*/
             outfile.writeBytes64(entryFile.bytes)
-        }
     }
 
     fun exportDirRecurse(disk: VirtualDisk, parentDir: EntryID, outfile: File, charset: Charset) {

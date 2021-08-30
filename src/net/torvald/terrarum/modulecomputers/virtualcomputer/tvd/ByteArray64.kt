@@ -137,9 +137,47 @@ class ByteArray64(initialSize: Long = bankSize.toLong()) {
         }
     }
 
+    /** Iterates over all written bytes. */
     fun forEach(consumer: (Byte) -> Unit) = iterator().forEach { consumer(it) }
+    /** Iterates over all written 32-bit words. */
     fun forEachInt32(consumer: (Int) -> Unit) = iteratorChoppedToInt().forEach { consumer(it) }
+    /** Iterates over all existing banks, even if they are not used. Please use [forEachUsedBanks] to iterate over banks that are actually been used. */
     fun forEachBanks(consumer: (ByteArray) -> Unit) = __data.forEach(consumer)
+    /** Iterates over all written bytes. */
+    fun forEachIndexed(consumer: (Long, Byte) -> Unit) {
+        var cnt = 0L
+        iterator().forEach {
+            consumer(cnt, it)
+            cnt += 1
+        }
+    }
+    /** Iterates over all written 32-bit words. */
+    fun forEachInt32Indexed(consumer: (Long, Int) -> Unit) {
+        var cnt = 0L
+        iteratorChoppedToInt().forEach {
+            consumer(cnt, it)
+            cnt += 1
+        }
+    }
+
+    /**
+     * @param consumer (Int, Int, ByteArray)-to-Unit function where first Int is index;
+     * second Int is actual number of bytes written in that bank, 0 to BankSize inclusive.
+     */
+    fun forEachUsedBanksIndexed(consumer: (Int, Int, ByteArray) -> Unit) {
+        __data.forEachIndexed { index, bytes ->
+            consumer(index, (size - bankSize * index).coerceIn(0, bankSize.toLong()).toInt(), bytes)
+        }
+    }
+
+    /**
+     * @param consumer (Int, Int, ByteArray)-to-Unit function where Int is actual number of bytes written in that bank, 0 to BankSize inclusive.
+     */
+    fun forEachUsedBanks(consumer: (Int, ByteArray) -> Unit) {
+        __data.forEachIndexed { index, bytes ->
+            consumer((size - bankSize * index).coerceIn(0, bankSize.toLong()).toInt(), bytes)
+        }
+    }
 
     fun sliceArray64(range: LongRange): ByteArray64 {
         val newarr = ByteArray64(range.last - range.first + 1)
@@ -209,9 +247,8 @@ open class ByteArray64OutputStream(val byteArray64: ByteArray64): OutputStream()
 
     override fun write(b: Int) {
         try {
+            byteArray64.add(b.toByte())
             writeCounter += 1
-
-            byteArray64[writeCounter - 1] = b.toByte()
         }
         catch (e: ArrayIndexOutOfBoundsException) {
             throw IOException(e)
@@ -236,7 +273,7 @@ open class ByteArray64GrowableOutputStream(size: Long = ByteArray64.bankSize.toL
             throw IllegalStateException("This output stream is finalised and cannot be modified.")
         }
         else {
-            buf[count] = b.toByte()
+            buf.add(b.toByte())
             count += 1
         }
     }

@@ -4,6 +4,7 @@ import java.io.IOException
 import java.nio.charset.Charset
 import java.util.*
 import java.util.zip.CRC32
+import java.util.zip.GZIPInputStream
 import kotlin.experimental.and
 import kotlin.experimental.or
 
@@ -200,7 +201,7 @@ open class EntryFile(internal var bytes: ByteArray64) : DiskEntryContent {
         return buffer
     }
 }
-class EntryFileCompressed(internal var uncompressedSize: Long, bytes: ByteArray64) : EntryFile(bytes) {
+/*class EntryFileCompressed(internal var uncompressedSize: Long, bytes: ByteArray64) : EntryFile(bytes) {
 
     override fun getSizePure() = bytes.size
     override fun getSizeEntry() = getSizePure() + 12
@@ -214,7 +215,19 @@ class EntryFileCompressed(internal var uncompressedSize: Long, bytes: ByteArray6
         buffer.put(bytes)
         return buffer
     }
-}
+
+    fun decompress(): ByteArray64 {
+        val unzipdBytes = ByteArray64()
+        val zi = GZIPInputStream(ByteArray64InputStream(bytes))
+        while (true) {
+            val byte = zi.read()
+            if (byte == -1) break
+            unzipdBytes.add(byte.toByte())
+        }
+        zi.close()
+        return unzipdBytes
+    }
+}*/
 class EntryDirectory(private val entries: ArrayList<EntryID> = ArrayList<EntryID>()) : DiskEntryContent {
 
     override fun getSizePure() = entries.size * 4L
