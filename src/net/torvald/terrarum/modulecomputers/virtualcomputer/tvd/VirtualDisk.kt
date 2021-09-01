@@ -180,6 +180,7 @@ interface DiskEntryContent {
     fun serialize(): AppendableByteBuffer
     fun getSizePure(): Long
     fun getSizeEntry(): Long
+    fun getContent(): Any
 }
 
 /**
@@ -200,6 +201,8 @@ open class EntryFile(internal var bytes: ByteArray64) : DiskEntryContent {
         buffer.put(bytes)
         return buffer
     }
+
+    override fun getContent() = bytes
 }
 /*class EntryFileCompressed(internal var uncompressedSize: Long, bytes: ByteArray64) : EntryFile(bytes) {
 
@@ -260,6 +263,8 @@ class EntryDirectory(private val entries: ArrayList<EntryID> = ArrayList<EntryID
         return buffer
     }
 
+    override fun getContent() = entries.toIntArray()
+
     companion object {
         val NEW_ENTRY_SIZE = DiskEntry.HEADER_SIZE + 4L
     }
@@ -273,6 +278,8 @@ class EntrySymlink(val target: EntryID) : DiskEntryContent {
         val buffer = AppendableByteBuffer(4)
         return buffer.put(target.toBigEndian())
     }
+
+    override fun getContent() = target
 }
 
 

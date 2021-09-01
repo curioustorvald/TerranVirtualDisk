@@ -21,6 +21,8 @@ class ByteArray64(initialSize: Long = bankSize.toLong()) {
     var size = 0L
         internal set
 
+    private var finalised = false
+
     companion object {
         val bankSize: Int = 8192
 
@@ -31,7 +33,11 @@ class ByteArray64(initialSize: Long = bankSize.toLong()) {
         }
     }
 
-    internal val __data: ArrayList<ByteArray>
+    private val __data: ArrayList<ByteArray>
+
+    private fun checkMutability() {
+        if (finalised) throw IllegalStateException("ByteArray64 is finalised and cannot be modified")
+    }
 
     init {
         if (internalCapacity < 0)
@@ -49,6 +55,7 @@ class ByteArray64(initialSize: Long = bankSize.toLong()) {
     private fun Long.toBankOffset(): Int = (this % bankSize).toInt()
 
     operator fun set(index: Long, value: Byte) {
+        checkMutability()
         ensureCapacity(index + 1)
 
         try {
@@ -224,6 +231,10 @@ class ByteArray64(initialSize: Long = bankSize.toLong()) {
         fos.flush()
         fos.close()
     }
+
+    fun finalise() {
+        this.finalised = true
+    }
 }
 
 open class ByteArray64InputStream(val byteArray64: ByteArray64): InputStream() {
@@ -253,6 +264,10 @@ open class ByteArray64OutputStream(val byteArray64: ByteArray64): OutputStream()
         catch (e: ArrayIndexOutOfBoundsException) {
             throw IOException(e)
         }
+    }
+
+    override fun close() {
+        byteArray64.finalise()
     }
 }
 
@@ -285,8 +300,13 @@ open class ByteArray64GrowableOutputStream(size: Long = ByteArray64.bankSize.toL
      */
     @Synchronized
     fun toByteArray64(): ByteArray64 {
-        finalised = true
+        close()
         buf.size = count
         return buf
+    }
+
+    override fun close() {
+        finalised = true
+        buf.finalise()
     }
 }
