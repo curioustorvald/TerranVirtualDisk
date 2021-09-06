@@ -91,10 +91,8 @@ class ByteArray64(initialSize: Long = bankSize.toLong()) {
         }
     }
 
-    private fun doubleTheCapacity() {
-        val oldSize = __data.size
-        repeat(oldSize) { __data.add(ByteArray(bankSize)) }
-
+    private fun addOneBank() {
+        __data.add(ByteArray(bankSize))
         internalCapacity = __data.size * bankSize.toLong()
     }
 
@@ -103,7 +101,7 @@ class ByteArray64(initialSize: Long = bankSize.toLong()) {
      */
     fun ensureCapacity(minCapacity: Long) {
         while (minCapacity > internalCapacity) {
-            doubleTheCapacity()
+            addOneBank()
         }
     }
 
