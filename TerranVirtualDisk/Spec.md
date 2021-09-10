@@ -7,6 +7,7 @@ current specversion number: 0x03
 ### 0x04
 - Removed compressed file (TODO instead we're providing compression tool)
 - Footer moved upto the header (thus freeing the entry id 0xFEFEFEFE)
+- Entry IDs are extended to 8 bytes
 
 ### 0x03
 - Option to compress file entry
@@ -26,13 +27,9 @@ current specversion number: 0x03
 
 
     Header
-    
     <entry>
-    
     <entry>
-    
     <entry>
-    
     ...
 
 
@@ -67,10 +64,10 @@ NOTES:
 - entries are not guaranteed to be sorted, even though the disk cracker will make it sorted.
 - Root entry (ID=0) however, must be the first entry that comes right after the header.
 - Name of the root entry is undefined, the DiskCracker defaults it as "(root)", but it can be anything.
-- Parent node of the root is undefined; do not make an assume that root node's parent is 0.
+- Parent node of the root is undefined; do not make an assumption that root node's parent is 0.
 
 ###  Entry Header
-    Int64       EntryID (random Integer). This act as "jump" position for directory listing.
+    Int64       EntryID (random Long). This act as "jump" position for directory listing.
                 NOTE: Index 0 must be a root "Directory"
     Int64       EntryID of parent directory
     UInt8       Flag for file or directory or symlink
@@ -81,7 +78,7 @@ NOTES:
     Uint8[256]  File name (UTF-8 is recommended)
     Int48       Creation date in real-life UNIX timestamp
     Int48       Last modification date in real-life UNIX timestamp
-    Int32       CRC-32 of Actual Entry
+    Int32       CRC-32 of Actual Entry (entrysize and the actual bytes concatenated)
 
     (Header size: 292 bytes)
 

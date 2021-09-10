@@ -1,23 +1,47 @@
 package net.torvald.terrarum.modulecomputers.virtualcomputer.tvd
 
 import java.io.*
+import java.nio.ByteBuffer
+import java.nio.channels.FileChannel
 import java.nio.charset.Charset
 import java.util.*
 import kotlin.collections.HashMap
 import kotlin.experimental.and
 
 /**
- * Creates entry-to-offset tables to allow streaming from the disk, without storing whole VD file to the memory.
+ * Skimming allows modifying the Virtual Disk without loading entire disk onto the memory.
  *
- * Skimming is only useful for limited applications, reading/adding/removing one or two files occasionally.
+ * Skimmer will just scan through the raw bytes of the Virtual Disk to get the file requested with its Entry ID;
+ * modifying/removing files will edit the Virtual Disk in "dirty" way, where old entries are simply marked as deletion
+ * and leaves the actual contents untouched, then will simply append modified files at the end.
  *
- * IO Operation using the skimmer has huge overheads for every operation. For large operations, use VDUtil to load the
- * entire disk onto the memory and modify the disk as much as you want, then export the changes as a new file.
+ * To obtain "clean" version of the modified Virtual Disk, simply run [sync] function.
  *
  * Created by minjaesong on 2017-11-17.
  */
 class DiskSkimmer(private val diskFile: File, val charset: Charset = Charset.defaultCharset()) {
 
+    /*
+
+init:
+
+1. get the startingpoint of the entries (after the 8 byte ID space ofc)
+
+addfile/editfile:
+
+10. mark old parentdir as invalidated
+11. mark old entryfile as invalidated
+20. append new file
+30. append modified parentdir
+40. update startingpoint table
+
+removefile:
+
+10. mark old parentdir as invalidated
+20. append modified parentdir
+30. update startingpoint table
+
+     */
 
     /**
      * EntryID to Offset.
@@ -25,30 +49,28 @@ class DiskSkimmer(private val diskFile: File, val charset: Charset = Charset.def
      * Offset is where the header begins, so first 4 bytes are exactly the same as the EntryID.
      */
     private var entryToOffsetTable = HashMap<EntryID, Long>()
-    private var footerPosition: Long = 0L
 
-    private val footerSize: Int
-        get() = (diskFile.length() - footerPosition).toInt()
 
     /** temporary storage to store tree edges */
-    private var directoryStruct = ArrayList<DirectoryEdge>()
+//    private var directoryStruct = ArrayList<DirectoryEdge>()
 
     /** root node of the directory tree */
-    private var directory = DirectoryNode(0, null, DiskEntry.DIRECTORY, "")
+//    private var directory = DirectoryNode(0, null, DiskEntry.DIRECTORY, "")
 
-    private data class DirectoryEdge(val nodeParent: EntryID, val node: EntryID, val type: Byte, val name: String)
-    private data class DirectoryNode(var nodeThis: EntryID, val nodeParent: EntryID?, var type: Byte, var name: String)
+//    private data class DirectoryEdge(val nodeParent: EntryID, val node: EntryID, val type: Byte, val name: String)
+//    private data class DirectoryNode(var nodeThis: EntryID, val nodeParent: EntryID?, var type: Byte, var name: String)
 
     private val dirDelim = Regex("""[\\/]""")
     private val DIR = "/"
 
-    val fis = FileInputStream(diskFile)
-    val fc = fis.channel
+    val fa = RandomAccessFile(diskFile, "rw")
 
     init {
+        val fis = FileInputStream(diskFile)
+
         println("[DiskSkimmer] loading the diskfile ${diskFile.canonicalPath}")
 
-        var currentPosition = fis.skip(47) // skip disk header
+        var currentPosition = fis.skip(64) // skip disk header
 
 
         fun skipRead(bytes: Long) {
@@ -98,49 +120,39 @@ class DiskSkimmer(private val diskFile: File, val charset: Charset = Charset.def
             return buffer.toLongBig()
         }
 
-        val currentLength = fc.size()
+        val currentLength = diskFile.length()
         while (currentPosition < currentLength) {
+
             val entryID = readLongBig() // at this point, cursor is 4 bytes past to the entry head
 
-
             // fill up the offset table
-            entryToOffsetTable[entryID] = currentPosition - 4
+            val offset = currentPosition
 
-            val parentID = readLongBig()
-            val entryType = readByte()
-            val nameBytes = ByteArray(256); readBytes(nameBytes) // read and store to the bytearray
+            skipRead(8)
+            val typeFlag = readByte()
+            skipRead(3)
+            val nameBytes = ByteArray(256); readBytes(nameBytes)
+            skipRead(16) // skip rest of the header
 
-            // fill up the tree's edges table
-            directoryStruct.add(DirectoryEdge(parentID, entryID, entryType, nameBytes.toCanonicalString(charset)))
-
-            skipRead(6 + 6 + 4) // skips rest of the header
-
-
-            // figure out the entry size so that we can skip
-            val entrySize: Long = when(entryType and 127) {
-                0x01.toByte() -> readInt48()
-                0x02.toByte() -> readUshortBig() * 4L
-                0x03.toByte() -> 4 // symlink
-                else -> throw InternalError("Unknown entry type: ${entryType.toUint()}")
+            val entrySize = when (typeFlag and 127) {
+                DiskEntry.NORMAL_FILE -> readInt48()
+                DiskEntry.DIRECTORY -> readIntBig().toLong()
+                else -> 0
             }
-
 
             skipRead(entrySize) // skips rest of the entry's actual contents
 
-            println("[DiskSkimmer] successfully read the entry $entryID (name: ${nameBytes.toCanonicalString(charset)})")
+            if (typeFlag > 0) {
+                entryToOffsetTable[entryID] = offset
+                println("[DiskSkimmer] successfully read the entry $entryID at offset $offset (name: ${nameBytes.toCanonicalString(charset)})")
+            }
+            else {
+                println("[DiskSkimmer] discarding entry $entryID at offset $offset (name: ${nameBytes.toCanonicalString(charset)})")
+            }
         }
 
-
-        // construct directory tree from the edges
-
-        /*
-         */
-
-        val nodes = HashSet<DirectoryNode>()
-        directoryStruct.forEach {
-            // TODO
-        }
     }
+
 
     //////////////////////////////////////////////////
     // THESE ARE METHODS TO SUPPORT ON-LINE READING //
@@ -157,22 +169,21 @@ class DiskSkimmer(private val diskFile: File, val charset: Charset = Charset.def
                 return null
             }
             else {
-                val fis = FileInputStream(diskFile)
-                fis.skip(offset + 8) // get to the EntryHeader's parent directory area
-                val parent = fis.read(8).toLongBig()
-                val fileFlag = fis.read(4)[0]
-                val filename = fis.read(256)
-                val creationTime = fis.read(6).toInt48()
-                val modifyTime = fis.read(6).toInt48()
-                val skip_crc = fis.read(4)
+                fa.seek(offset)
+                val parent = fa.read(8).toLongBig()
+                val fileFlag = fa.read(4)[0]
+                val filename = fa.read(256)
+                val creationTime = fa.read(6).toInt48()
+                val modifyTime = fa.read(6).toInt48()
+                val skip_crc = fa.read(4)
 
                 // get entry size     // TODO future me, is this kind of comment helpful or redundant?
                 val entrySize = when (fileFlag) {
                     DiskEntry.NORMAL_FILE -> {
-                        fis.read(6).toInt48()
+                        fa.read(6).toInt48()
                     }
                     DiskEntry.DIRECTORY -> {
-                        fis.read(4).toIntBig().toLong()
+                        fa.read(4).toIntBig().toLong()
                     }
                     DiskEntry.SYMLINK -> 8L
                     else -> throw UnsupportedOperationException("Unsupported entry type: $fileFlag") // FIXME no support for compressed file
@@ -184,7 +195,7 @@ class DiskSkimmer(private val diskFile: File, val charset: Charset = Charset.def
                         val byteArray = ByteArray64(entrySize)
                         // read one byte at a time
                         for (c in 0L until entrySize) {
-                            byteArray[c] = fis.read().toByte()
+                            byteArray[c] = fa.read().toByte()
                         }
 
                         EntryFile(byteArray)
@@ -194,14 +205,14 @@ class DiskSkimmer(private val diskFile: File, val charset: Charset = Charset.def
                         // read 8 bytes at a time
                         val bytesBuffer8 = ByteArray(8)
                         for (c in 0L until entrySize) {
-                            fis.read(bytesBuffer8)
+                            fa.read(bytesBuffer8)
                             dirContents.add(bytesBuffer8.toLongBig())
                         }
 
                         EntryDirectory(dirContents)
                     }
                     DiskEntry.SYMLINK -> {
-                        val target = fis.read(8).toLongBig()
+                        val target = fa.read(8).toLongBig()
 
                         EntrySymlink(target)
                     }
@@ -220,7 +231,7 @@ class DiskSkimmer(private val diskFile: File, val charset: Charset = Charset.def
      * @param path A path to the file from the root, directory separated with '/' (and not '\')
      * @return DiskEntry if the search was successful, `null` otherwise
      */
-    fun requestFile(path: String): DiskEntry? {
+    /*fun requestFile(path: String): DiskEntry? {
         // fixme pretty much untested
 
         val path = path.split(dirDelim)
@@ -261,6 +272,14 @@ class DiskSkimmer(private val diskFile: File, val charset: Charset = Charset.def
         }
 
         return requestFile(traversedDir)
+    }*/
+
+    fun invalidateEntry(id: EntryID) {
+        fa.seek(entryToOffsetTable[id]!! + 8)
+        val type = fa.read()
+        fa.seek(entryToOffsetTable[id]!! + 8)
+        fa.write(type or 128)
+        entryToOffsetTable.remove(id)
     }
 
     ///////////////////////////////////////////////////////
@@ -268,11 +287,45 @@ class DiskSkimmer(private val diskFile: File, val charset: Charset = Charset.def
     ///////////////////////////////////////////////////////
 
     fun appendEntry(entry: DiskEntry) {
+        val parentDir = requestFile(entry.parentEntryID)!!
+        val id = entry.entryID
+        val parent = entry.parentEntryID
 
+        // add the entry to its parent directory if there was none
+        val dirContent = (parentDir.contents as EntryDirectory)
+        if (!dirContent.contains(id)) dirContent.add(id)
+
+        invalidateEntry(parent)
+        invalidateEntry(id)
+
+        val appendAt = fa.length()
+        fa.seek(appendAt)
+
+        // append new file
+        entryToOffsetTable[id] = appendAt + 8
+        entry.serialize().forEach { fa.writeByte(it.toInt()) }
+        // append modified directory
+        entryToOffsetTable[parent] = fa.filePointer + 8
+        parentDir.serialize().forEach { fa.writeByte(it.toInt()) }
     }
 
-    fun deleteEntry(entry: EntryID) {
+    fun deleteEntry(id: EntryID) {
+        val entry = requestFile(id)!!
+        val parentDir = requestFile(entry.parentEntryID)!!
+        val parent = entry.parentEntryID
 
+        invalidateEntry(parent)
+
+        // remove the entry
+        val dirContent = (parentDir.contents as EntryDirectory)
+        dirContent.remove(id)
+
+        val appendAt = fa.length()
+        fa.seek(appendAt)
+
+        // append modified directory
+        entryToOffsetTable[id] = appendAt + 8
+        parentDir.serialize().forEach { fa.writeByte(it.toInt()) }
     }
 
     fun appendEntries(entries: List<DiskEntry>) = entries.forEach { appendEntry(it) }
@@ -281,14 +334,24 @@ class DiskSkimmer(private val diskFile: File, val charset: Charset = Charset.def
     /**
      * Writes new clean file
      */
-    fun sync() {
+    fun sync(): VirtualDisk {
         // rebuild VirtualDisk out of this and use it to write out
+        return VDUtil.readDiskArchive(diskFile, charset = charset)
     }
 
+
+    fun dispose() {
+        fa.close()
+    }
 
 
     companion object {
         fun InputStream.read(size: Int): ByteArray {
+            val ba = ByteArray(size)
+            this.read(ba)
+            return ba
+        }
+        fun RandomAccessFile.read(size: Int): ByteArray {
             val ba = ByteArray(size)
             this.read(ba)
             return ba
