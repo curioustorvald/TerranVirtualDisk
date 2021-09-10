@@ -18,11 +18,11 @@ Run the .jar file to launch the Finder.
 
 ## Limitation
 
-- Each directory cannot hold more than 65 535 entries
+- Each directory cannot hold more than 214748340 entries
 - Each file or the capacity of the disk can be no larger than 256 TiB.
 - Name of the file/directory is limited to 256 bytes
 - Name of the disk is limited to 32 bytes
-- Total number of entries cannot exceed 4 294 967 294 (you will most likely run out of disk space before reach this number)
+- Total number of entries cannot exceed 18446744073709551615 (you will most likely run out of disk space before reach this number)
 - Timestamp will overflow after [8.9 million years](https://www.wolframalpha.com/input/?i=unix+epoch+%2B+2%5E48+seconds)
 
 ## Documentation

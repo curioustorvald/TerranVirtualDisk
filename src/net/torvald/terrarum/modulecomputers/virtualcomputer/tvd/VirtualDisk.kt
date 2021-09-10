@@ -4,7 +4,6 @@ import java.io.IOException
 import java.nio.charset.Charset
 import java.util.*
 import java.util.zip.CRC32
-import java.util.zip.GZIPInputStream
 import kotlin.experimental.and
 import kotlin.experimental.or
 
@@ -12,31 +11,28 @@ import kotlin.experimental.or
  * Created by minjaesong on 2017-03-31.
  */
 
-typealias EntryID = Int
+typealias EntryID = Long
 
-val specversion = 0x03.toByte()
+val specversion = 0x04.toByte()
 
 class VirtualDisk(
         /** capacity of 0 makes the disk read-only */
         var capacity: Long,
-        var diskName: ByteArray = ByteArray(NAME_LENGTH),
-        footer: ByteArray64 = ByteArray64(8) // default to mandatory 8-byte footer
+        var diskName: ByteArray = ByteArray(NAME_LENGTH)
 ) {
-    var footerBytes: ByteArray64 = footer
-        private set
+    var extraInfoBytes = ByteArray(16)
     val entries = HashMap<EntryID, DiskEntry>()
     var isReadOnly: Boolean
-        set(value) { footerBytes[0] = (footerBytes[0] and 0xFE.toByte()) or value.toBit() }
-        get() = capacity == 0L || (footerBytes.size > 0 && footerBytes[0].and(1) == 1.toByte())
+        set(value) { extraInfoBytes[0] = (extraInfoBytes[0] and 0xFE.toByte()) or value.toBit() }
+        get() = capacity == 0L || (extraInfoBytes.size > 0 && extraInfoBytes[0].and(1) == 1.toByte())
     fun getDiskNameString(charset: Charset) = String(diskName, charset)
     val root: DiskEntry
         get() = entries[0]!!
 
-
     private fun Boolean.toBit() = if (this) 1.toByte() else 0.toByte()
 
     internal fun __internalSetFooter__(footer: ByteArray64) {
-        footerBytes = footer
+        extraInfoBytes = footer.toByteArray()
     }
 
     private fun serializeEntriesOnly(): ByteArray64 {
@@ -51,18 +47,19 @@ class VirtualDisk(
 
     fun serialize(): AppendableByteBuffer {
         val entriesBuffer = serializeEntriesOnly()
-        val buffer = AppendableByteBuffer(HEADER_SIZE + entriesBuffer.size + FOOTER_SIZE + footerBytes.size)
+        val buffer = AppendableByteBuffer(HEADER_SIZE + entriesBuffer.size)
         val crc = hashCode().toBigEndian()
 
         buffer.put(MAGIC)
+
         buffer.put(capacity.toInt48())
         buffer.put(diskName.forceSize(NAME_LENGTH))
         buffer.put(crc)
         buffer.put(specversion)
+        buffer.put(0xFE.toByte())
+        buffer.put(extraInfoBytes)
+
         buffer.put(entriesBuffer)
-        buffer.put(FOOTER_START_MARK)
-        buffer.put(footerBytes)
-        buffer.put(EOF_MARK)
 
         return buffer
     }
@@ -83,13 +80,13 @@ class VirtualDisk(
 
     /** Expected size of the virtual disk */
     val usedBytes: Long
-        get() = entries.map { it.value.serialisedSize }.sum() + HEADER_SIZE + FOOTER_SIZE
+        get() = entries.map { it.value.serialisedSize }.sum() + HEADER_SIZE
 
-    fun generateUniqueID(): Int {
-        var id: Int
+    fun generateUniqueID(): Long {
+        var id: Long
         do {
-            id = Random().nextInt()
-        } while (null != entries[id] || id == FOOTER_MARKER)
+            id = Random().nextLong()
+        } while (null != entries[id])
         return id
     }
 
@@ -97,14 +94,10 @@ class VirtualDisk(
     override fun toString() = "VirtualDisk(name: ${getDiskNameString(Charsets.UTF_8)}, capacity: $capacity bytes, crc: ${hashCode().toHex()})"
 
     companion object {
-        val HEADER_SIZE = 47L // according to the spec
-        val FOOTER_SIZE = 6L  // footer mark + EOF
+        val HEADER_SIZE = 64L // according to the spec
         val NAME_LENGTH = 32
 
         val MAGIC = "TEVd".toByteArray()
-        val FOOTER_MARKER = 0xFEFEFEFE.toInt()
-        val FOOTER_START_MARK = FOOTER_MARKER.toBigEndian()
-        val EOF_MARK = byteArrayOf(0xFF.toByte(), 0x19.toByte())
     }
 }
 
@@ -120,20 +113,19 @@ class DiskEntry(
         // content
         val contents: DiskEntryContent
 ) {
-    fun getFilenameString(charset: Charset) = if (entryID == 0) ROOTNAME else filename.toCanonicalString(charset)
+    fun getFilenameString(charset: Charset) = if (entryID == 0L) ROOTNAME else filename.toCanonicalString(charset)
 
     val serialisedSize: Long
         get() = contents.getSizeEntry() + HEADER_SIZE
 
     companion object {
-        val HEADER_SIZE = 281L // according to the spec
+        val HEADER_SIZE = 292L // according to the spec
         val ROOTNAME = "(root)"
         val NAME_LENGTH  = 256
 
         val NORMAL_FILE = 1.toByte()
         val DIRECTORY =   2.toByte()
         val SYMLINK =     3.toByte()
-        val COMPRESSED_FILE = 0x11.toByte()
 
         private fun DiskEntryContent.getTypeFlag() =
                 if      (this is EntryFile)      NORMAL_FILE
@@ -156,10 +148,12 @@ class DiskEntry(
         buffer.put(entryID.toBigEndian())
         buffer.put(parentEntryID.toBigEndian())
         buffer.put(contents.getTypeFlag())
+        buffer.put(0); buffer.put(0); buffer.put(0)
         buffer.put(filename.forceSize(NAME_LENGTH))
         buffer.put(creationDate.toInt48())
         buffer.put(modificationDate.toInt48())
         buffer.put(this.hashCode().toBigEndian())
+
         buffer.put(serialisedContents.array)
 
         return buffer
@@ -174,7 +168,7 @@ class DiskEntry(
 
 
 fun ByteArray.forceSize(size: Int): ByteArray {
-    return ByteArray(size, { if (it < this.size) this[it] else 0.toByte() })
+    return ByteArray(size) { if (it < this.size) this[it] else 0.toByte() }
 }
 interface DiskEntryContent {
     fun serialize(): AppendableByteBuffer
@@ -204,39 +198,12 @@ open class EntryFile(internal var bytes: ByteArray64) : DiskEntryContent {
 
     override fun getContent() = bytes
 }
-/*class EntryFileCompressed(internal var uncompressedSize: Long, bytes: ByteArray64) : EntryFile(bytes) {
-
-    override fun getSizePure() = bytes.size
-    override fun getSizeEntry() = getSizePure() + 12
-
-    /* No new blank file for the compressed */
-
-    override fun serialize(): AppendableByteBuffer {
-        val buffer = AppendableByteBuffer(getSizeEntry())
-        buffer.put(getSizePure().toInt48())
-        buffer.put(uncompressedSize.toInt48())
-        buffer.put(bytes)
-        return buffer
-    }
-
-    fun decompress(): ByteArray64 {
-        val unzipdBytes = ByteArray64()
-        val zi = GZIPInputStream(ByteArray64InputStream(bytes))
-        while (true) {
-            val byte = zi.read()
-            if (byte == -1) break
-            unzipdBytes.add(byte.toByte())
-        }
-        zi.close()
-        return unzipdBytes
-    }
-}*/
 class EntryDirectory(private val entries: ArrayList<EntryID> = ArrayList<EntryID>()) : DiskEntryContent {
 
-    override fun getSizePure() = entries.size * 4L
-    override fun getSizeEntry() = getSizePure() + 2
-    private fun checkCapacity(toAdd: Int = 1) {
-        if (entries.size + toAdd > 65535)
+    override fun getSizePure() = entries.size * 8L
+    override fun getSizeEntry() = getSizePure() + 4
+    private fun checkCapacity(toAdd: Long = 1L) {
+        if (entries.size + toAdd > 4294967295L)
             throw IOException("Directory entries limit exceeded.")
     }
 
@@ -258,24 +225,24 @@ class EntryDirectory(private val entries: ArrayList<EntryID> = ArrayList<EntryID
 
     override fun serialize(): AppendableByteBuffer {
         val buffer = AppendableByteBuffer(getSizeEntry())
-        buffer.put(entries.size.toShort().toBigEndian())
-        entries.forEach { indexNumber -> buffer.put(indexNumber.toBigEndian()) }
+        buffer.put(entries.size.toBigEndian())
+        entries.sorted().forEach { indexNumber -> buffer.put(indexNumber.toBigEndian()) }
         return buffer
     }
 
-    override fun getContent() = entries.toIntArray()
+    override fun getContent() = entries.toLongArray()
 
     companion object {
-        val NEW_ENTRY_SIZE = DiskEntry.HEADER_SIZE + 4L
+        val NEW_ENTRY_SIZE = DiskEntry.HEADER_SIZE + 12L
     }
 }
 class EntrySymlink(val target: EntryID) : DiskEntryContent {
 
-    override fun getSizePure() = 4L
-    override fun getSizeEntry() = 4L
+    override fun getSizePure() = 8L
+    override fun getSizeEntry() = 8L
 
     override fun serialize(): AppendableByteBuffer {
-        val buffer = AppendableByteBuffer(4)
+        val buffer = AppendableByteBuffer(getSizeEntry())
         return buffer.put(target.toBigEndian())
     }
 
@@ -284,11 +251,15 @@ class EntrySymlink(val target: EntryID) : DiskEntryContent {
 
 
 fun Int.toHex() = this.toLong().and(0xFFFFFFFF).toString(16).padStart(8, '0').toUpperCase()
+fun Long.toHex() = this.ushr(32).toInt().toHex() + "_" + this.toInt().toHex()
 fun Int.toBigEndian(): ByteArray {
-    return ByteArray(4, { this.ushr(24 - (8 * it)).toByte() })
+    return ByteArray(4) { this.ushr(24 - (8 * it)).toByte() }
+}
+fun Long.toBigEndian(): ByteArray {
+    return ByteArray(8) { this.ushr(56 - (8 * it)).toByte() }
 }
 fun Long.toInt48(): ByteArray {
-    return ByteArray(6, { this.ushr(40 - (8 * it)).toByte() })
+    return ByteArray(6) { this.ushr(40 - (8 * it)).toByte() }
 }
 fun Short.toBigEndian(): ByteArray {
     return byteArrayOf(
@@ -299,7 +270,7 @@ fun Short.toBigEndian(): ByteArray {
 
 fun AppendableByteBuffer.getCRC32(): Int {
     val crc = CRC32()
-    this.array.forEachInt32 { crc.update(it) }
+    this.array.forEach { crc.update(it.toInt()) }
     return crc.value.toInt()
 }
 class AppendableByteBuffer(val size: Long) {

@@ -4,8 +4,11 @@ import java.io.*
 import java.nio.charset.Charset
 import java.util.*
 import java.util.logging.Level
+import java.util.zip.GZIPInputStream
+import java.util.zip.GZIPOutputStream
 import javax.naming.OperationNotSupportedException
 import kotlin.collections.ArrayList
+import kotlin.experimental.and
 
 /**
  * Temporarily disabling on-disk compression; it somehow does not work, compress the files by yourself!
@@ -108,6 +111,8 @@ object VDUtil {
         outfile.writeBytes64(disk.serialize().array)
     }
 
+    private const val DEBUG_PRINT_READ = false
+
     /**
      * Reads serialised binary and returns corresponding VirtualDisk instance.
      *
@@ -125,59 +130,73 @@ object VDUtil {
         val diskName = inbytes.sliceArray64(10L..10L + 31)
         val diskCRC = inbytes.sliceArray64(10L + 32..10L + 32 + 3).toIntBig() // to check with completed vdisk
         val diskSpecVersion = inbytes[10L + 32 + 4]
-
+        val footers = inbytes.sliceArray64(10L+32+6..10L+32+21)
 
         if (diskSpecVersion != specversion)
             throw RuntimeException("Unsupported disk format version: current internal version is $specversion; the file's version is $diskSpecVersion")
 
         val vdisk = VirtualDisk(diskSize, diskName.toByteArray())
 
+        vdisk.__internalSetFooter__(footers)
+
         //println("[VDUtil] currentUnixtime = $currentUnixtime")
 
         var entryOffset = VirtualDisk.HEADER_SIZE
         // not footer, entries
-        while (!Arrays.equals(inbytes.sliceArray64(entryOffset..entryOffset + 3).toByteArray(), VirtualDisk.FOOTER_START_MARK)) {
+        while (entryOffset < inbytes.size) {
             //println("[VDUtil] entryOffset = $entryOffset")
             // read and prepare all the shits
-            val entryID = inbytes.sliceArray64(entryOffset..entryOffset + 3).toIntBig()
-            val entryParentID = inbytes.sliceArray64(entryOffset + 4..entryOffset + 7).toIntBig()
-            val entryTypeFlag = inbytes[entryOffset + 8]
-            val entryFileName = inbytes.sliceArray64(entryOffset + 9..entryOffset + 9 + 255).toByteArray()
-            val entryCreationTime = inbytes.sliceArray64(entryOffset + 265..entryOffset + 270).toInt48Big()
-            val entryModifyTime = inbytes.sliceArray64(entryOffset + 271..entryOffset + 276).toInt48Big()
-            val entryCRC = inbytes.sliceArray64(entryOffset + 277..entryOffset + 280).toIntBig() // to check with completed entry
+            val entryID = inbytes.sliceArray64(entryOffset..entryOffset + 7).toLongBig()
+            val entryParentID = inbytes.sliceArray64(entryOffset + 8..entryOffset + 15).toLongBig()
+            val entryTypeFlag = inbytes[entryOffset + 16]
+            val entryFileName = inbytes.sliceArray64(entryOffset + 20..entryOffset + 275).toByteArray()
+            val entryCreationTime = inbytes.sliceArray64(entryOffset + 276..entryOffset + 281).toInt48Big()
+            val entryModifyTime = inbytes.sliceArray64(entryOffset + 282..entryOffset + 287).toInt48Big()
+            val entryCRC = inbytes.sliceArray64(entryOffset + 288..entryOffset + 291).toIntBig() // to check with completed entry
 
-            val entryData = when (entryTypeFlag) {
+            val entryData = when (entryTypeFlag and 127) {
                 DiskEntry.NORMAL_FILE -> {
                     val filesize = inbytes.sliceArray64(entryOffset + DiskEntry.HEADER_SIZE..entryOffset + DiskEntry.HEADER_SIZE + 5).toInt48Big()
                     //println("[VDUtil] --> is file; filesize = $filesize")
                     inbytes.sliceArray64(entryOffset + DiskEntry.HEADER_SIZE + 6..entryOffset + DiskEntry.HEADER_SIZE + 5 + filesize)
                 }
                 DiskEntry.DIRECTORY   -> {
-                    val entryCount = inbytes.sliceArray64(entryOffset + DiskEntry.HEADER_SIZE..entryOffset + DiskEntry.HEADER_SIZE + 1).toShortBig()
+                    val entryCount = inbytes.sliceArray64(entryOffset + DiskEntry.HEADER_SIZE..entryOffset + DiskEntry.HEADER_SIZE + 3).toIntBig()
                     //println("[VDUtil] --> is directory; entryCount = $entryCount")
-                    inbytes.sliceArray64(entryOffset + DiskEntry.HEADER_SIZE + 2..entryOffset + DiskEntry.HEADER_SIZE + 1 + entryCount * 4)
+                    inbytes.sliceArray64(entryOffset + DiskEntry.HEADER_SIZE + 4..entryOffset + DiskEntry.HEADER_SIZE + 3 + entryCount * 8)
                 }
                 DiskEntry.SYMLINK     -> {
-                    inbytes.sliceArray64(entryOffset + DiskEntry.HEADER_SIZE..entryOffset + DiskEntry.HEADER_SIZE + 3)
+                    inbytes.sliceArray64(entryOffset + DiskEntry.HEADER_SIZE..entryOffset + DiskEntry.HEADER_SIZE + 7)
                 }
                 else -> throw RuntimeException("Unknown entry with type $entryTypeFlag at entryOffset $entryOffset")
             }
 
+            if (DEBUG_PRINT_READ) {
+                println("== Entry deserialise debugprint for entry ID $entryID (child of $entryParentID)")
+                println("Entry type flag: ${entryTypeFlag and 127}${if (entryTypeFlag < 0) "*" else ""}")
+                println("Entry raw contents bytes: (len: ${entryData.size})")
+                entryData.forEachIndexed { i, it ->
+                    if (i > 0 && i % 8 == 0L) print(" ")
+                    else if (i > 0 && i % 4 == 0L) print("_")
+                    print(it.toInt().toHex().substring(6))
+                }; println()
+            }
 
 
             // update entryOffset so that we can fetch next entry in the binary
-            entryOffset += DiskEntry.HEADER_SIZE + entryData.size + when (entryTypeFlag) {
-                DiskEntry.COMPRESSED_FILE -> 12 // PLEASE DO REFER TO Spec.md
+            entryOffset += DiskEntry.HEADER_SIZE + entryData.size + when (entryTypeFlag and 127) {
                 DiskEntry.NORMAL_FILE -> 6      // PLEASE DO REFER TO Spec.md
-                DiskEntry.DIRECTORY   -> 2      // PLEASE DO REFER TO Spec.md
+                DiskEntry.DIRECTORY   -> 4      // PLEASE DO REFER TO Spec.md
                 DiskEntry.SYMLINK     -> 0      // PLEASE DO REFER TO Spec.md
                 else -> throw RuntimeException("Unknown entry with type $entryTypeFlag")
             }
 
 
-            // create entry
-            val diskEntry = DiskEntry(
+            // check for the discard bit
+            if (entryTypeFlag in 1..127) {
+
+                // create entry
+                val diskEntry = DiskEntry(
                     entryID = entryID,
                     parentEntryID = entryParentID,
                     filename = entryFileName,
@@ -185,53 +204,63 @@ object VDUtil {
                     modificationDate = entryModifyTime,
                     contents = if (entryTypeFlag == DiskEntry.NORMAL_FILE) {
                         EntryFile(entryData)
-                    }
-                    else if (entryTypeFlag == DiskEntry.DIRECTORY) {
+                    } else if (entryTypeFlag == DiskEntry.DIRECTORY) {
+
                         val entryList = ArrayList<EntryID>()
-                        (0..entryData.size / 4 - 1).forEach {
-                            entryList.add(entryData.sliceArray64(4 * it..4 * it + 3).toIntBig())
+
+                        (0 until entryData.size / 8).forEach { cnt ->
+                            entryList.add(entryData.sliceArray64(8 * cnt until 8 * (cnt+1)).toLongBig())
                         }
 
+                        entryList.sort()
+
                         EntryDirectory(entryList)
-                    }
-                    else if (entryTypeFlag == DiskEntry.SYMLINK) {
-                        EntrySymlink(entryData.toIntBig())
-                    }
-                    else
+                    } else if (entryTypeFlag == DiskEntry.SYMLINK) {
+                        EntrySymlink(entryData.toLongBig())
+                    } else
                         throw RuntimeException("Unknown entry with type $entryTypeFlag")
-            )
+                )
 
-            // check CRC of entry
-            if (crcWarnLevel == Level.SEVERE || crcWarnLevel == Level.WARNING) {
-                val calculatedCRC = diskEntry.hashCode()
+                // check CRC of entry
+                if (crcWarnLevel == Level.SEVERE || crcWarnLevel == Level.WARNING) {
 
-                val crcMsg = "CRC failed: stored value is ${entryCRC.toHex()}, but calculated value is ${calculatedCRC.toHex()}\n" +
-                        "at file \"${diskEntry.getFilenameString(charset)}\" (entry ID ${diskEntry.entryID})"
+                    // test print
+                    if (DEBUG_PRINT_READ) {
+                        val testbytez = diskEntry.contents.serialize()
+                        val testbytes = testbytez.array
+                        (diskEntry.contents as? EntryDirectory)?.forEach {
+                            println("entry: ${it.toHex()}")
+                        }
+                        println("bytes to calculate crc against:")
+                        testbytes.forEachIndexed { i, it ->
+                            if (i % 4 == 0L) print(" ")
+                            print(it.toInt().toHex().substring(6))
+                        }
+                        println("\nCRC: " + testbytez.getCRC32().toHex())
+                    }
+                    // end of test print
 
-                if (calculatedCRC != entryCRC) {
+                    val calculatedCRC = diskEntry.contents.serialize().getCRC32()
 
-                    println("CRC failed; entry info:\n$diskEntry")
+                    val crcMsg =
+                        "CRC failed: stored value is ${entryCRC.toHex()}, but calculated value is ${calculatedCRC.toHex()}\n" +
+                                "at file \"${diskEntry.getFilenameString(charset)}\" (entry ID ${diskEntry.entryID})"
 
-                    if (crcWarnLevel == Level.SEVERE)
-                        throw IOException(crcMsg)
-                    else if (warningFunc != null)
-                        warningFunc(crcMsg)
+                    if (calculatedCRC != entryCRC) {
+
+                        println("CRC failed; entry info:\n$diskEntry")
+
+                        if (crcWarnLevel == Level.SEVERE)
+                            throw IOException(crcMsg)
+                        else if (warningFunc != null)
+                            warningFunc(crcMsg)
+                    }
                 }
-            }
 
-            // add entry to disk
-            vdisk.entries[entryID] = diskEntry
-        }
-        // entries ends, footers are to be read
-        run {
-            entryOffset += 4 // skip footer marker
-
-            val footerSize = inbytes.size - entryOffset - VirtualDisk.EOF_MARK.size
-            if (footerSize > 0) {
-                vdisk.__internalSetFooter__(inbytes.sliceArray64(entryOffset..entryOffset + footerSize - 1))
+                // add entry to disk
+                vdisk.entries[entryID] = diskEntry
             }
         }
-
 
         // check CRC of disk
         if (crcWarnLevel == Level.SEVERE || crcWarnLevel == Level.WARNING) {
@@ -252,7 +281,6 @@ object VDUtil {
 
 
     fun isFile(disk: VirtualDisk, entryID: EntryID) = disk.entries[entryID]?.contents is EntryFile
-    //fun isCompressedFile(disk: VirtualDisk, entryID: EntryID) = disk.entries[entryID]?.contents is EntryFileCompressed
     fun isDirectory(disk: VirtualDisk, entryID: EntryID) = disk.entries[entryID]?.contents is EntryDirectory
     fun isSymlink(disk: VirtualDisk, entryID: EntryID) = disk.entries[entryID]?.contents is EntrySymlink
 
@@ -413,7 +441,7 @@ object VDUtil {
         if (!directoryContains(disk, parentID, targetID)) {
             throw FileNotFoundException("No such file to delete")
         }
-        else if (targetID == 0) {
+        else if (targetID == 0L) {
             throw IOException("Cannot delete root file system")
         }
         else if (file.contents is EntryDirectory && file.contents.entryCount > 0) {
@@ -819,7 +847,16 @@ object VDUtil {
 
         var i = 0
         var c = 0
-        this.forEach { byte -> i += byte.toUint().shl(24 - c * 8); c += 1 }
+        this.forEach { byte -> i = i or byte.toUint().shl(24 - c * 8); c += 1 }
+        return i
+    }
+    fun ByteArray64.toLongBig(): Long {
+        if (this.size != 8L)
+            throw OperationNotSupportedException("ByteArray is not Long")
+
+        var i = 0L
+        var c = 0
+        this.forEach { byte -> i = i or byte.toUlong().shl(56 - c * 8); c += 1 }
         return i
     }
     fun ByteArray64.toInt48Big(): Long {
@@ -828,7 +865,7 @@ object VDUtil {
 
         var i = 0L
         var c = 0
-        this.forEach { byte -> i += byte.toUint().shl(40 - c * 8); c += 1 }
+        this.forEach { byte -> i = i or byte.toUlong().shl(40 - c * 8); c += 1 }
         return i
     }
     fun ByteArray64.toShortBig(): Short {
@@ -931,6 +968,31 @@ object VDUtil {
             e.printStackTrace()
             throw InternalError("Aw, snap!")
         }
+    }
+
+    fun compress(ba: ByteArray64) = compress(ba.iterator())
+    fun compress(byteIterator: Iterator<Byte>): ByteArray64 {
+        val bo = ByteArray64GrowableOutputStream()
+        val zo = GZIPOutputStream(bo)
+
+        // zip
+        byteIterator.forEach {
+            zo.write(it.toInt())
+        }
+        zo.flush(); zo.close()
+        return bo.toByteArray64()
+    }
+
+    fun decompress(bytes: ByteArray64): ByteArray64 {
+        val unzipdBytes = ByteArray64()
+        val zi = GZIPInputStream(ByteArray64InputStream(bytes))
+        while (true) {
+            val byte = zi.read()
+            if (byte == -1) break
+            unzipdBytes.add(byte.toByte())
+        }
+        zi.close()
+        return unzipdBytes
     }
 }
 
