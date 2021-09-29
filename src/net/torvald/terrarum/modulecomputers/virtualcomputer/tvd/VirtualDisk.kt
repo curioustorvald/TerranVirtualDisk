@@ -119,7 +119,9 @@ class DiskEntry(
 
         // content
         val contents: DiskEntryContent
-) {
+): Comparable<DiskEntry> {
+    override fun compareTo(other: DiskEntry) = entryID.compareTo(other.entryID)
+
     fun getFilenameString(charset: Charset) = if (entryID == 0) ROOTNAME else filename.toCanonicalString(charset)
 
     val serialisedSize: Long
