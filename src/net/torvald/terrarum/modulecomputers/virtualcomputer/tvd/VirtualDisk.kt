@@ -28,7 +28,7 @@ class VirtualDisk(
     var isReadOnly: Boolean
         set(value) { footerBytes[0] = (footerBytes[0] and 0xFE.toByte()) or value.toBit() }
         get() = capacity == 0L || (footerBytes.size > 0 && footerBytes[0].and(1) == 1.toByte())
-    fun getDiskNameString(charset: Charset) = String(diskName, charset)
+    fun getDiskNameString(charset: Charset) = diskName.toCanonicalString(charset)
     val root: DiskEntry
         get() = entries[0]!!
 
