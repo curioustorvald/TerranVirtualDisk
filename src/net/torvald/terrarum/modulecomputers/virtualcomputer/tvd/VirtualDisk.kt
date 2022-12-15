@@ -8,14 +8,16 @@ import java.util.zip.GZIPInputStream
 import kotlin.experimental.and
 import kotlin.experimental.or
 
-/**
- * Created by minjaesong on 2017-03-31.
- */
 
 typealias EntryID = Int
 
 val specversion = 0x03.toByte()
 
+/**
+ * This class provides DOM (disk object model) of the TEVD virtual filesystem.
+ *
+ * Created by minjaesong on 2017-03-31.
+ */
 class VirtualDisk(
         /** capacity of 0 makes the disk read-only */
         var capacity: Long,
