@@ -6,6 +6,7 @@ import java.nio.channels.FileChannel
 import java.nio.charset.Charset
 import java.util.*
 import kotlin.collections.HashMap
+import kotlin.experimental.and
 
 /**
  * Skimmer allows modifications of the Virtual Disk without building a DOM (disk object model).
@@ -45,7 +46,7 @@ removefile:
     /**
      * EntryID to Offset.
      *
-     * Offset is where the header begins, so first 4 bytes are exactly the same as the EntryID.
+     * Offset is where the CONTENTS begin, e.g. first 4 bytes are ID of the parent directory.
      */
     private var entryToOffsetTable = HashMap<EntryID, Long>()
 
@@ -64,13 +65,15 @@ removefile:
 
     val fa = RandomAccessFile(diskFile, "rw")
 
+    private var footerPosition = -1L // where the footer marker (FE FE FE FE) begins, unlike the entryToOffsetTable
+    private val footerSize: Int
+        get() = (diskFile.length() - footerPosition).toInt()
+
     init {
         val fis = FileInputStream(diskFile)
 
         println("[DiskSkimmer] loading the diskfile ${diskFile.canonicalPath}")
 
-        var currentPosition = fis.skip(64) // skip disk header
-        val fis = FileInputStream(diskFile)
         var currentPosition = fis.skip(47) // skip disk header
 
 
@@ -99,7 +102,7 @@ removefile:
         fun readUshortBig(): Int {
             val buffer = ByteArray(2)
             val readStatus = readBytes(buffer)
-            if (readStatus != 2) throw InternalError("Unexpected error -- EOF reached? (expected 4, got $readStatus)")
+            if (readStatus != 2) throw InternalError("Unexpected error -- EOF reached? (expected 2, got $readStatus)")
             return buffer.toShortBig()
         }
         fun readIntBig(): Int {
@@ -117,8 +120,6 @@ removefile:
 
         val currentLength = diskFile.length()
         while (currentPosition < currentLength) {
-
-        while (true) {
             val entryID = readIntBig() // at this point, cursor is 4 bytes past to the entry head
 
             // footer
@@ -127,40 +128,20 @@ removefile:
                 break
             }
 
-            val entryID = readLongBig() // at this point, cursor is 4 bytes past to the entry head
 
             // fill up the offset table
             val offset = currentPosition
 
-            skipRead(8)
+            skipRead(4) // parent dir
             val typeFlag = readByte()
-            skipRead(3)
             val nameBytes = ByteArray(256); readBytes(nameBytes)
             skipRead(16) // skip rest of the header
 
             val entrySize = when (typeFlag and 127) {
                 DiskEntry.NORMAL_FILE -> readInt48()
-                DiskEntry.DIRECTORY -> readIntBig().toLong()
-                else -> 0
-            entryToOffsetTable[entryID] = currentPosition - 4
-
-            val parentID = readIntBig()
-            val entryType = readByte()
-            val nameBytes = ByteArray(256); readBytes(nameBytes) // read and store to the bytearray
-
-            // fill up the tree's edges table
-            directoryStruct.add(DirectoryEdge(parentID, entryID, entryType, nameBytes.toCanonicalString(charset)))
-
-            skipRead(6 + 6 + 4) // skips rest of the header
-
-
-            // figure out the entry size so that we can skip
-            val entrySize: Long = when(entryType) {
-                0x01.toByte() -> readInt48()
-                0x11.toByte() -> readInt48() + 6 // size of compressed payload + 6 (header elem for uncompressed size)
-                0x02.toByte() -> readUshortBig() * 4L
-                0x03.toByte() -> 4 // symlink
-                else -> throw InternalError("Unknown entry type: ${entryType.toUint()}")
+                DiskEntry.DIRECTORY -> readUshortBig().toLong()
+                DiskEntry.SYMLINK -> 4
+                else -> throw InternalError("Unknown entry type: ${typeFlag.toUint()}")
             }
 
             skipRead(entrySize) // skips rest of the entry's actual contents
@@ -193,20 +174,12 @@ removefile:
             }
             else {
                 fa.seek(offset)
-                val parent = fa.read(8).toLongBig()
-                val fileFlag = fa.read(4)[0]
+                val parent = fa.read(4).toIntBig()
+                val fileFlag = fa.read(1)[0]
                 val filename = fa.read(256)
                 val creationTime = fa.read(6).toInt48()
                 val modifyTime = fa.read(6).toInt48()
                 val skip_crc = fa.read(4)
-                val fis = FileInputStream(diskFile)
-                fis.skip(offset + 4) // get to the EntryHeader's parent directory area
-                val parent = fis.read(4).toIntBig()
-                val fileFlag = fis.read(1)[0]
-                val filename = fis.read(256)
-                val creationTime = fis.read(6).toInt48()
-                val modifyTime = fis.read(6).toInt48()
-                val skip_crc = fis.read(4)
 
                 // get entry size     // TODO future me, is this kind of comment helpful or redundant?
                 val entrySize = when (fileFlag) {
@@ -214,8 +187,7 @@ removefile:
                         fa.read(6).toInt48()
                     }
                     DiskEntry.DIRECTORY -> {
-                        fa.read(4).toIntBig().toLong()
-                        fis.read(2).toShortBig().toLong()
+                        fa.read(2).toShortBig().toLong()
                     }
                     DiskEntry.SYMLINK -> 4L
                     else -> throw UnsupportedOperationException("Unsupported entry type: $fileFlag") // FIXME no support for compressed file
@@ -237,17 +209,14 @@ removefile:
                         // read 4 bytes at a time
                         val bytesBuffer4 = ByteArray(4)
                         for (c in 0L until entrySize) {
-                            fa.read(bytesBuffer8)
-                            dirContents.add(bytesBuffer8.toLongBig())
-                            fis.read(bytesBuffer4)
+                            fa.read(bytesBuffer4)
                             dirContents.add(bytesBuffer4.toIntBig())
                         }
 
                         EntryDirectory(dirContents)
                     }
                     DiskEntry.SYMLINK -> {
-                        val target = fa.read(8).toLongBig()
-                        val target = fis.read(4).toIntBig()
+                        val target = fa.read(4).toIntBig()
 
                         EntrySymlink(target)
                     }
@@ -266,7 +235,7 @@ removefile:
      * @param path A path to the file from the root, directory separated with '/' (and not '\')
      * @return DiskEntry if the search was successful, `null` otherwise
      */
-    /*fun requestFile(path: String): DiskEntry? {
+    fun requestFile(path: String): DiskEntry? {
         // fixme pretty much untested
 
         val path = path.split(dirDelim)
@@ -307,7 +276,7 @@ removefile:
         }
 
         return requestFile(traversedDir)
-    }*/
+    }
 
     fun invalidateEntry(id: EntryID) {
         fa.seek(entryToOffsetTable[id]!! + 8)
@@ -321,46 +290,6 @@ removefile:
     // THESE ARE METHODS TO SUPPORT ON-LINE MODIFICATION //
     ///////////////////////////////////////////////////////
 
-    fun appendEntry(entry: DiskEntry) {
-        val parentDir = requestFile(entry.parentEntryID)!!
-        val id = entry.entryID
-        val parent = entry.parentEntryID
-
-        // add the entry to its parent directory if there was none
-        val dirContent = (parentDir.contents as EntryDirectory)
-        if (!dirContent.contains(id)) dirContent.add(id)
-
-        invalidateEntry(parent)
-        invalidateEntry(id)
-
-        val appendAt = fa.length()
-        fa.seek(appendAt)
-
-        // append new file
-        entryToOffsetTable[id] = appendAt + 8
-        entry.serialize().forEach { fa.writeByte(it.toInt()) }
-        // append modified directory
-        entryToOffsetTable[parent] = fa.filePointer + 8
-        parentDir.serialize().forEach { fa.writeByte(it.toInt()) }
-    }
-
-    fun deleteEntry(id: EntryID) {
-        val entry = requestFile(id)!!
-        val parentDir = requestFile(entry.parentEntryID)!!
-        val parent = entry.parentEntryID
-
-        invalidateEntry(parent)
-
-        // remove the entry
-        val dirContent = (parentDir.contents as EntryDirectory)
-        dirContent.remove(id)
-
-        val appendAt = fa.length()
-        fa.seek(appendAt)
-
-        // append modified directory
-        entryToOffsetTable[id] = appendAt + 8
-        parentDir.serialize().forEach { fa.writeByte(it.toInt()) }
     fun appendEntry(entry: DiskEntry) = appendEntries(listOf(entry))
 
     fun appendEntries(entries: List<DiskEntry>): Boolean {
@@ -706,6 +635,8 @@ removefile:
     fun sync(): VirtualDisk {
         // rebuild VirtualDisk out of this and use it to write out
         return VDUtil.readDiskArchive(diskFile, charset = charset)
+    }
+
     fun fixEntryCountUsingActualContents(originalFile: File, tmpFile: File) {
         // scan through every entries for a kind of census
         val censusChild = HashMap<EntryID, Int>() // key: entryID (directory), value: number of childs

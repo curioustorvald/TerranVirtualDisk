@@ -1,11 +1,8 @@
 # Terran Virtual Disk Image Format Specification
 
-current specversion number: 0x03
+current specversion number: 0x02
 
 ## Changes
-
-### 0x03
-- Option to compress file entry
 
 ### 0x02
 - 48-Bit filesize and timestamp (Max 256 TiB / 8.9 million years)

@@ -11,7 +11,7 @@ import kotlin.experimental.or
 
 typealias EntryID = Int
 
-val specversion = 0x03.toByte()
+val specversion = 0x02.toByte()
 
 /**
  * This class provides DOM (disk object model) of the TEVD virtual filesystem.
