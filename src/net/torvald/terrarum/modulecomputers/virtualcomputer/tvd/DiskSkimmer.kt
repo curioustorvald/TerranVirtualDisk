@@ -344,7 +344,7 @@ removefile:
 
 
             entries.forEach { entry ->
-                val bytes = entry.serialize().array
+                val bytes = entry.serialize()
 
                 // update newEntryOffsetTable
                 newEntryOffsetTable[entry.entryID] = entryCounter

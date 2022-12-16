@@ -4,7 +4,6 @@ import java.io.IOException
 import java.nio.charset.Charset
 import java.util.*
 import java.util.zip.CRC32
-import java.util.zip.GZIPInputStream
 import kotlin.experimental.and
 import kotlin.experimental.or
 
@@ -45,26 +44,26 @@ class VirtualDisk(
         val buffer = ByteArray64()
         entries.forEach {
             val serialised = it.value.serialize()
-            serialised.forEach { buffer.add(it) }
+            buffer.appendBytes(serialised)
         }
 
         return buffer
     }
 
-    fun serialize(): AppendableByteBuffer {
+    fun serialize(): ByteArray64 {
         val entriesBuffer = serializeEntriesOnly()
-        val buffer = AppendableByteBuffer(HEADER_SIZE + entriesBuffer.size + FOOTER_SIZE + footerBytes.size)
+        val buffer = ByteArray64(HEADER_SIZE + entriesBuffer.size + FOOTER_SIZE + footerBytes.size)
         val crc = hashCode().toBigEndian()
 
-        buffer.put(MAGIC)
-        buffer.put(capacity.toInt48())
-        buffer.put(diskName.forceSize(NAME_LENGTH))
-        buffer.put(crc)
-        buffer.put(specversion)
-        buffer.put(entriesBuffer)
-        buffer.put(FOOTER_START_MARK)
-        buffer.put(footerBytes)
-        buffer.put(EOF_MARK)
+        buffer.appendBytes(MAGIC)
+        buffer.appendBytes(capacity.toInt48())
+        buffer.appendBytes(diskName.forceSize(NAME_LENGTH))
+        buffer.appendBytes(crc)
+        buffer.appendByte(specversion)
+        buffer.appendBytes(entriesBuffer)
+        buffer.appendBytes(FOOTER_START_MARK)
+        buffer.appendBytes(footerBytes)
+        buffer.appendBytes(EOF_MARK)
 
         return buffer
     }
@@ -153,18 +152,18 @@ class DiskEntry(
         }
     }
 
-    fun serialize(): AppendableByteBuffer {
+    fun serialize(): ByteArray64 {
         val serialisedContents = contents.serialize()
-        val buffer = AppendableByteBuffer(HEADER_SIZE + serialisedContents.size)
+        val buffer = ByteArray64(HEADER_SIZE + serialisedContents.size)
 
-        buffer.put(entryID.toBigEndian())
-        buffer.put(parentEntryID.toBigEndian())
-        buffer.put(contents.getTypeFlag())
-        buffer.put(filename.forceSize(NAME_LENGTH))
-        buffer.put(creationDate.toInt48())
-        buffer.put(modificationDate.toInt48())
-        buffer.put(this.hashCode().toBigEndian())
-        buffer.put(serialisedContents.array)
+        buffer.appendBytes(entryID.toBigEndian())
+        buffer.appendBytes(parentEntryID.toBigEndian())
+        buffer.appendByte(contents.getTypeFlag())
+        buffer.appendBytes(filename.forceSize(NAME_LENGTH))
+        buffer.appendBytes(creationDate.toInt48())
+        buffer.appendBytes(modificationDate.toInt48())
+        buffer.appendBytes(this.hashCode().toBigEndian())
+        buffer.appendBytes(serialisedContents)
 
         return buffer
     }
@@ -181,7 +180,7 @@ fun ByteArray.forceSize(size: Int): ByteArray {
     return ByteArray(size, { if (it < this.size) this[it] else 0.toByte() })
 }
 interface DiskEntryContent {
-    fun serialize(): AppendableByteBuffer
+    fun serialize(): ByteArray64
     fun getSizePure(): Long
     fun getSizeEntry(): Long
     fun getContent(): Any
@@ -199,10 +198,10 @@ open class EntryFile(internal var bytes: ByteArray64) : DiskEntryContent {
     /** Create new blank file */
     constructor(size: Long): this(ByteArray64(size))
 
-    override fun serialize(): AppendableByteBuffer {
-        val buffer = AppendableByteBuffer(getSizeEntry())
-        buffer.put(getSizePure().toInt48())
-        buffer.put(bytes)
+    override fun serialize(): ByteArray64 {
+        val buffer = ByteArray64(getSizeEntry())
+        buffer.appendBytes(getSizePure().toInt48())
+        buffer.appendBytes(bytes)
         return buffer
     }
 
@@ -215,8 +214,8 @@ open class EntryFile(internal var bytes: ByteArray64) : DiskEntryContent {
 
     /* No new blank file for the compressed */
 
-    override fun serialize(): AppendableByteBuffer {
-        val buffer = AppendableByteBuffer(getSizeEntry())
+    override fun serialize(): ByteArray64 {
+        val buffer = ByteArray64(getSizeEntry())
         buffer.put(getSizePure().toInt48())
         buffer.put(uncompressedSize.toInt48())
         buffer.put(bytes)
@@ -260,10 +259,10 @@ class EntryDirectory(private val entries: ArrayList<EntryID> = ArrayList<EntryID
     val entryCount: Int
         get() = entries.size
 
-    override fun serialize(): AppendableByteBuffer {
-        val buffer = AppendableByteBuffer(getSizeEntry())
-        buffer.put(entries.size.toShort().toBigEndian())
-        entries.forEach { indexNumber -> buffer.put(indexNumber.toBigEndian()) }
+    override fun serialize(): ByteArray64 {
+        val buffer = ByteArray64(getSizeEntry())
+        buffer.appendBytes(entries.size.toShort().toBigEndian())
+        entries.forEach { indexNumber -> buffer.appendBytes(indexNumber.toBigEndian()) }
         return buffer
     }
 
@@ -278,9 +277,10 @@ class EntrySymlink(val target: EntryID) : DiskEntryContent {
     override fun getSizePure() = 4L
     override fun getSizeEntry() = 4L
 
-    override fun serialize(): AppendableByteBuffer {
-        val buffer = AppendableByteBuffer(4)
-        return buffer.put(target.toBigEndian())
+    override fun serialize(): ByteArray64 {
+        val buffer = ByteArray64(4)
+        buffer.appendBytes(target.toBigEndian())
+        return buffer
     }
 
     override fun getContent() = target
@@ -301,29 +301,8 @@ fun Short.toBigEndian(): ByteArray {
     )
 }
 
-fun AppendableByteBuffer.getCRC32(): Int {
+fun ByteArray64.getCRC32(): Int {
     val crc = CRC32()
-    this.array.forEachInt32 { crc.update(it) }
+    this.forEachInt32 { crc.update(it) }
     return crc.value.toInt()
-}
-class AppendableByteBuffer(val size: Long) {
-    val array = ByteArray64(size)
-    private var offset = 0L
-
-    fun put(byteArray64: ByteArray64): AppendableByteBuffer {
-        // it's slow but works
-        // can't do system.arrayCopy directly
-        byteArray64.forEach { put(it) }
-        return this
-    }
-    fun put(byteArray: ByteArray): AppendableByteBuffer {
-        byteArray.forEach { put(it) }
-        return this
-    }
-    fun put(byte: Byte): AppendableByteBuffer {
-        array[offset] = byte
-        offset += 1
-        return this
-    }
-    fun forEach(consumer: (Byte) -> Unit) = array.forEach(consumer)
 }

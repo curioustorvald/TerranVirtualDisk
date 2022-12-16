@@ -104,7 +104,7 @@ object VDUtil {
     }
 
     fun dumpToRealMachine(disk: VirtualDisk, outfile: File) {
-        outfile.writeBytes64(disk.serialize().array)
+        outfile.writeBytes64(disk.serialize())
     }
 
     /**
@@ -939,10 +939,10 @@ fun magicMismatch(magic: ByteArray, array: ByteArray): Boolean {
     return !Arrays.equals(array, magic)
 }
 fun String.toEntryName(length: Int, charset: Charset): ByteArray {
-    val buffer = AppendableByteBuffer(length.toLong())
+    val buffer = ByteArray64(length.toLong())
     val stringByteArray = this.toByteArray(charset)
-    buffer.put(stringByteArray.sliceArray(0..minOf(length, stringByteArray.size) - 1))
-    return buffer.array.toByteArray()
+    buffer.appendBytes(stringByteArray.sliceArray(0 until minOf(length, stringByteArray.size)))
+    return buffer.toByteArray()
 }
 fun ByteArray.toCanonicalString(charset: Charset): String {
     var lastIndexOfRealStr = 0
