@@ -184,6 +184,7 @@ interface DiskEntryContent {
     fun getSizePure(): Long
     fun getSizeEntry(): Long
     fun getContent(): Any
+    fun replaceContent(obj: Any)
 }
 
 /**
@@ -206,6 +207,10 @@ open class EntryFile(internal var bytes: ByteArray64) : DiskEntryContent {
     }
 
     override fun getContent() = bytes
+
+    override fun replaceContent(obj: Any) {
+        bytes = obj as ByteArray64
+    }
 }
 /*class EntryFileCompressed(internal var uncompressedSize: Long, bytes: ByteArray64) : EntryFile(bytes) {
 
@@ -234,7 +239,7 @@ open class EntryFile(internal var bytes: ByteArray64) : DiskEntryContent {
         return unzipdBytes
     }
 }*/
-class EntryDirectory(private val entries: ArrayList<EntryID> = ArrayList<EntryID>()) : DiskEntryContent {
+class EntryDirectory(private var entries: ArrayList<EntryID> = ArrayList<EntryID>()) : DiskEntryContent {
 
     override fun getSizePure() = entries.size * 4L
     override fun getSizeEntry() = getSizePure() + 2
@@ -268,11 +273,18 @@ class EntryDirectory(private val entries: ArrayList<EntryID> = ArrayList<EntryID
 
     override fun getContent() = entries.toIntArray()
 
+    override fun replaceContent(obj: Any) {
+        entries = obj as ArrayList<EntryID>
+    }
+
     companion object {
         val NEW_ENTRY_SIZE = DiskEntry.HEADER_SIZE + 4L
     }
 }
-class EntrySymlink(val target: EntryID) : DiskEntryContent {
+class EntrySymlink(_target: EntryID) : DiskEntryContent {
+
+    var target: EntryID = _target
+        internal set
 
     override fun getSizePure() = 4L
     override fun getSizeEntry() = 4L
@@ -284,6 +296,10 @@ class EntrySymlink(val target: EntryID) : DiskEntryContent {
     }
 
     override fun getContent() = target
+
+    override fun replaceContent(obj: Any) {
+        target = obj as EntryID
+    }
 }
 
 
