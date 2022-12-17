@@ -1,5 +1,6 @@
 package net.torvald.terrarum.modulecomputers.virtualcomputer.tvd
 
+import net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.VDUtil.getAsDirectoryOrNull
 import java.io.*
 import java.nio.charset.Charset
 import java.util.*
@@ -255,6 +256,17 @@ object VDUtil {
     fun isDirectory(disk: VirtualDisk, entryID: EntryID) = disk.entries[entryID]?.contents is EntryDirectory
     fun isSymlink(disk: VirtualDisk, entryID: EntryID) = disk.entries[entryID]?.contents is EntrySymlink
 
+    fun isFileFollowSymlink(disk: VirtualDisk, entryID: EntryID): Boolean =
+            if (isSymlink(disk, entryID))
+                isFileFollowSymlink(disk, (disk.entries[entryID]!!.contents as EntrySymlink).target)
+            else
+                isFile(disk, entryID)
+    fun isDirectoryFollowSymlink(disk: VirtualDisk, entryID: EntryID): Boolean =
+            if (isSymlink(disk, entryID))
+                isDirectoryFollowSymlink(disk, (disk.entries[entryID]!!.contents as EntrySymlink).target)
+            else
+                isDirectory(disk, entryID)
+
     /**
      * Get list of entries of directory.
      */
@@ -332,30 +344,45 @@ object VDUtil {
 
     /**
      * SYNOPSIS  disk.getFile("bin/msh.lua")!!.file.getAsNormalFile(disk)
-     *
-     * Use VirtualDisk.getAsNormalFile(path)
      */
-    private fun DiskEntry.getAsNormalFile(disk: VirtualDisk): EntryFile =
+    fun DiskEntry.getAsNormalFile(disk: VirtualDisk): EntryFile =
             this.contents as? EntryFile ?:
-                    if (this.contents is EntryDirectory)
-                        throw RuntimeException("this is directory")
-                    else if (this.contents is EntrySymlink)
-                        disk.entries[this.contents.target]!!.getAsNormalFile(disk)
-                    else
-                        throw RuntimeException("Unknown entry type")
+            if (this.contents is EntryDirectory)
+                throw RuntimeException("this is directory")
+            else if (this.contents is EntrySymlink)
+                disk.entries[this.contents.target]!!.getAsNormalFile(disk)
+            else
+                throw RuntimeException("Unknown entry type")
+    /**
+     * SYNOPSIS  disk.getFile("bin/msh.lua")?.file.getAsNormalFileOrNull(disk)
+     */
+    fun DiskEntry?.getAsNormalFileOrNull(disk: VirtualDisk): EntryFile? =
+            this?.contents as? EntryFile ?:
+            if (this?.contents is EntrySymlink)
+                disk.entries[(this.contents as EntrySymlink).target]!!.getAsNormalFileOrNull(disk)
+            else
+                null
     /**
      * SYNOPSIS  disk.getFile("bin/msh.lua")!!.first.getAsNormalFile(disk)
-     *
-     * Use VirtualDisk.getAsNormalFile(path)
      */
-    private fun DiskEntry.getAsDirectory(disk: VirtualDisk): EntryDirectory =
+    fun DiskEntry.getAsDirectory(disk: VirtualDisk): EntryDirectory =
             this.contents as? EntryDirectory ?:
-                    if (this.contents is EntrySymlink)
-                        disk.entries[this.contents.target]!!.getAsDirectory(disk)
-                    else if (this.contents is EntryFile)
-                        throw RuntimeException("this is not directory")
-                    else
-                        throw RuntimeException("Unknown entry type")
+            if (this.contents is EntrySymlink)
+                disk.entries[this.contents.target]!!.getAsDirectory(disk)
+            else if (this.contents is EntryFile)
+                throw RuntimeException("this is not directory")
+            else
+                throw RuntimeException("Unknown entry type")
+    /**
+     * SYNOPSIS  disk.getFile("bin/msh.lua")?.first.getAsNormalFileOrNull(disk)
+     */
+    fun DiskEntry?.getAsDirectoryOrNull(disk: VirtualDisk): EntryDirectory? =
+            this?.contents as? EntryDirectory ?:
+            if (this?.contents is EntrySymlink)
+                disk.entries[(this.contents as EntrySymlink).target]!!.getAsDirectoryOrNull(disk)
+            else
+                null
+
 
     /**
      * Search for the file and returns a instance of normal file.
