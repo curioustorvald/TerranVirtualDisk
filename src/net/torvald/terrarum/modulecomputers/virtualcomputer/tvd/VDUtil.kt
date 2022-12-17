@@ -966,10 +966,10 @@ fun magicMismatch(magic: ByteArray, array: ByteArray): Boolean {
     return !Arrays.equals(array, magic)
 }
 fun String.toEntryName(length: Int, charset: Charset): ByteArray {
-    val buffer = ByteArray64(length.toLong())
-    val stringByteArray = this.toByteArray(charset)
-    buffer.appendBytes(stringByteArray.sliceArray(0 until minOf(length, stringByteArray.size)))
-    return buffer.toByteArray()
+    val buffer = ByteArray(length)
+    val src = this.toByteArray(charset)
+    System.arraycopy(src, 0, buffer, 0, minOf(length, src.size))
+    return buffer
 }
 fun ByteArray.toCanonicalString(charset: Charset): String {
     var lastIndexOfRealStr = 0
