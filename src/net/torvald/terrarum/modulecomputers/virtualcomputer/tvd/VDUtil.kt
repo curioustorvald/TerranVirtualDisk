@@ -389,21 +389,29 @@ object VDUtil {
      */
     fun getAsNormalFile(disk: VirtualDisk, path: VDPath) =
             getFile(disk, path)!!.getAsNormalFile(disk)
+    fun getAsNormalFileOrNull(disk: VirtualDisk, path: VDPath) =
+        getFile(disk, path)?.getAsNormalFile(disk)
     /**
      * Fetch the file and returns a instance of normal file.
      */
     fun getAsNormalFile(disk: VirtualDisk, entryIndex: EntryID) =
             disk.entries[entryIndex]!!.getAsNormalFile(disk)
+    fun getAsNormalFileOrNull(disk: VirtualDisk, entryIndex: EntryID) =
+        disk.entries[entryIndex]?.getAsNormalFile(disk)
     /**
      * Search for the file and returns a instance of directory.
      */
     fun getAsDirectory(disk: VirtualDisk, path: VDPath) =
             getFile(disk, path)!!.getAsDirectory(disk)
+    fun getAsDirectoryOrNull(disk: VirtualDisk, path: VDPath) =
+        getFile(disk, path)?.getAsDirectory(disk)
     /**
      * Fetch the file and returns a instance of directory.
      */
     fun getAsDirectory(disk: VirtualDisk, entryIndex: EntryID) =
             disk.entries[entryIndex]!!.getAsDirectory(disk)
+    fun getAsDirectoryOrNull(disk: VirtualDisk, entryIndex: EntryID) =
+        disk.entries[entryIndex]?.getAsDirectory(disk)
     /**
      * Deletes file on the disk safely.
      */
