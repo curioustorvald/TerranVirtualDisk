@@ -74,6 +74,23 @@ class ByteArray64(initialSize: Long = BANK_SIZE.toLong()) {
         }
     }
 
+    /**
+     * Sets the internal size to 0. This method will not wipe the bytes that are already written on the used banks, but unused banks will be freed.
+     */
+    fun clear() {
+        size = 0L
+        trim()
+    }
+
+    /**
+     * Sends unused banks into oblivion. Bank usage is deduced from the `size`, regardless of the data contained.
+     */
+    fun trim() {
+        val banksToSurvive = if (size == 0L) 1 else 1 + ((size - 1) / BANK_SIZE).toInt()
+        val banksToRemove = __data.size - banksToSurvive
+        repeat(banksToRemove) { __data.removeAt(banksToSurvive) }
+    }
+
     fun appendByte(value: Byte) = set(size, value)
 
     fun appendBytes(bytes: ByteArray64) {
@@ -87,7 +104,10 @@ class ByteArray64(initialSize: Long = BANK_SIZE.toLong()) {
         bytes.forEachUsedBanksIndexed { index, bytesInBank, srcBank ->
             // as the data must be written bank-aligned, each bank copy requires two separate copies, split by the
             // 'remaining' below
-            if (remaining < bytesInBank) { // 'remaining' should never be less than zero
+            if (bankOffset == 0) {
+                System.arraycopy(srcBank, 0, __data[initialBankNumber + index], bankOffset, BANK_SIZE)
+            }
+            else if (remaining < bytesInBank) { // 'remaining' should never be less than zero
                 System.arraycopy(srcBank, 0, __data[initialBankNumber + index], bankOffset, remaining)
                 System.arraycopy(srcBank, remaining, __data[initialBankNumber + index + 1], 0, bytesInBank - remaining)
             }

@@ -191,7 +191,7 @@ interface DiskEntryContent {
  * Do not retrieve bytes directly from this! Use VDUtil.retrieveFile(DiskEntry)
  * And besides, the bytes could be compressed.
  */
-open class EntryFile(internal var bytes: ByteArray64) : DiskEntryContent {
+open class EntryFile(internal val bytes: ByteArray64) : DiskEntryContent {
 
     override fun getSizePure() = bytes.size
     override fun getSizeEntry() = getSizePure() + 6
@@ -209,7 +209,13 @@ open class EntryFile(internal var bytes: ByteArray64) : DiskEntryContent {
     override fun getContent() = bytes
 
     override fun replaceContent(obj: Any) {
-        bytes = obj as ByteArray64
+        bytes.clear()
+        if (obj is ByteArray)
+            bytes.appendBytes(obj)
+        else if (obj is ByteArray64)
+            bytes.appendBytes(obj)
+        else
+            throw IllegalArgumentException("Unknown object type '${obj.javaClass.canonicalName}'")
     }
 }
 /*class EntryFileCompressed(internal var uncompressedSize: Long, bytes: ByteArray64) : EntryFile(bytes) {
@@ -239,7 +245,7 @@ open class EntryFile(internal var bytes: ByteArray64) : DiskEntryContent {
         return unzipdBytes
     }
 }*/
-class EntryDirectory(private var entries: ArrayList<EntryID> = ArrayList<EntryID>()) : DiskEntryContent {
+class EntryDirectory(private val entries: ArrayList<EntryID> = ArrayList<EntryID>()) : DiskEntryContent {
 
     override fun getSizePure() = entries.size * 4L
     override fun getSizeEntry() = getSizePure() + 2
@@ -274,7 +280,13 @@ class EntryDirectory(private var entries: ArrayList<EntryID> = ArrayList<EntryID
     override fun getContent() = entries.toIntArray()
 
     override fun replaceContent(obj: Any) {
-        entries = obj as ArrayList<EntryID>
+        entries.clear()
+        if (obj is Collection<*> && obj.first() is EntryID) {
+            entries.addAll(obj as Collection<EntryID>)
+        }
+        else {
+            throw IllegalArgumentException("Unknown object type '${obj.javaClass.canonicalName}'")
+        }
     }
 
     companion object {
@@ -298,7 +310,10 @@ class EntrySymlink(_target: EntryID) : DiskEntryContent {
     override fun getContent() = target
 
     override fun replaceContent(obj: Any) {
-        target = obj as EntryID
+        if (obj is EntryID)
+            target = obj
+        else
+            throw IllegalArgumentException("Unknown object type '${obj.javaClass.canonicalName}'")
     }
 }
 

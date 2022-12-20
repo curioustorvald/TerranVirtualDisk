@@ -1024,18 +1024,10 @@ class VDFileWriter(private val fileEntry: DiskEntry, private val append: Boolean
         if (!closed) {
             val newByteArray = newFileBuffer.toByteArray()
 
-            if (!append) {
-                (fileEntry.contents as EntryFile).bytes = newByteArray.toByteArray64()
-            }
-            else {
-                val oldByteArray = (fileEntry.contents as EntryFile).bytes.toByteArray().copyOf()
-                val newFileBuffer = ByteArray(oldByteArray.size + newByteArray.size)
-
-                System.arraycopy(oldByteArray, 0, newFileBuffer, 0, oldByteArray.size)
-                System.arraycopy(newByteArray, 0, newFileBuffer, oldByteArray.size, newByteArray.size)
-
-                fileEntry.contents.bytes = newByteArray.toByteArray64()
-            }
+            if (!append)
+                (fileEntry.contents as EntryFile).replaceContent(newByteArray)
+            else
+                (fileEntry.contents as EntryFile).bytes.appendBytes(newByteArray)
 
             newFileBuffer = ArrayList<Byte>()
 
@@ -1071,18 +1063,10 @@ class VDFileOutputStream(private val fileEntry: DiskEntry, private val append: B
         if (!closed) {
             val newByteArray = newFileBuffer.toByteArray()
 
-            if (!append) {
-                (fileEntry.contents as EntryFile).bytes = newByteArray.toByteArray64()
-            }
-            else {
-                val oldByteArray = (fileEntry.contents as EntryFile).bytes.toByteArray().copyOf()
-                val newFileBuffer = ByteArray(oldByteArray.size + newByteArray.size)
-
-                System.arraycopy(oldByteArray, 0, newFileBuffer, 0, oldByteArray.size)
-                System.arraycopy(newByteArray, 0, newFileBuffer, oldByteArray.size, newByteArray.size)
-
-                fileEntry.contents.bytes = newByteArray.toByteArray64()
-            }
+            if (!append)
+                (fileEntry.contents as EntryFile).replaceContent(newByteArray)
+            else
+                (fileEntry.contents as EntryFile).bytes.appendBytes(newByteArray)
 
             newFileBuffer = ArrayList<Byte>()
 
