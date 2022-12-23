@@ -90,6 +90,12 @@ class VirtualDiskCracker(val sysCharset: Charset = Charsets.UTF_8) : JFrame() {
     private var currentDirectoryEntriesAltMode: Array<DiskEntry>? = null
 
 
+
+    private val panelFinderTab: JTabbedPane
+
+    private val inEntriesMode: Boolean
+        get() = panelFinderTab.selectedIndex == 1
+
     init {
 
         if (annoyHackers) {
@@ -191,11 +197,11 @@ class VirtualDiskCracker(val sysCharset: Charset = Charsets.UTF_8) : JFrame() {
                     val row = table.rowAtPoint(e.point)
 
 
-                    currentDirectoryEntriesAltMode!![row].entryID
+                    selectedFile = currentDirectoryEntriesAltMode!![row].entryID
 
 
                     fileDesc.text = if (selectedFile != null) {
-                        getFileInfoText(vdisk!!.entries[selectedFile!!]!!)
+                        getFileInfoText(vdisk!!.entries[selectedFile!!])
                     }
                     else
                         ""
@@ -377,7 +383,10 @@ class VirtualDiskCracker(val sysCharset: Charset = Charsets.UTF_8) : JFrame() {
             })
             add("New Directory…").addMouseListener(object : MouseAdapter() {
                 override fun mousePressed(e: MouseEvent?) {
-                    if (vdisk != null) {
+                    if (inEntriesMode) {
+                        popupMessage("Not available on Entries tab")
+                    }
+                    else if (vdisk != null) {
                         val newname = JOptionPane.showInputDialog("Enter a new directory name:")
                         if (newname != null) {
                             try {
@@ -445,16 +454,57 @@ class VirtualDiskCracker(val sysCharset: Charset = Charsets.UTF_8) : JFrame() {
                             popupError(e.toString())
                         }
                     }
-                    if (clipboard != null && vdisk != null) {
-                        // check name collision. If it is, ask for new one
-                        if (VDUtil.nameExists(vdisk!!, clipboard!!.getFilenameString(sysCharset), currentDirectory, sysCharset)) {
-                            val newname = JOptionPane.showInputDialog("The name already exists. Enter a new name:")
-                            if (newname != null) {
-                                paste1(newname.toEntryName(DiskEntry.NAME_LENGTH, sysCharset))
+                    fun pasteForEntryMode(newname: ByteArray, newEntryID: Int?, newParentEntryID: Int?) {
+                        try {
+                            val newEntryID = newEntryID ?: vdisk!!.generateUniqueID()
+                            val newParentEntryID = newParentEntryID ?: 0
+                            if (vdisk!!.entries[newParentEntryID] != null) {
+                                VDUtil.addFile(vdisk!!, newParentEntryID, DiskEntry(// clone
+                                        newEntryID,
+                                        newParentEntryID,
+                                        newname,
+                                        clipboard!!.creationDate,
+                                        clipboard!!.modificationDate,
+                                        clipboard!!.contents
+                                ))
                             }
+                            else {
+                                vdisk!!.entries[newEntryID] = DiskEntry(
+                                        newEntryID,
+                                        newParentEntryID,
+                                        newname,
+                                        clipboard!!.creationDate,
+                                        clipboard!!.modificationDate,
+                                        clipboard!!.contents
+                                )
+                            }
+
+                            updateDiskInfo()
+                            setStat("File pasted")
+                        }
+                        catch (e: Exception) {
+                            e.printStackTrace()
+                            popupError(e.toString())
+                        }
+                    }
+                    if (clipboard != null && vdisk != null) {
+                        if (inEntriesMode) {
+                            val newname = JOptionPane.showInputDialog("Enter a new name: (1 of 3 params)")
+                            val newID = JOptionPane.showInputDialog("Enter a new ID: (2 of 3 params, leave blank to use random ID)").toIntOrNull()
+                            val newParentID = JOptionPane.showInputDialog("Enter a new Parent ID for ${newID}: (3 of 3 params, leave blank for root dir)").toIntOrNull()
+                            pasteForEntryMode(newname.toEntryName(DiskEntry.NAME_LENGTH, sysCharset), newID, newParentID)
                         }
                         else {
-                            paste1(clipboard!!.filename)
+                            // check name collision. If it is, ask for new one
+                            if (VDUtil.nameExists(vdisk!!, clipboard!!.getFilenameString(sysCharset), currentDirectory, sysCharset)) {
+                                val newname = JOptionPane.showInputDialog("The name already exists. Enter a new name:")
+                                if (newname != null) {
+                                    paste1(newname.toEntryName(DiskEntry.NAME_LENGTH, sysCharset))
+                                }
+                            }
+                            else {
+                                paste1(clipboard!!.filename)
+                            }
                         }
                     }
                 }
@@ -487,16 +537,52 @@ class VirtualDiskCracker(val sysCharset: Charset = Charsets.UTF_8) : JFrame() {
                             popupError(e.toString())
                         }
                     }
-                    if (clipboard != null && vdisk != null) {
-                        // check name collision. If it is, ask for new one
-                        if (VDUtil.nameExists(vdisk!!, clipboard!!.getFilenameString(sysCharset), currentDirectory, sysCharset)) {
-                            val newname = JOptionPane.showInputDialog("The name already exists. Enter a new name:")
-                            if (newname != null) {
-                                pasteSymbolic(newname.toEntryName(DiskEntry.NAME_LENGTH, sysCharset))
+                    fun pasteSymbolicForEntryMode(newname: ByteArray, newEntryID: Int?, newParentEntryID: Int?) {
+                        try {
+                            val newEntryID = newEntryID ?: vdisk!!.generateUniqueID()
+                            val newParentEntryID = newParentEntryID ?: 0
+                            // check if the original file is there in the first place
+                            if (vdisk!!.entries[clipboard!!.entryID] != null) {
+                                val entrySymlink = EntrySymlink(clipboard!!.entryID)
+                                VDUtil.addFile(vdisk!!, currentDirectory, DiskEntry(
+                                        newEntryID,
+                                        newParentEntryID,
+                                        newname,
+                                        VDUtil.currentUnixtime,
+                                        VDUtil.currentUnixtime,
+                                        entrySymlink
+                                ))
+
+                                updateDiskInfo()
+                                setStat("Symbolic link created")
+                            }
+                            else {
+                                popupError("The orignal file is gone")
                             }
                         }
+                        catch (e: Exception) {
+                            e.printStackTrace()
+                            popupError(e.toString())
+                        }
+                    }
+                    if (clipboard != null && vdisk != null) {
+                        if (inEntriesMode) {
+                            val newname = JOptionPane.showInputDialog("Enter a new name: (1 of 3 params)")
+                            val newID = JOptionPane.showInputDialog("Enter a new ID: (2 of 3 params, leave blank to use random ID)").toIntOrNull()
+                            val newParentID = JOptionPane.showInputDialog("Enter a new Parent ID for ${newID}: (3 of 3 params, leave blank for root dir)").toIntOrNull()
+                            pasteSymbolicForEntryMode(newname.toEntryName(DiskEntry.NAME_LENGTH, sysCharset), newID, newParentID)
+                        }
                         else {
-                            pasteSymbolic(clipboard!!.filename)
+                            // check name collision. If it is, ask for new one
+                            if (VDUtil.nameExists(vdisk!!, clipboard!!.getFilenameString(sysCharset), currentDirectory, sysCharset)) {
+                                val newname = JOptionPane.showInputDialog("The name already exists. Enter a new name:")
+                                if (newname != null) {
+                                    pasteSymbolic(newname.toEntryName(DiskEntry.NAME_LENGTH, sysCharset))
+                                }
+                            }
+                            else {
+                                pasteSymbolic(clipboard!!.filename)
+                            }
                         }
                     }
                 }
@@ -539,10 +625,57 @@ class VirtualDiskCracker(val sysCharset: Charset = Charsets.UTF_8) : JFrame() {
                     }
                 }
             })
+            add("Renumber…").addMouseListener(object : MouseAdapter() {
+                override fun mousePressed(e: MouseEvent?) {
+                    if (selectedFile != null) {
+                        try {
+                            val newID = JOptionPane.showInputDialog("Enter a new entry ID:").toIntOrNull()
+                            val oldID = selectedFile!!
+                            if (newID != null) {
+                                if (!inEntriesMode && vdisk!!.entries[newID] != null) {
+                                    popupError("The name already exists")
+                                }
+                                else {
+                                    val file = vdisk!!.entries[oldID]!!.apply {
+                                        entryID = newID
+
+                                        val oldParentID = parentEntryID
+                                        val newParentID = if (inEntriesMode)
+                                            JOptionPane.showInputDialog("Enter a new parent ID (click Cancel to not change the parent ID):").toIntOrNull() ?: oldParentID
+                                        else
+                                            oldParentID
+
+
+                                        (vdisk!!.entries[oldParentID]?.contents as? EntryDirectory)?.apply {
+                                            remove(oldID)
+                                        }
+                                        (vdisk!!.entries[newParentID]?.contents as? EntryDirectory)?.apply {
+                                            add(newID)
+                                        }
+
+                                        parentEntryID = newParentID
+                                    }
+
+                                    vdisk!!.entries.remove(oldID)
+                                    vdisk!!.entries[newID] = file
+
+
+                                    updateDiskInfo()
+                                    setStat("File renumbered")
+                                }
+                            }
+                        }
+                        catch (e: Exception) {
+                            e.printStackTrace()
+                            popupError(e.toString())
+                        }
+                    }
+                }
+            })
             add("Look Clipboard").addMouseListener(object : MouseAdapter() {
                 override fun mousePressed(e: MouseEvent?) {
                     popupMessage(if (clipboard != null)
-                        "${clipboard ?: "(bug found)"}"
+                        "${clipboard ?: "(you need some ECC RAM if you're seeing this)"}"
                     else "(nothing)", "Clipboard"
                     )
                 }
@@ -552,53 +685,71 @@ class VirtualDiskCracker(val sysCharset: Charset = Charsets.UTF_8) : JFrame() {
             add("Import Files/Folders…").addMouseListener(object : MouseAdapter() {
                 override fun mousePressed(e: MouseEvent?) {
                     if (vdisk != null) {
-                        val fileChooser = JFileChooser("./")
-                        fileChooser.fileSelectionMode = JFileChooser.FILES_AND_DIRECTORIES
-                        fileChooser.isMultiSelectionEnabled = true
-                        fileChooser.showOpenDialog(null)
-                        if (fileChooser.selectedFiles.isNotEmpty()) {
-                            try {
-                                fileChooser.selectedFiles.forEach {
-                                    if (!it.isDirectory) {
-                                        val entry = VDUtil.importFile(it, vdisk!!.generateUniqueID(), sysCharset)
+                        if (!inEntriesMode) {
+                            val fileChooser = JFileChooser("./")
+                            fileChooser.fileSelectionMode = JFileChooser.FILES_AND_DIRECTORIES
+                            fileChooser.isMultiSelectionEnabled = true
+                            fileChooser.showOpenDialog(null)
+                            if (fileChooser.selectedFiles.isNotEmpty()) {
+                                try {
+                                    fileChooser.selectedFiles.forEach {
+                                        if (!it.isDirectory) {
+                                            val entry = VDUtil.importFile(it, vdisk!!.generateUniqueID(), sysCharset)
 
-                                        val newname: String?
-                                        if (VDUtil.nameExists(vdisk!!, entry.filename, currentDirectory)) {
-                                            newname = JOptionPane.showInputDialog("The name already exists. Enter a new name:")
+                                            val newname: String?
+                                            if (VDUtil.nameExists(vdisk!!, entry.filename, currentDirectory)) {
+                                                newname = JOptionPane.showInputDialog("The name already exists. Enter a new name:")
+                                            }
+                                            else {
+                                                newname = entry.getFilenameString(sysCharset)
+                                            }
+
+                                            if (newname != null) {
+                                                entry.filename = newname.toEntryName(DiskEntry.NAME_LENGTH, sysCharset)
+                                                VDUtil.addFile(vdisk!!, currentDirectory, entry)
+                                            }
                                         }
                                         else {
-                                            newname = entry.getFilenameString(sysCharset)
-                                        }
+                                            val newname: String?
+                                            if (VDUtil.nameExists(vdisk!!, it.name.toEntryName(DiskEntry.NAME_LENGTH, sysCharset), currentDirectory)) {
+                                                newname = JOptionPane.showInputDialog("The name already exists. Enter a new name:")
+                                            }
+                                            else {
+                                                newname = it.name
+                                            }
 
-                                        if (newname != null) {
-                                            entry.filename = newname.toEntryName(DiskEntry.NAME_LENGTH, sysCharset)
-                                            VDUtil.addFile(vdisk!!, currentDirectory, entry)
+                                            if (newname != null) {
+                                                VDUtil.importDirRecurse(vdisk!!, it, currentDirectory, sysCharset, newname)
+                                            }
                                         }
                                     }
-                                    else {
-                                        val newname: String?
-                                        if (VDUtil.nameExists(vdisk!!, it.name.toEntryName(DiskEntry.NAME_LENGTH, sysCharset), currentDirectory)) {
-                                            newname = JOptionPane.showInputDialog("The name already exists. Enter a new name:")
-                                        }
-                                        else {
-                                            newname = it.name
-                                        }
-
-                                        if (newname != null) {
-                                            VDUtil.importDirRecurse(vdisk!!, it, currentDirectory, sysCharset, newname)
-                                        }
-                                    }
+                                    updateDiskInfo()
+                                    setStat("File added")
                                 }
-                                updateDiskInfo()
-                                setStat("File added")
+                                catch (e: Exception) {
+                                    e.printStackTrace()
+                                    popupError(e.toString())
+                                }
                             }
-                            catch (e: Exception) {
-                                e.printStackTrace()
-                                popupError(e.toString())
+
+                            fileChooser.isMultiSelectionEnabled = false
+                        }
+                        else {
+                            val fileChooser = JFileChooser("./")
+                            fileChooser.fileSelectionMode = JFileChooser.FILES_ONLY
+                            fileChooser.isMultiSelectionEnabled = false
+                            fileChooser.showOpenDialog(null)
+                            if (fileChooser.selectedFiles.isNotEmpty()) {
+                                val newname = JOptionPane.showInputDialog("Enter a new name: (1 of 3 params; leave blank to use the same name as the original file)")
+                                val newID = JOptionPane.showInputDialog("Enter a new ID: (2 of 3 params, leave blank to use random ID)").toIntOrNull() ?: vdisk!!.generateUniqueID()
+                                val newParentID = JOptionPane.showInputDialog("Enter a new Parent ID for ${newID}: (3 of 3 params, leave blank for root dir)").toIntOrNull()
+
+                                VDUtil.importFile(fileChooser.selectedFile, newID, sysCharset).apply {
+                                    newParentID?.let { parentEntryID = it }
+                                    if (newname.isNotBlank()) filename = newname.toEntryName(DiskEntry.NAME_LENGTH, sysCharset)
+                                }
                             }
                         }
-
-                        fileChooser.isMultiSelectionEnabled = false
                     }
                 }
             })
@@ -800,11 +951,10 @@ class VirtualDiskCracker(val sysCharset: Charset = Charsets.UTF_8) : JFrame() {
             add(tableFilesScroll, BorderLayout.CENTER)
         }
 
-        val panelFinderTab = JTabbedPane().apply {
+        panelFinderTab = JTabbedPane().apply {
             addTab("Navigator", panelFinder)
             addTab("Entries", tableEntriesScroll)
         }
-
 
         val panelFileDesc = JPanel(BorderLayout()).apply {
             add(JLabel("Entry Information"), BorderLayout.NORTH)
@@ -891,14 +1041,13 @@ class VirtualDiskCracker(val sysCharset: Charset = Charsets.UTF_8) : JFrame() {
 
         diskInfo.text = if (vdisk == null) "(Disk not loaded)" else getDiskInfoText(vdisk!!)
 
+        updateCurrentDirectory()
+
         tableFiles.revalidate()
         tableFiles.repaint()
 
         tableEntries.revalidate()
         tableEntries.repaint()
-
-
-        updateCurrentDirectory()
     }
     private fun getDiskInfoText(disk: VirtualDisk): String {
         return """Name: ${String(disk.diskName, sysCharset)}
@@ -910,7 +1059,9 @@ Write protected: ${disk.isReadOnly.toEnglish()}"""
     private fun Boolean.toEnglish() = if (this) "Yes" else "No"
 
 
-    private fun getFileInfoText(file: DiskEntry): String {
+    private fun getFileInfoText(file: DiskEntry?): String {
+        if (file == null) return ""
+
         return """Name: ${file.getFilenameString(sysCharset)}
 Size: ${file.getEffectiveSize()}
 Type: ${DiskEntry.getTypeString(file.contents)}
