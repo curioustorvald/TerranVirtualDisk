@@ -128,6 +128,9 @@ class DiskEntry(
     val serialisedSize: Long
         get() = contents.getSizeEntry() + HEADER_SIZE
 
+    val typeString: String
+        get() = DiskEntry.getTypeString(this.contents)
+
     companion object {
         val HEADER_SIZE = 281L // according to the spec
         val ROOTNAME = "(root)"
