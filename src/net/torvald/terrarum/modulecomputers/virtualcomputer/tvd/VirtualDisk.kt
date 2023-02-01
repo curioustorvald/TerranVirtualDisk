@@ -21,14 +21,13 @@ class VirtualDisk(
         /** capacity of 0 makes the disk read-only */
         var capacity: Long,
         var diskName: ByteArray = ByteArray(NAME_LENGTH),
-        footer: ByteArray64 = ByteArray64(8) // default to mandatory 8-byte footer
+        footer: ByteArray = ByteArray(8) // default to mandatory 8-byte footer
 ) {
-    var footerBytes: ByteArray64 = footer
-        private set
+    val footerBytes: ByteArray = footer
     val entries = HashMap<EntryID, DiskEntry>()
     var isReadOnly: Boolean
         set(value) { footerBytes[0] = (footerBytes[0] and 0xFE.toByte()) or value.toBit() }
-        get() = capacity == 0L || (footerBytes.size > 0 && footerBytes[0].and(1) == 1.toByte())
+        get() = capacity == 0L || ( footerBytes[0].and(1) == 1.toByte())
     fun getDiskNameString(charset: Charset) = diskName.toCanonicalString(charset)
     val root: DiskEntry
         get() = entries[0]!!
@@ -36,8 +35,10 @@ class VirtualDisk(
 
     private fun Boolean.toBit() = if (this) 1.toByte() else 0.toByte()
 
-    internal fun __internalSetFooter__(footer: ByteArray64) {
-        footerBytes = footer
+    internal fun __internalSetFooter__(footer: ByteArray) {
+        for (k in 0..7) {
+            footerBytes[k] = footer[k]
+        }
     }
 
     private fun serializeEntriesOnly(): ByteArray64 {
@@ -52,7 +53,7 @@ class VirtualDisk(
 
     fun serialize(): ByteArray64 {
         val entriesBuffer = serializeEntriesOnly()
-        val buffer = ByteArray64(HEADER_SIZE + entriesBuffer.size + FOOTER_SIZE + footerBytes.size)
+        val buffer = ByteArray64(HEADER_SIZE + entriesBuffer.size + FOOTER_SIZE)
         val crc = hashCode().toBigEndian()
 
         buffer.appendBytes(MAGIC)
@@ -99,7 +100,7 @@ class VirtualDisk(
 
     companion object {
         val HEADER_SIZE = 47L // according to the spec
-        val FOOTER_SIZE = 6L  // footer mark + EOF
+        val FOOTER_SIZE = 6L + 8L  // footer mark + EOF
         val NAME_LENGTH = 32
 
         val MAGIC = "TEVd".toByteArray()

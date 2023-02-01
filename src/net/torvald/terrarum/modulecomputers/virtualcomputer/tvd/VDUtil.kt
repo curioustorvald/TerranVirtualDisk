@@ -135,11 +135,29 @@ object VDUtil {
         //println("[VDUtil] currentUnixtime = $currentUnixtime")
 
         var entryOffset = VirtualDisk.HEADER_SIZE
-        // not footer, entries
-        while (!Arrays.equals(inbytes.sliceArray64(entryOffset..entryOffset + 3).toByteArray(), VirtualDisk.FOOTER_START_MARK)) {
+        // read through the entire disk, overwrite existing entry if duplicates were found
+        while (entryOffset < inbytes.size) {
             //println("[VDUtil] entryOffset = $entryOffset")
             // read and prepare all the shits
+
             val entryID = inbytes.sliceArray64(entryOffset..entryOffset + 3).toIntBig()
+
+
+            // process footer
+            if (entryID == VirtualDisk.FOOTER_MARKER) {
+                // entries ends, footers are to be read
+                entryOffset += 4 // skip footer marker
+
+                val footerSize = 8
+                vdisk.__internalSetFooter__(inbytes.sliceArray64(entryOffset until entryOffset + footerSize).toByteArray())
+
+                entryOffset += 14
+
+                continue
+            }
+
+
+            // process regular entries
             val entryParentID = inbytes.sliceArray64(entryOffset + 4..entryOffset + 7).toIntBig()
             val entryTypeFlag = inbytes[entryOffset + 8]
             val entryFileName = inbytes.sliceArray64(entryOffset + 9..entryOffset + 9 + 255).toByteArray()
@@ -221,15 +239,6 @@ object VDUtil {
 
             // add entry to disk
             vdisk.entries[entryID] = diskEntry
-        }
-        // entries ends, footers are to be read
-        run {
-            entryOffset += 4 // skip footer marker
-
-            val footerSize = inbytes.size - entryOffset - VirtualDisk.EOF_MARK.size
-            if (footerSize > 0) {
-                vdisk.__internalSetFooter__(inbytes.sliceArray64(entryOffset..entryOffset + footerSize - 1))
-            }
         }
 
 
