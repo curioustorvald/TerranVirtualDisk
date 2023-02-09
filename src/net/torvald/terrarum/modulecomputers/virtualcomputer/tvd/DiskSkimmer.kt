@@ -69,6 +69,8 @@ removefile:
     private val footerSize: Int
         get() = (diskFile.length() - footerPosition).toInt()
 
+    private var skimmerDirectoryStructure = SkimmerDirectoryStructure()
+
     init {
         val fis = FileInputStream(diskFile)
 
