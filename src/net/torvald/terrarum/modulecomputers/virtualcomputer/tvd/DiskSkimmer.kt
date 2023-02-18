@@ -69,16 +69,15 @@ removefile:
     private val footerSize: Int
         get() = (diskFile.length() - footerPosition).toInt()
 
-    private var skimmerDirectoryStructure = SkimmerDirectoryStructure()
+    var readOnly: Boolean = false; private set
+    var diskCapacity: Long = 0; internal set
 
     init {
         val fis = FileInputStream(diskFile)
 
         println("[DiskSkimmer] loading the diskfile ${diskFile.canonicalPath}")
 
-        var currentPosition = fis.skip(47) // skip disk header
-
-
+        var currentPosition = 0L
         fun skipRead(bytes: Long) {
             currentPosition += fis.skip(bytes)
         }
@@ -92,7 +91,6 @@ removefile:
             if (read < 0) throw InternalError("Unexpectedly reached EOF")
             return read.toByte()
         }
-
         /**
          * Reads specific bytes to the buffer and adds up the position var
          */
@@ -120,6 +118,14 @@ removefile:
             return buffer.toInt48()
         }
 
+        fis.skip(4)
+
+        diskCapacity = readInt48()
+
+        fis.skip(37)
+
+        currentPosition = 47
+
         val currentLength = diskFile.length()
         while (currentPosition < currentLength) {
             val entryID = readIntBig() // at this point, cursor is 4 bytes past to the entry head
@@ -127,6 +133,7 @@ removefile:
             // footer
             if (entryID == 0xFEFEFEFE.toInt()) {
                 footerPosition = currentPosition - 4
+                readOnly = (readByte().and(1).toInt() != 0)
                 break
             }
 
@@ -141,9 +148,9 @@ removefile:
 
             val entrySize = when (typeFlag and 127) {
                 DiskEntry.NORMAL_FILE -> readInt48()
-                DiskEntry.DIRECTORY -> readUshortBig().toLong()
-                DiskEntry.SYMLINK -> 4
-                else -> throw InternalError("Unknown entry type: ${typeFlag.toUint()}")
+                DiskEntry.DIRECTORY -> 4L * readUshortBig()
+                DiskEntry.SYMLINK -> 4L
+                else -> throw InternalError("Unknown entry with type ${typeFlag.toUint()} at entryOffset $offset")
             }
 
             skipRead(entrySize) // skips rest of the entry's actual contents
@@ -156,7 +163,6 @@ removefile:
                 println("[DiskSkimmer] discarding entry $entryID at offset $offset (name: ${nameBytes.toCanonicalString(charset)})")
             }
         }
-
     }
 
 

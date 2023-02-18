@@ -6,37 +6,46 @@ current specversion number: 0x02
 
 ### 0x02
 - 48-Bit filesize and timestamp (Max 256 TiB / 8.9 million years)
-- 8 Reserved footer
+- 8 Reserved footer bytes (excluding footer marker and EOF)
 
 ### 0x01
 **Note: this version were never released in public**
 - Doubly Linked List instead of Singly
 
 
-## Specs
+## File Structure
 
-* File structure
+```
+The Archive:
++--------------+
+|    Header    |    where,
++--------------+
+|              |    Header:            Disk Entry:           Contents:
+|  0th Entry   |    +-------------+    +----------------+    - File:
+|              |    |   "TEVd"    |    |    Entry ID    |    +-------------+
++--------------+    +-------------+    +----------------+    |  File Size  |
+|              |    |  Disk Size  |    |   Parent ID    |    +-------------+
+|  Disk Entry  |    +-------------+    +----------------+    |   Payload   |
+|              |    |  Disk Name  |    |   Type Flag    |    +-------------+
++--------------+    +-------------+    +----------------+
+|              |    |   CRC-32    |    |    Filename    |    - Directory:
+|  Disk Entry  |    +-------------+    +----------------+    +-------------+
+|              |    |   Version   |    |  CreationDate  |    |ChildrenCount|
++--------------+    +-------------+    +----------------+    +-------------+
+|              |                       |ModificationDate|    | ID of Child |
+|     ...      |    0th Entry:         +----------------+    +-------------+
+|              |    DiskEntry with     |     CRC-32     |    | ID of Child |
++--------------+    ID of zero,        +----------------+    +-------------+
+|    Footer    |    directory type     |                |    |     ...     |
++--------------+                       |                |    +-------------+
+                                       |    Contents    |
+                                       |                |    - Symlink:
+                                       |                |    +-------------+
+                                       +----------------+    |  Target ID  |
+                                                             +-------------+
+```
 
-
-    Header
-    
-    IndexNumber
-    <entry>
-    
-    IndexNumber
-    <entry>
-    
-    IndexNumber
-    <entry>
-    
-    ...
-    
-    Footer
-
-
-* Order of the indices does not matter. Actual sorting is a job of the application.
 * Endianness: Big
-
 
 ##  Header
     Uint8[4]    Magic: TEVd
@@ -53,7 +62,7 @@ current specversion number: 0x02
 
 
 
-##  IndexNumber and Contents
+##  DiskEntry
     <Entry Header>
     <Actual Entry>
 
@@ -83,15 +92,8 @@ NOTES:
     
     (Header size: 6 bytes)
 
-###  Entry of File (Compressed)
-    Int48       Size of compressed payload (max 256 TiB)
-    Int48       Size of uncompressed file (max 256 TiB)
-    <Bytes>     Actual Contents, DEFLATEd payload
-    
-    (Header size: 12 bytes)
-
 ###  Entry of Directory
-    Uint16      Number of entries (normal files, other directories, symlinks)
+    Uint16      Number of entries (normal files, sub-directories, symlinks)
     <Int32s>    Entry listing, contains IndexNumber
     
     (Header size: 2 bytes)
@@ -112,5 +114,4 @@ NOTES:
                 0th bit: Readonly
                 
     Int8[7]     Reserved, should be filled with zero
-    <optional footer if present>
     Uint8[2]    0xFF 0x19 (EOF mark)

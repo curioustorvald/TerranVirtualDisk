@@ -1,9 +1,14 @@
 package net.torvald.terrarum.modulecomputers.virtualcomputer.tvd
 
+import net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.VDUtil.sanitisePath
 import java.io.File
+import java.io.IOException
 import java.nio.charset.Charset
+import java.util.*
+import kotlin.collections.HashMap
+import kotlin.collections.HashSet
 
-internal data class FileCache(val file: DiskEntry, var hits: Int = 1)
+internal data class FileCache(val file: DiskEntry, var hits: Int = 1, var lastAccess: Long = System.currentTimeMillis())
 
 /**
  * DOM with lesser memory footprint. Suitable for multi-machine environment.
@@ -15,11 +20,21 @@ internal data class FileCache(val file: DiskEntry, var hits: Int = 1)
  * - Caches the frequently-access files, no larger than set size (default: 10 MB)
  * - Changes on the Disk are accumulated
  *
+ * @param diskFile Disk Archive File
+ * @param charset Character set of the VM
+ * @param CACHE_SIZE How many files are cached. Default: 16
+ * @param MAX_FILESIZE_TO_CACHE Maximum size of the file for caching. A file larger than this will not be cached. Default: 10485760
+ * @param CACHE_RETAINING_TIME How hong a file should be cached. A file unused for this time or longer are considered unused and will be pending for removal. Default: 60000 (10 minutes)
+ * @param FRESH_CACHE_REMOVAL_CHANCE If there is no cache old enough to be removed, a oldest fresh cache will still be removed randomly. This value decides how often should it happen. Default: 0.1 (10 %)
+ *
  * Created by minjaesong on 2023-02-05.
  */
 class PartialDOM(private val diskFile: File, val charset: Charset = Charset.defaultCharset(),
                  private val CACHE_SIZE: Int = 16,
-                 private val MAX_FILESIZE_TO_CACHE: Int = 10485760) {
+                 private val MAX_FILESIZE_TO_CACHE: Int = 10485760,
+                 private val CACHE_RETAINING_TIME: Long = 1000 * 10 * 60, // 10 minutes
+                 private val FRESH_CACHE_REMOVAL_CHANCE: Double = 0.1
+) {
 
     private val fileAccessedAtLeastOnce = BloomFilter(256, 128)
     private val fileCache = HashMap<EntryID, FileCache>()
@@ -31,29 +46,58 @@ class PartialDOM(private val diskFile: File, val charset: Charset = Charset.defa
 
     private val directoryStructure = SkimmerDirectoryStructure(diskSkimmer, charset)
 
+    val isReadOnly: Boolean
+        get() = diskSkimmer.readOnly
+
+    var usedBytes: Long; private set
+
+    val capacity: Long
+        get() = diskSkimmer.diskCapacity
+
     init {
         directoryStructure.rebuild()
+
+        // calculate disk usage
+        usedBytes = directoryStructure.IDtoPath.keys.fold(0L) { acc, id ->
+            acc + diskSkimmer.requestFile(id)!!.serialisedSize // FullDOM uses the same variable for calculating the disk usage
+        }
     }
 
     internal fun cacheFile(file: DiskEntry?) {
         if (file == null) return
         if (file.contents is EntryFile && file.contents.getSizePure() > MAX_FILESIZE_TO_CACHE) return
 
-        // remove most unpopular files from the cache
-        while (fileCache.size >= CACHE_SIZE) {
-            var hitrateToSearch = 2147483647
-            var idFound = 0
-            fileCache.forEach { id, cache ->
-                if (cache.hits < hitrateToSearch) {
-                    idFound = id
-                    hitrateToSearch = cache.hits
-                }
-            }
+        val timeNow = System.currentTimeMillis()
 
-            uncacheFile(idFound)
+        // 1. mark the oldest unused
+        var oldest = 0xFEFEFEFE.toInt()
+        var oldestIdleTime = 0L
+        fileCache.forEach { id, cache ->
+
+            // TODO apply weighing using hitcount and idlingtime
+
+            val check = timeNow - cache.lastAccess
+            if (check > oldestIdleTime) {
+                oldest = id
+                oldestIdleTime = check
+            }
+        }
+        // 2. if its idle time is not greater than CACHE_RETAINING_TIME, give it 10% chance for removal
+        if (oldestIdleTime > CACHE_RETAINING_TIME || Math.random() < FRESH_CACHE_REMOVAL_CHANCE) {
+            fileCache.remove(oldest)
         }
 
-        fileCache[file.entryID] = FileCache(file)
+
+        if (fileCache.contains(file.entryID)) {
+            fileCache[file.entryID]!!.let {
+                it.hits += 1
+                it.lastAccess = System.currentTimeMillis()
+            }
+        }
+        else {
+            fileCache[file.entryID] = FileCache(file)
+        }
+
     }
 
     /**
@@ -75,45 +119,80 @@ class PartialDOM(private val diskFile: File, val charset: Charset = Charset.defa
     }
 
 
-    private fun getFileByPath(path: String): DiskEntry? {
-        TODO()
+    fun checkReadOnly() {
+        if (isReadOnly)
+            throw IOException("Disk is read-only")
+    }
+    fun checkCapacity(newSize: Long) {
+        if (usedBytes + newSize > capacity)
+            throw IOException("Not enough space on the disk")
     }
 
+
+    private fun String.sanitise(): String {
+        var path = this.sanitisePath()
+        // remove any superfluous initial slashes
+        if (path.isEmpty()) return "/"
+        while (path[0] == '/')
+            path = path.substring(1)
+        return "/"+path
+    }
 
     /**
      * Marks the file as "altered" so that the changes can be committed
      */
     fun touchFile(file: DiskEntry) {
+        checkReadOnly()
         changedFiles.add(file)
     }
     fun touchFile(path: String) {
-        TODO()
+        directoryStructure.find(path.sanitise())?.let { id ->
+            requestFile(id)?.let { touchFile(it) }
+        }
     }
 
 
 
     fun requestFile(id: EntryID): DiskEntry? {
         peekFile(id)
-        return fileCache[id]?.file ?: diskSkimmer.requestFile(id)
+        return fileCache.get(id)?.file ?: diskSkimmer.requestFile(id)
     }
     fun requestFile(path: String): DiskEntry? {
-        TODO()
+        return directoryStructure.find(path.sanitise())?.let { requestFile(it) }
     }
 
     /**
-     * the file must be altered beforehand. This function is just a symlink to the `touchFile(DiskEntry)`
+     * the file must be altered beforehand. This function is NOT a symlink to the `touchFile(DiskEntry)`
      */
-    inline fun writeFile(file: DiskEntry) {
+    fun writeFile(file: DiskEntry) {
         touchFile(file)
+        // TODO add filesize-delta to the usedBytes
     }
 
     fun removeFile(id: EntryID) {
+        checkReadOnly()
         removedFiles.add(id)
+        directoryStructure.remove(id)
         uncacheFile(id)
     }
     fun removeFile(path: String) {
-        TODO()
+        directoryStructure.find(path.sanitise())?.let { id ->
+            removeFile(id)
+        }
     }
+
+
+    fun addNewFile(entry: DiskEntry) {
+        checkCapacity(entry.serialisedSize)
+        checkReadOnly()
+
+        usedBytes += entry.serialisedSize
+
+        touchFile(entry)
+        val fullPath = directoryStructure.toFullPath(entry.parentEntryID)
+        directoryStructure.add("$fullPath/${entry.filename.toCanonicalString(charset)}", entry.entryID)
+    }
+
 
     /**
      * Saves the filesystem change to the underlying Disk Skimmer, which in turn creates a "dirty" disk image to the physical disk
@@ -132,7 +211,13 @@ class PartialDOM(private val diskFile: File, val charset: Charset = Charset.defa
         diskSkimmer.sync()
     }
 
-
+    fun generateUniqueID(): Int {
+        var id: Int
+        do {
+            id = Random().nextInt()
+        } while (null != directoryStructure.IDtoPath[id] || id == VirtualDisk.FOOTER_MARKER)
+        return id
+    }
 
 
 }
