@@ -71,6 +71,8 @@ NOTES:
 - Root entry (ID=0) however, must be the first entry that comes right after the header.
 - Name of the root entry is undefined, the DiskCracker defaults it as "(root)", but it can be anything.
 - Parent node of the root is undefined; do not make an assume that root node's parent is 0.
+- The entry which its id is equal to its parent (not just the root) are considered valid and must not be purged. This is the official way to create a hidden file.
+  - tsvm expects Entry ID of 1 for the bootloader
 
 ###  Entry Header
     Int32       EntryID (random Integer). This act as "jump" position for directory listing.
