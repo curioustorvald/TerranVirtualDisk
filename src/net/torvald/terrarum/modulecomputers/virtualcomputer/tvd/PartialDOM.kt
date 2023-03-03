@@ -2,6 +2,7 @@ package net.torvald.terrarum.modulecomputers.virtualcomputer.tvd
 
 import net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.VDUtil.sanitisePath
 import java.io.File
+import java.io.FileNotFoundException
 import java.io.IOException
 import java.nio.charset.Charset
 import java.util.*
@@ -155,7 +156,20 @@ class PartialDOM(private val diskFile: File, val charset: Charset = Charset.defa
 
     fun requestFile(id: EntryID): DiskEntry? {
         peekFile(id)
-        return fileCache.get(id)?.file ?: diskSkimmer.requestFile(id)
+        // 1. look for fileCache, return if found
+        // 2. look for changedFiles, return if found
+        // 3. take a file from diskSkimmer:
+        // 3.1. if the file is there:
+        // 3.1.1 ...and the file is on the removedFiles -> return null
+        // 3.1.2 ...and the file is NOT on the removedFiles -> return it
+        // 3.2. if the file is not there, return null
+        return fileCache.get(id)?.file ?: changedFiles.find { it.entryID == id } ?:
+        let { dom ->
+            val fileOnSkimmer = diskSkimmer.requestFile(id)
+            if (removedFiles.contains(fileOnSkimmer?.entryID))
+                null
+            else fileOnSkimmer /* may be null! */
+        }
     }
     fun requestFile(path: String): DiskEntry? {
         return directoryStructure.find(path.sanitise())?.let { requestFile(it) }
@@ -189,8 +203,20 @@ class PartialDOM(private val diskFile: File, val charset: Charset = Charset.defa
         usedBytes += entry.serialisedSize
 
         touchFile(entry)
-        val fullPath = directoryStructure.toFullPath(entry.parentEntryID)
-        directoryStructure.add("$fullPath/${entry.filename.toCanonicalString(charset)}", entry.entryID)
+        var fullPath = directoryStructure.toFullPath(entry.parentEntryID)
+                ?: throw FileNotFoundException("Parent entry ${entry.parentEntryID} does not exist")
+        var entryFileName = entry.filename.toCanonicalString(charset)
+        while (fullPath.startsWith("/")) {
+            fullPath = fullPath.substring(1)
+        }
+        while (entryFileName.startsWith("/")) {
+            entryFileName = entryFileName.substring(1)
+        }
+        var addPath = "$fullPath/$entryFileName"
+        while (addPath[1] == '/') {
+            addPath = addPath.substring(1)
+        }
+        directoryStructure.add(addPath, entry.entryID)
     }
 
 

@@ -58,7 +58,7 @@ class SkimmerDirectoryStructure(val diskSkimmer: DiskSkimmer, val charset: Chars
         if (DEBUG) {
             println("[SkimmerDirectoryStructure] PATH-TO-ID MAP:")
             pathToID.toSortedMap().forEach { path, id ->
-                println("[SkimmerDirectoryStructure] $path -> ${id}")
+                println("[SkimmerDirectoryStructure] $path -> $id")
             }
         }
     }
@@ -96,7 +96,7 @@ class SkimmerDirectoryStructure(val diskSkimmer: DiskSkimmer, val charset: Chars
         return item*/
 
         val r = pathToID[path]
-        if (r == null) printdbg("File not found: $path")
+        if (r == null) printdbg("File not found: '$path'")
         return r
     }
 
@@ -105,6 +105,7 @@ class SkimmerDirectoryStructure(val diskSkimmer: DiskSkimmer, val charset: Chars
     fun add(fullPath: String, id: EntryID) {
         pathToID[fullPath] = id
         IDtoPath[id] = fullPath
+        printdbg("Accepting new file '$fullPath' -> $id")
     }
 
     fun remove(id: EntryID) {

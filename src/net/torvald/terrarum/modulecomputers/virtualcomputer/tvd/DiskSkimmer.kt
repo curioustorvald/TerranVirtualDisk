@@ -21,6 +21,12 @@ import kotlin.experimental.and
  */
 class DiskSkimmer(private val diskFile: File, val charset: Charset = Charset.defaultCharset()) {
 
+    private val DEBUG = true
+    private fun printdbg(msg: Any?) {
+        if (DEBUG) println("[DiskSkimmer] $msg")
+    }
+
+
     /*
 
 init:
@@ -337,6 +343,9 @@ removefile:
         val tmpFile = File(originalFile.absolutePath + "_tmp")
         val oldFile = File(originalFile.absolutePath + "_old")
 
+        // main -cp-> old
+        originalFile.copyTo(oldFile, true)
+
 
         // buffer the footer
         val footerBytes = fetchFooterBytes(diskFile)
@@ -345,13 +354,18 @@ removefile:
         // make tmpfile
         try {
             val tmpOut = BufferedOutputStream(FileOutputStream(tmpFile))
-            val oldIn = BufferedInputStream(FileInputStream(diskFile))
+            val oldIn = BufferedInputStream(FileInputStream(originalFile))
             var entryCounter = footerPosition // a counter to set new footer position
+
+            printdbg("Copying old bytes (0 until $footerPosition)")
+
             // copy old bytes minus the footer
             byteByByteCopy(footerPosition, oldIn, tmpOut)
 
 
             entries.forEach { entry ->
+                printdbg("Appending new entry ${entry.entryID} at offset $entryCounter")
+
                 val bytes = entry.serialize()
 
                 // update newEntryOffsetTable
@@ -363,6 +377,7 @@ removefile:
                 // update counter
                 entryCounter += bytes.size
             }
+            printdbg("Writing footer (${footerBytes.size} bytes)")
             tmpOut.write(footerBytes)
 
             tmpOut.flush(); tmpOut.close()
@@ -378,7 +393,7 @@ removefile:
 
 
         // replace tmpFile with original file
-        if (!commitTempfileChange(oldFile, tmpFile)) return false
+        if (!commitTempfileChange(originalFile, tmpFile)) return false
         // if TRUE is retuned, ignore the return value
 
 
@@ -426,6 +441,10 @@ removefile:
         val tmpFile = File(originalFile.absolutePath + "_tmp")
         val oldFile = File(originalFile.absolutePath + "_old")
 
+        // main -cp-> old
+        originalFile.copyTo(oldFile, true)
+
+
         // buffer the footer
         val footerBytes = fetchFooterBytes(diskFile)
 
@@ -435,7 +454,7 @@ removefile:
             val tmpOut = BufferedOutputStream(FileOutputStream(tmpFile))
             val oldIn = BufferedInputStream(FileInputStream(diskFile))
 
-            oldIn.mark(-1) // mark at pos zero
+            oldIn.mark(2147483647) // mark at pos zero
 
             // copy header
             tmpOut.write(oldIn.read(VirtualDisk.HEADER_SIZE.toInt()))
@@ -480,7 +499,7 @@ removefile:
 
 
         // replace tmpFile with original file
-        if (!commitTempfileChange(oldFile, tmpFile)) return false
+        if (!commitTempfileChange(originalFile, tmpFile)) return false
         // if TRUE is retuned, ignore the return value
 
 
@@ -652,7 +671,7 @@ removefile:
         val fis = BufferedInputStream(FileInputStream(originalFile)) // bufferd, in order to use markings
         val fos = FileOutputStream(tmpFile)
 
-        fis.mark(-1) // mark at zero
+        fis.mark(2147483647) // mark at zero
 
         // start scanning
         entryToOffsetTable.forEach { t, u ->
@@ -741,38 +760,12 @@ removefile:
 
     }
 
-    private fun commitTempfileChange(oldFile: File, tmpFile: File): Boolean {
+    private fun commitTempfileChange(mainFile: File, tmpFile: File): Boolean {
         try {
-            // fix before actual commit
-            //fixEntryCountUsingActualContents(tmpFile, tmpFile)
-
-
-            // the actual commit
-            oldFile.delete()
-
-            // fix commit using tmp2
-            val tmpFile2 = File(tmpFile.absolutePath + "2")
-            fixEntryCountUsingActualContents(tmpFile, tmpFile2)
-
-            val suc1 = diskFile.renameTo(oldFile)
-            if (!suc1) {
-                throw RuntimeException("Renaming ${diskFile.canonicalPath} to ${oldFile.canonicalPath} failed")
-                return false
-            }
-
-            tmpFile2.copyTo(diskFile)
-
-            val suc2 = tmpFile2.delete()
-            if (!suc2) {
-                throw RuntimeException("Removing tempfile ${tmpFile2.canonicalPath} faild")
-                return false
-            }
-
-            val suc3 = tmpFile.delete()
-            if (!suc3) {
-                throw RuntimeException("Removing tempfile ${tmpFile.canonicalPath} faild")
-                return false
-            }
+            // tmp -cp-> main
+            // rm tmp
+            tmpFile.copyTo(mainFile, true)
+            tmpFile.delete()
         }
         catch (e: Exception) {
             e.printStackTrace()
@@ -802,7 +795,7 @@ removefile:
         println("[DiskSkimmer.getEntryBlockSize] offset for entry $id = $offset")
 
         val fis = FileInputStream(diskFile)
-        fis.skip(offset + 8)
+        fis.skip(offset + 4)
         val type = fis.read().toByte()
         fis.skip(272) // skip name, timestamp and CRC
 
