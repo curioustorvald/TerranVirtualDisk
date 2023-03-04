@@ -4,6 +4,14 @@ current specversion number: 0x02
 
 ## Changes
 
+### 0x03
+- Structural Change: no more footers
+- To convert the version 2 disk into version 3, perform the following on a hex editor
+  1. append 17 bits after the version number
+  2. overwrite 47th byte to the footer's first byte
+  3. remove the footer entirely (FE FE FE FE .. .. .. FF 19)
+  4. overwrite 46th byte to 0x03
+
 ### 0x02
 - 48-Bit filesize and timestamp (Max 256 TiB / 8.9 million years)
 - 8 Reserved footer bytes (excluding footer marker and EOF)
@@ -32,13 +40,13 @@ The Archive:
 |  Disk Entry  |    +-------------+    +----------------+    +-------------+
 |              |    |   Version   |    |  CreationDate  |    |ChildrenCount|
 +--------------+    +-------------+    +----------------+    +-------------+
-|              |                       |ModificationDate|    | ID of Child |
-|     ...      |    0th Entry:         +----------------+    +-------------+
-|              |    DiskEntry with     |     CRC-32     |    | ID of Child |
-+--------------+    ID of zero,        +----------------+    +-------------+
-|    Footer    |    directory type     |                |    |     ...     |
-+--------------+                       |                |    +-------------+
-                                       |    Contents    |
+|              |    | Attributes  |    |ModificationDate|    | ID of Child |
+|     ...      |    +-------------+    +----------------+    +-------------+
+|              |                       |     CRC-32     |    | ID of Child |
++--------------+     0th Entry:        +----------------+    +-------------+
+                     DiskEntry with    |                |    |     ...     |
+                     ID of zero,       |                |    +-------------+
+                     directory type    |    Contents    |
                                        |                |    - Symlink:
                                        |                |    +-------------+
                                        +----------------+    |  Target ID  |
@@ -57,8 +65,12 @@ The Archive:
                 3. sort the list (here's the catch -- you will treat CRCs as SIGNED integer)
                 4. for elems on list: update crc with the elem (crc = calculateCRC(crc, elem))
     Int8        Version
-    
-    (Header size: 47 bytes)
+    Uint8       Disk Attributes
+                  0b 7 6 5 4 3 2 1 0
+                  0th bit: Readonly
+    Uint8[16]   Extra Attributes (user-defined)
+
+    (Header size: 64 bytes)
 
 
 
@@ -76,11 +88,10 @@ NOTES:
 
 ###  Entry Header
     Int32       EntryID (random Integer). This act as "jump" position for directory listing.
-                NOTE: Index 0 must be a root "Directory"; 0xFEFEFEFE is invalid (used as footer marker)
+                NOTE: Index 0 must be a root "Directory"
     Int32       EntryID of parent directory
     Int8        Flag for file or directory or symlink (cannot be negative)
                 0x01: Normal file, 0x02: Directory list, 0x03: Symlink
-                0x11: Compressed normal file
     Uint8[256]  File name in UTF-8
     Int48       Creation date in real-life UNIX timestamp
     Int48       Last modification date in real-life UNIX timestamp
@@ -104,16 +115,3 @@ NOTES:
     Int32       Target IndexNumber
     
     (Content size: 4 bytes)
-
-
-
-
-## Footer
-    Uint8[4]    0xFE 0xFE 0xFE 0xFE (footer marker)
-    Int8        Disk properties flag 1
-                0b 7 6 5 4 3 2 1 0
-                
-                0th bit: Readonly
-                
-    Int8[7]     Reserved, should be filled with zero
-    Uint8[2]    0xFF 0x19 (EOF mark)

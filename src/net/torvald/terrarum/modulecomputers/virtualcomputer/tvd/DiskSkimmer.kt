@@ -1,5 +1,6 @@
 package net.torvald.terrarum.modulecomputers.virtualcomputer.tvd
 
+import net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.VirtualDisk.Companion.ATTRIBS_LENGTH
 import java.io.*
 import java.nio.ByteBuffer
 import java.nio.channels.FileChannel
@@ -71,10 +72,6 @@ removefile:
 
     val fa = RandomAccessFile(diskFile, "rw")
 
-    private var footerPosition = -1L // where the footer marker (FE FE FE FE) begins, unlike the entryToOffsetTable
-    private val footerSize: Int
-        get() = (diskFile.length() - footerPosition).toInt()
-
     var readOnly: Boolean = false; private set
     var diskCapacity: Long = 0; internal set
 
@@ -128,21 +125,13 @@ removefile:
 
         diskCapacity = readInt48()
 
-        fis.skip(37)
+        fis.skip(54)
 
-        currentPosition = 47
+        currentPosition = 64
 
         val currentLength = diskFile.length()
         while (currentPosition < currentLength) {
             val entryID = readIntBig() // at this point, cursor is 4 bytes past to the entry head
-
-            // footer
-            if (entryID == 0xFEFEFEFE.toInt()) {
-                footerPosition = currentPosition - 4
-                readOnly = (readByte().and(1).toInt() != 0)
-                break
-            }
-
 
             // fill up the offset table
             val offset = currentPosition
@@ -304,209 +293,102 @@ removefile:
     // THESE ARE METHODS TO SUPPORT ON-LINE MODIFICATION //
     ///////////////////////////////////////////////////////
 
-    fun appendEntry(entry: DiskEntry) = appendEntries(listOf(entry))
+    fun appendEntry(entry: DiskEntry) = updateEntries(listOf(entry))
+    fun deleteEntry(entry: EntryID) = deleteEntries(listOf(entry))
+    fun appendEntries(entries: List<DiskEntry>) = updateEntries(entries)
 
-    fun appendEntries(entries: List<DiskEntry>): Boolean {
-        // FIXME untested
-        // FIXME dir: files were added but files count was not updated
-
-        // buffer the footer
-        // define newFooterPos = 0
-        // define newEntryOffsetTable = entryToOffsetTable.clone()
-        // make new diskFile_tmp such that:
-        //      try :
-        //          copy (0 until footerPosition) bytes to the tmpfile -> throws IOException
-        //          serialise newly adding entries -> throws IOException
-        //          update newEntryOffsetTable
-        //          copy (footerPosition until file.length) bytes to the tmpfile -> throws IOException
-        //          set newFooterPos
-        //      catch IOException:
-        //          return false
-        // try:
-        //      move diskFile to diskFile_old -> throws IOException
-        //      move diskFile_tmp to diskFile -> throws IOException
-        //      delete diskFile_old -> throws IOException
-        // catch IOException:
-        //      try:
-        //          if (diskFile_old) exists, rename diskFile_old to diskFile -> throws IOException
-        //      catch IOException:
-        //          do nothing
-        //      return false
-        // footerPosition = newFooterPos
-        // entryToOffsetTable = newEntryOffsetTable
-        // return true
-
-
-        var newFooterPos = 0L
+    fun updateEntries(entries: List<DiskEntry>): Boolean {
         val originalFile = diskFile.absoluteFile
         val newEntryOffsetTable = entryToOffsetTable.clone() as HashMap<EntryID, Long>
-        val tmpFile = File(originalFile.absolutePath + "_tmp")
         val oldFile = File(originalFile.absolutePath + "_old")
 
-        // main -cp-> old
+        // strategy:
+        // 1. main -cp-> old
+        // 2. append necessary bytes to main
+
+
+        // STEP 1
         originalFile.copyTo(oldFile, true)
 
 
-        // buffer the footer
-        val footerBytes = fetchFooterBytes(diskFile)
-
-
-        // make tmpfile
+        // STEP 2
         try {
-            val tmpOut = BufferedOutputStream(FileOutputStream(tmpFile))
-            val oldIn = BufferedInputStream(FileInputStream(originalFile))
-            var entryCounter = footerPosition // a counter to set new footer position
-
-            printdbg("Copying old bytes (0 until $footerPosition)")
-
-            // copy old bytes minus the footer
-            byteByByteCopy(footerPosition, oldIn, tmpOut)
-
-
+            var offsetCounter = originalFile.length()
+            val fileOut = BufferedOutputStream(FileOutputStream(originalFile))
             entries.forEach { entry ->
-                printdbg("Appending new entry ${entry.entryID} at offset $entryCounter")
+                printdbg("Appending new entry ${entry.entryID} at offset $offsetCounter")
 
                 val bytes = entry.serialize()
 
                 // update newEntryOffsetTable
-                newEntryOffsetTable[entry.entryID] = entryCounter
+                newEntryOffsetTable[entry.entryID] = offsetCounter
 
                 // actually copy the bytes
-                bytes.forEachBanks { tmpOut.write(it) }
+                bytes.forEachUsedBanks { used, bank ->
+                    if (used > 0) fileOut.write(bank, 0, used)
+                }
 
                 // update counter
-                entryCounter += bytes.size
+                offsetCounter += bytes.size
             }
-            printdbg("Writing footer (${footerBytes.size} bytes)")
-            tmpOut.write(footerBytes)
-
-            tmpOut.flush(); tmpOut.close()
-            oldIn.close()
-
-            // at this point, entryCounter should rightfully point the new footer position
-            newFooterPos = entryCounter
+            fileOut.flush(); fileOut.close()
         }
         catch (e: Exception) {
             e.printStackTrace()
             return false
         }
 
-
-        // replace tmpFile with original file
-        if (!commitTempfileChange(originalFile, tmpFile)) return false
-        // if TRUE is retuned, ignore the return value
-
-
-        footerPosition = newFooterPos
+        // update entryToOffsetTable
         entryToOffsetTable = newEntryOffsetTable
         return true
-
     }
 
-    fun deleteEntry(entry: EntryID) = deleteEntries(listOf(entry))
 
     fun deleteEntries(entries: List<EntryID>): Boolean {
-        // FIXME untested
-        // FIXME dir: files were removed but files count was not updated
-
-        // buffer the footer
-        // define newFooterPos = 0
-        // define newEntryOffsetTable = entryToOffsetTable.clone()
-        // make new diskFile_tmp such that:
-        //      try :
-        //          copy header into the tmpfile -> throws IOException
-        //          copy all the surviving entries ONE BY ONE into the tmpfile -> throws IOException
-        //          update newEntryOffsetTable
-        //          copy (footerPosition until file.length) bytes to the tmpfile -> throws IOException
-        //      catch IOException:
-        //          return false
-        // try:
-        //      move diskFile to diskFile_old -> throws IOException
-        //      move diskFile_tmp to diskFile -> throws IOException
-        //      delete diskFile_old -> throws IOException
-        // catch IOException:
-        //      try:
-        //          if (diskFile_old) exists, rename diskFile_old to diskFile -> throws IOException
-        //      catch IOException:
-        //          do nothing
-        //      return false
-        // footerPosition = newFooterPos
-        // entryToOffsetTable = newEntryOffsetTable
-        // return true
-
-        var newFooterPos = VirtualDisk.HEADER_SIZE
         val originalFile = diskFile.absoluteFile
-        val cleanedOffsetTable = entryToOffsetTable.clone() as HashMap<EntryID, Long>
-        val newOffsetTable = HashMap<EntryID, Long>()
-        val tmpFile = File(originalFile.absolutePath + "_tmp")
+        val newEntryOffsetTable = entryToOffsetTable.clone() as HashMap<EntryID, Long>
         val oldFile = File(originalFile.absolutePath + "_old")
 
-        // main -cp-> old
+        // strategy:
+        // 1. main -cp-> old
+        // 2. append necessary bytes to main
+
+
+        // STEP 1
         originalFile.copyTo(oldFile, true)
 
 
-        // buffer the footer
-        val footerBytes = fetchFooterBytes(diskFile)
-
-
-        // make tmpfile
+        // STEP 2
         try {
-            val tmpOut = BufferedOutputStream(FileOutputStream(tmpFile))
-            val oldIn = BufferedInputStream(FileInputStream(diskFile))
+            val ofa = RandomAccessFile(originalFile, "RW")
+            entries.forEach { entryID ->
+                val offset = newEntryOffsetTable[entryID]
 
-            oldIn.mark(2147483647) // mark at pos zero
+                if (offset != null) {
+                    printdbg("Marking entry $entryID as deleted (offset: $offset)")
 
-            // copy header
-            tmpOut.write(oldIn.read(VirtualDisk.HEADER_SIZE.toInt()))
+                    ofa.seek(offset + 4)
+                    val oldMark = ofa.read()
+                    ofa.seek(offset + 4)
+                    ofa.write(oldMark or 128)
 
-            // copy entries one by one //
-
-            //// construct iteration offset table that excludes to-be-deleted entries
-            entries.forEach { cleanedOffsetTable.remove(it) }
-
-            // copy root entry (the root entry has fixed position on the disk)
-            val rootSize = getEntryBlockSize(0)!!
-            newOffsetTable[0] = newFooterPos // write in new offset to the offsetTable
-            byteByByteCopy(rootSize, oldIn, tmpOut)
-            // update footer position
-            newFooterPos += rootSize
-
-            // copy non-root entry
-            cleanedOffsetTable.forEach { id, offset ->
-                if (id != 0) { // remember, the root entry has fixed position!
-                    val size = getEntryBlockSize(id)!!
-                    newOffsetTable[id] = newFooterPos // write in new offset to the offsetTable
-                    oldIn.reset() // return to pos zero
-                    oldIn.skip(offset)
-                    byteByByteCopy(size, oldIn, tmpOut)
-
-                    // update footer position
-                    newFooterPos += size
+                    newEntryOffsetTable.remove(entryID)
+                }
+                else {
+                    printdbg("Entry $entryID is not found, skipping...")
                 }
             }
-
-            // write footer
-            tmpOut.write(footerBytes)
-
-            tmpOut.flush()
-            tmpOut.close()
-            oldIn.close()
         }
         catch (e: Exception) {
             e.printStackTrace()
             return false
         }
 
-
-        // replace tmpFile with original file
-        if (!commitTempfileChange(originalFile, tmpFile)) return false
-        // if TRUE is retuned, ignore the return value
-
-
-        footerPosition = newFooterPos
-        entryToOffsetTable = newOffsetTable
+        // update entryToOffsetTable
+        entryToOffsetTable = newEntryOffsetTable
         return true
     }
+
 
     /**
      * Creates a new file. Nonexisting directories will be automatically constructed.
@@ -752,7 +634,7 @@ removefile:
         var id: Int
         do {
             id = Random().nextInt()
-        } while (entryToOffsetTable.containsKey(id) || id == VirtualDisk.FOOTER_MARKER)
+        } while (entryToOffsetTable.containsKey(id))
         return id
     }
 
@@ -775,15 +657,6 @@ removefile:
         return true
     }
 
-    private fun fetchFooterBytes(diskFile: File): ByteArray {
-        val fis = FileInputStream(diskFile)
-        fis.skip(footerPosition)
-        val footerBytes = fis.read(footerSize)
-        fis.close()
-
-        return footerBytes
-    }
-
     /**
      * total size of the entry block. This size includes that of the header
      */
@@ -804,9 +677,6 @@ removefile:
         when (type) {
             DiskEntry.NORMAL_FILE -> {
                 ret = fis.read(6).toInt48() + HEADER_SIZE + 6
-            }
-            DiskEntry.COMPRESSED_FILE -> {
-                ret = fis.read(6).toInt48() + HEADER_SIZE + 12
             }
             DiskEntry.DIRECTORY -> {
                 ret = fis.read(2).toShortBig() * 4 + HEADER_SIZE + 2

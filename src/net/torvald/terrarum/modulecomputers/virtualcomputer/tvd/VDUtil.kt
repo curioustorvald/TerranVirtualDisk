@@ -125,12 +125,14 @@ object VDUtil {
         val diskName = inbytes.sliceArray64(10L..10L + 31)
         val diskCRC = inbytes.sliceArray64(10L + 32..10L + 32 + 3).toIntBig() // to check with completed vdisk
         val diskSpecVersion = inbytes[10L + 32 + 4]
+        val attrib0 = inbytes[10L + 32 + 5]
+        val attribs = inbytes.sliceArray(10 + 32 + 6 until 10 + 32 + 6 + 16)
 
 
         if (diskSpecVersion != specversion)
             throw RuntimeException("Unsupported disk format version: current internal version is $specversion; the file's version is $diskSpecVersion")
 
-        val vdisk = VirtualDisk(diskSize, diskName.toByteArray())
+        val vdisk = VirtualDisk(diskSize, diskName.toByteArray(), attrib0, attribs)
 
         //println("[VDUtil] currentUnixtime = $currentUnixtime")
 
@@ -142,22 +144,7 @@ object VDUtil {
 
             val entryID = inbytes.sliceArray64(entryOffset..entryOffset + 3).toIntBig()
 
-
-            // process footer
-            if (entryID == VirtualDisk.FOOTER_MARKER) {
-                // entries ends, footers are to be read
-                entryOffset += 4 // skip footer marker
-
-                val footerSize = 8
-                vdisk.__internalSetFooter__(inbytes.sliceArray64(entryOffset until entryOffset + footerSize).toByteArray())
-
-                entryOffset += 14
-
-                continue
-            }
-
-
-            // process regular entries
+            // process entries
             val entryParentID = inbytes.sliceArray64(entryOffset + 4..entryOffset + 7).toIntBig()
             val entryTypeFlag = inbytes[entryOffset + 8]
             val entryFileName = inbytes.sliceArray64(entryOffset + 9..entryOffset + 9 + 255).toByteArray()
@@ -186,7 +173,6 @@ object VDUtil {
 
             // update entryOffset so that we can fetch next entry in the binary
             entryOffset += DiskEntry.HEADER_SIZE + entryData.size + when (entryTypeFlag) {
-                DiskEntry.COMPRESSED_FILE -> 12 // PLEASE DO REFER TO Spec.md
                 DiskEntry.NORMAL_FILE -> 6      // PLEASE DO REFER TO Spec.md
                 DiskEntry.DIRECTORY   -> 2      // PLEASE DO REFER TO Spec.md
                 DiskEntry.SYMLINK     -> 0      // PLEASE DO REFER TO Spec.md

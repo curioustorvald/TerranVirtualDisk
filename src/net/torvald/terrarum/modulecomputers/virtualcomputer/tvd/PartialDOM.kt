@@ -241,7 +241,7 @@ class PartialDOM(private val diskFile: File, val charset: Charset = Charset.defa
         var id: Int
         do {
             id = Random().nextInt()
-        } while (null != directoryStructure.IDtoPath[id] || id == VirtualDisk.FOOTER_MARKER)
+        } while (null != directoryStructure.IDtoPath[id])
         return id
     }
 

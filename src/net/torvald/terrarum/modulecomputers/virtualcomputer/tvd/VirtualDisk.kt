@@ -10,7 +10,7 @@ import kotlin.experimental.or
 
 typealias EntryID = Int
 
-val specversion = 0x02.toByte()
+val specversion = 0x03.toByte()
 
 /**
  * This class provides DOM (disk object model) of the TEVD virtual filesystem.
@@ -21,25 +21,19 @@ class VirtualDisk(
         /** capacity of 0 makes the disk read-only */
         var capacity: Long,
         var diskName: ByteArray = ByteArray(NAME_LENGTH),
-        footer: ByteArray = ByteArray(8) // default to mandatory 8-byte footer
+        var attribs: Byte = 0.toByte(),
+        val extraAttribs: ByteArray = ByteArray(ATTRIBS_LENGTH)
 ) {
-    val footerBytes: ByteArray = footer
     val entries = HashMap<EntryID, DiskEntry>()
     var isReadOnly: Boolean
-        set(value) { footerBytes[0] = (footerBytes[0] and 0xFE.toByte()) or value.toBit() }
-        get() = capacity == 0L || ( footerBytes[0].and(1) == 1.toByte())
+        set(value) { attribs = (attribs and 0xFE.toByte()) or value.toBit() }
+        get() = capacity == 0L || ( attribs.and(1) == 1.toByte())
     fun getDiskNameString(charset: Charset) = diskName.toCanonicalString(charset)
     val root: DiskEntry
         get() = entries[0]!!
 
 
     private fun Boolean.toBit() = if (this) 1.toByte() else 0.toByte()
-
-    internal fun __internalSetFooter__(footer: ByteArray) {
-        for (k in 0..7) {
-            footerBytes[k] = footer[k]
-        }
-    }
 
     private fun serializeEntriesOnly(): ByteArray64 {
         val buffer = ByteArray64()
@@ -53,7 +47,7 @@ class VirtualDisk(
 
     fun serialize(): ByteArray64 {
         val entriesBuffer = serializeEntriesOnly()
-        val buffer = ByteArray64(HEADER_SIZE + entriesBuffer.size + FOOTER_SIZE)
+        val buffer = ByteArray64(HEADER_SIZE + entriesBuffer.size)
         val crc = hashCode().toBigEndian()
 
         buffer.appendBytes(MAGIC)
@@ -61,10 +55,9 @@ class VirtualDisk(
         buffer.appendBytes(diskName.forceSize(NAME_LENGTH))
         buffer.appendBytes(crc)
         buffer.appendByte(specversion)
+        buffer.appendByte(attribs)
+        buffer.appendBytes(extraAttribs.forceSize(ATTRIBS_LENGTH))
         buffer.appendBytes(entriesBuffer)
-        buffer.appendBytes(FOOTER_START_MARK)
-        buffer.appendBytes(footerBytes)
-        buffer.appendBytes(EOF_MARK)
 
         return buffer
     }
@@ -85,13 +78,13 @@ class VirtualDisk(
 
     /** Expected size of the virtual disk */
     val usedBytes: Long
-        get() = entries.map { it.value.serialisedSize }.sum() + HEADER_SIZE + FOOTER_SIZE
+        get() = entries.map { it.value.serialisedSize }.sum() + HEADER_SIZE
 
     fun generateUniqueID(): Int {
         var id: Int
         do {
             id = Random().nextInt()
-        } while (null != entries[id] || id == FOOTER_MARKER)
+        } while (null != entries[id])
         return id
     }
 
@@ -99,14 +92,11 @@ class VirtualDisk(
     override fun toString() = "VirtualDisk(name: ${getDiskNameString(Charsets.UTF_8)}, capacity: $capacity bytes, crc: ${hashCode().toHex()})"
 
     companion object {
-        val HEADER_SIZE = 47L // according to the spec
-        val FOOTER_SIZE = 6L + 8L  // footer mark + EOF
+        val HEADER_SIZE = 64L // according to the spec
         val NAME_LENGTH = 32
+        val ATTRIBS_LENGTH = 16
 
         val MAGIC = "TEVd".toByteArray()
-        val FOOTER_MARKER = 0xFEFEFEFE.toInt()
-        val FOOTER_START_MARK = FOOTER_MARKER.toBigEndian()
-        val EOF_MARK = byteArrayOf(0xFF.toByte(), 0x19.toByte())
     }
 }
 
@@ -134,13 +124,12 @@ class DiskEntry(
 
     companion object {
         val HEADER_SIZE = 281L // according to the spec
-        val ROOTNAME = "(root)"
+        val ROOTNAME = "."
         val NAME_LENGTH  = 256
 
         val NORMAL_FILE = 1.toByte()
         val DIRECTORY =   2.toByte()
         val SYMLINK =     3.toByte()
-        val COMPRESSED_FILE = 0x11.toByte()
 
         private fun DiskEntryContent.getTypeFlag() =
                 if      (this is EntryFile)      NORMAL_FILE
