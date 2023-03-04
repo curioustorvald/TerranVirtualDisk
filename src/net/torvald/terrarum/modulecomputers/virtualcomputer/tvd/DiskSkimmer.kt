@@ -360,7 +360,7 @@ removefile:
 
         // STEP 2
         try {
-            val ofa = RandomAccessFile(originalFile, "RW")
+            val ofa = RandomAccessFile(originalFile, "rw")
             entries.forEach { entryID ->
                 val offset = newEntryOffsetTable[entryID]
 
