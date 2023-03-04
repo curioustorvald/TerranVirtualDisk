@@ -37,6 +37,11 @@ class PartialDOM(private val diskFile: File, val charset: Charset = Charset.defa
                  private val FRESH_CACHE_REMOVAL_CHANCE: Double = 0.1
 ) {
 
+    private val DEBUG = true
+    private fun printdbg(msg: Any?) {
+        if (DEBUG) println("[PartialDOM] $msg")
+    }
+
     private val fileAccessedAtLeastOnce = BloomFilter(256, 128)
     private val fileCache = HashMap<EntryID, FileCache>()
 
@@ -71,7 +76,7 @@ class PartialDOM(private val diskFile: File, val charset: Charset = Charset.defa
         val timeNow = System.currentTimeMillis()
 
         // 1. mark the oldest unused
-        var oldest = 0xFEFEFEFE.toInt()
+        var oldest: Int? = null
         var oldestIdleTime = 0L
         fileCache.forEach { id, cache ->
 
@@ -84,7 +89,7 @@ class PartialDOM(private val diskFile: File, val charset: Charset = Charset.defa
             }
         }
         // 2. if its idle time is not greater than CACHE_RETAINING_TIME, give it 10% chance for removal
-        if (oldestIdleTime > CACHE_RETAINING_TIME || Math.random() < FRESH_CACHE_REMOVAL_CHANCE) {
+        if (oldest != null && (oldestIdleTime > CACHE_RETAINING_TIME || Math.random() < FRESH_CACHE_REMOVAL_CHANCE)) {
             fileCache.remove(oldest)
         }
 
@@ -144,12 +149,15 @@ class PartialDOM(private val diskFile: File, val charset: Charset = Charset.defa
      */
     fun touchFile(file: DiskEntry) {
         checkReadOnly()
-        changedFiles.add(file)
+        _touchFileInternal(file)
     }
     fun touchFile(path: String) {
         directoryStructure.find(path.sanitise())?.let { id ->
-            requestFile(id)?.let { touchFile(it) }
+            requestFile(id)?.let { _touchFileInternal(it) }
         }
+    }
+    private fun _touchFileInternal(file: DiskEntry) {
+        changedFiles.add(file)
     }
 
 
@@ -180,14 +188,26 @@ class PartialDOM(private val diskFile: File, val charset: Charset = Charset.defa
      */
     fun writeFile(file: DiskEntry) {
         touchFile(file)
-        // TODO add filesize-delta to the usedBytes
+        // add filesize-delta to the usedBytes
+        val oldFileSize = requestFile(file.entryID)?.serialisedSize ?: 0
+        val sizeDelta = file.serialisedSize - oldFileSize
+        usedBytes += sizeDelta
     }
 
+    /**
+     * Parent dir must be alternd manually; when you're done, touchFile() the parent as well
+     */
     fun removeFile(id: EntryID) {
         checkReadOnly()
-        removedFiles.add(id)
-        directoryStructure.remove(id)
-        uncacheFile(id)
+
+        requestFile(id)?.let {
+
+            printdbg("Removing entry ${id}")
+
+            removedFiles.add(id)
+            directoryStructure.remove(id)
+            uncacheFile(id)
+        }
     }
     fun removeFile(path: String) {
         directoryStructure.find(path.sanitise())?.let { id ->
@@ -196,13 +216,13 @@ class PartialDOM(private val diskFile: File, val charset: Charset = Charset.defa
     }
 
 
+    /**
+     * Parent dir must be alternd manually; when you're done, touchFile() the parent as well
+     */
     fun addNewFile(entry: DiskEntry) {
         checkCapacity(entry.serialisedSize)
         checkReadOnly()
 
-        usedBytes += entry.serialisedSize
-
-        touchFile(entry)
         var fullPath = directoryStructure.toFullPath(entry.parentEntryID)
                 ?: throw FileNotFoundException("Parent entry ${entry.parentEntryID} does not exist")
         var entryFileName = entry.filename.toCanonicalString(charset)
@@ -216,7 +236,12 @@ class PartialDOM(private val diskFile: File, val charset: Charset = Charset.defa
         while (addPath[1] == '/') {
             addPath = addPath.substring(1)
         }
+
+        printdbg("Adding new entry ${entry.entryID}")
+        _touchFileInternal(entry)
         directoryStructure.add(addPath, entry.entryID)
+        usedBytes += entry.serialisedSize
+
     }
 
 
