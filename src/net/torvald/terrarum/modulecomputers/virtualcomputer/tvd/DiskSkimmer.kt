@@ -1,5 +1,6 @@
 package net.torvald.terrarum.modulecomputers.virtualcomputer.tvd
 
+import net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.ByteArray64.Companion.BANK_SIZE
 import net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.VirtualDisk.Companion.ATTRIBS_LENGTH
 import java.io.*
 import java.nio.ByteBuffer
@@ -314,7 +315,7 @@ removefile:
         // STEP 2
         try {
             var offsetCounter = originalFile.length()
-            val fileOut = BufferedOutputStream(FileOutputStream(originalFile))
+
             entries.forEach { entry ->
                 printdbg("Appending new entry ${entry.entryID} at offset $offsetCounter")
 
@@ -325,13 +326,14 @@ removefile:
 
                 // actually copy the bytes
                 bytes.forEachUsedBanks { used, bank ->
-                    if (used > 0) fileOut.write(bank, 0, used)
+                    if (used > 0) {
+                        originalFile.appendBytes(bank.sliceArray(0 until used))
+                    }
                 }
 
                 // update counter
                 offsetCounter += bytes.size
             }
-            fileOut.flush(); fileOut.close()
         }
         catch (e: Exception) {
             e.printStackTrace()
