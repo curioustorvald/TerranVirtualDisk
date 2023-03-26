@@ -26,7 +26,6 @@ internal data class FileCache(val file: DiskEntry, var hits: Int = 1, var lastAc
  * @param CACHE_SIZE How many files are cached. Default: 16
  * @param MAX_FILESIZE_TO_CACHE Maximum size of the file for caching. A file larger than this will not be cached. Default: 10485760
  * @param CACHE_RETAINING_TIME How hong a file should be cached. A file unused for this time or longer are considered unused and will be pending for removal. Default: 60000 (10 minutes)
- * @param FRESH_CACHE_REMOVAL_CHANCE If there is no cache old enough to be removed, a oldest fresh cache will still be removed randomly. This value decides how often should it happen. Default: 0.1 (10 %)
  *
  * Created by minjaesong on 2023-02-05.
  */
@@ -34,7 +33,6 @@ class PartialDOM(private val diskFile: File, val charset: Charset = Charset.defa
                  private val CACHE_SIZE: Int = 16,
                  private val MAX_FILESIZE_TO_CACHE: Int = 10485760,
                  private val CACHE_RETAINING_TIME: Long = 1000 * 10 * 60, // 10 minutes
-                 private val FRESH_CACHE_REMOVAL_CHANCE: Double = 0.1
 ) {
 
     private val DEBUG = true
@@ -88,9 +86,15 @@ class PartialDOM(private val diskFile: File, val charset: Charset = Charset.defa
                 oldestIdleTime = check
             }
         }
-        // 2. if its idle time is not greater than CACHE_RETAINING_TIME, give it 10% chance for removal
-        if (oldest != null && (oldestIdleTime > CACHE_RETAINING_TIME || Math.random() < FRESH_CACHE_REMOVAL_CHANCE)) {
-            fileCache.remove(oldest)
+        // 2. remove when:
+        //    cache is not full:
+        //      1. idle time is greater than CACHE_RETAINING_TIME (even if the cache is not full)
+        //    cache is full:
+        //      delete the whatever the oldest
+        if (oldest != null) {
+            if (fileCache.size < CACHE_SIZE && oldestIdleTime > CACHE_RETAINING_TIME || fileCache.size >= CACHE_SIZE) {
+                fileCache.remove(oldest)
+            }
         }
 
 
