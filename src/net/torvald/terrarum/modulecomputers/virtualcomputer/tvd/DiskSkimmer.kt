@@ -545,7 +545,7 @@ removefile:
      */
     fun sync(): VirtualDisk {
         // rebuild VirtualDisk out of this and use it to write out
-        return VDUtil.readDiskArchive(diskFile, charset = charset)
+        return VDUtil.readDiskArchive("format3", diskFile, charset = charset)
     }
 
     fun fixEntryCountUsingActualContents(originalFile: File, tmpFile: File) {

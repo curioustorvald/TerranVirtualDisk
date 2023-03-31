@@ -1,6 +1,7 @@
 package net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.finder
 
 import net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.*
+import net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.archivers.Format3Archiver
 import java.awt.BorderLayout
 import java.awt.Dimension
 import java.awt.event.KeyEvent
@@ -297,7 +298,7 @@ class VirtualDiskCracker(val sysCharset: Charset = Charsets.UTF_8) : JFrame() {
                         fileChooser.showOpenDialog(null)
                         if (fileChooser.selectedFile != null) {
                             try {
-                                vdisk = VDUtil.readDiskArchive(fileChooser.selectedFile, Level.WARNING, { popupWarning(it) }, sysCharset)
+                                vdisk = Format3Archiver().readDiskArchive(fileChooser.selectedFile, Level.WARNING, { popupWarning(it) }, sysCharset)
                                 if (vdisk != null) {
                                     gotoRoot()
                                     updateDiskInfo()
@@ -332,7 +333,7 @@ class VirtualDiskCracker(val sysCharset: Charset = Charsets.UTF_8) : JFrame() {
                         fileChooser.showSaveDialog(null)
                         if (fileChooser.selectedFile != null) {
                             try {
-                                VDUtil.dumpToRealMachine(vdisk!!, fileChooser.selectedFile)
+                                Format3Archiver().serialize(vdisk!!, fileChooser.selectedFile)
                                 setStat("Disk saved")
                             }
                             catch (e: Exception) {

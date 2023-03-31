@@ -10,7 +10,7 @@ import kotlin.experimental.or
 
 typealias EntryID = Int
 
-val specversion = 0x03.toByte()
+//val specversion = 0x03.toByte()
 
 /**
  * This class provides DOM (disk object model) of the TEVD virtual filesystem.
@@ -45,6 +45,7 @@ class VirtualDisk(
         return buffer
     }
 
+    @Deprecated("TEVD now supports multiple archival format. Please use Please use net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.archivers.ArchiverFactory", ReplaceWith("net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.archivers.ArchiverFactory.getDomArchiver(\"format3\").serializeToBA64(this)"))
     fun serialize(): ByteArray64 {
         val entriesBuffer = serializeEntriesOnly()
         val buffer = ByteArray64(HEADER_SIZE + entriesBuffer.size)
@@ -54,12 +55,14 @@ class VirtualDisk(
         buffer.appendBytes(capacity.toInt48())
         buffer.appendBytes(diskName.forceSize(NAME_LENGTH))
         buffer.appendBytes(crc)
-        buffer.appendByte(specversion)
+        buffer.appendByte(0x03)
         buffer.appendByte(attribs)
         buffer.appendBytes(extraAttribs.forceSize(ATTRIBS_LENGTH))
         buffer.appendBytes(entriesBuffer)
 
         return buffer
+
+        //throw UnsupportedOperationException("Please use net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.archivers.ArchiverFactory")
     }
 
     override fun hashCode(): Int {
