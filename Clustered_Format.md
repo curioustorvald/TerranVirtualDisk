@@ -88,6 +88,12 @@ Ptr of 0 is used to mark NULL
 | 0 | Binary File |
 | 1 | Directory |
 
+### Directory File Contents
+| entry size (2 bytes) | repetitoin: cluster numbers (3*n bytes) |
+| --- |-----------------------------------------|
+
+entry size cannot exceed 1362 (clusters that actually fits in the remaining bytes — it the length of the directory is longer than that, extra entries must be specified on the next block of the file)
+
 # Functions
 
 ## Disk Management Functions
