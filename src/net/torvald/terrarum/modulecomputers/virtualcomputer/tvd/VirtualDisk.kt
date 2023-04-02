@@ -330,6 +330,7 @@ fun Short.toBigEndian(): ByteArray {
             this.toByte()
     )
 }
+fun Boolean.toInt(shl: Int = 0) = if (this) 1.shl(shl) else 0
 
 fun ByteArray64.getCRC32(): Int {
     val crc = CRC32()

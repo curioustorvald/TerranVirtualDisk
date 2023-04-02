@@ -2,6 +2,7 @@
 
 <aside>
 💡 Comes with all the inconveniences of FAT!
+
 </aside>
 
 The filesystem is consisted of 4096 bytes blocks — a number coincides with the cluster size of the modern “host” filesystem.
@@ -31,19 +32,19 @@ An archive can have 16777216 blocks (max 64 GB)
 
 ### Structure
 
-| Offset | Type       | Description |
-| --- |------------| --- |
-| 0 | **“TEVd”**     | Magic |
-| 4 | Uint48     | Disk size in bytes |
-| 10 | Byte[32]   | Disk name |
-| 42 | Int32      | CRC-32 |
-| 46 | **0x11**       | Version |
-| 47 | Byte       | Primary Attribute |
-| 48 | Byte[16]   | User-defined Attributes |
-| 64 | Uint32     | FAT size in blocks |
+| Offset | Type | Description |
+| --- | --- | --- |
+| 0 | “TEVd” | Magic |
+| 4 | Uint48 | Disk size in bytes |
+| 10 | Byte[32] | Disk name |
+| 42 | Int32 | CRC-32 |
+| 46 | 0x11 | Version |
+| 47 | Byte | Primary Attribute |
+| 48 | Byte[16] | User-defined Attributes |
+| 64 | Uint32 | FAT size in blocks |
 | 68 | Byte[4028] | Unused |
-- Primary Attribute (1 byte)
 
+- Primary Attribute (1 byte)
 
 | — | — | — | Fixed-size? | — | — | — | Read-only? |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -62,12 +63,16 @@ e.g. FAT count must be 2→6→14→30→62→126→254→…
 
 ### File Entry Structure
 
-| Pointer to Block (3 bytes) | Flags (1 byte) | Filename (252 bytes) |
-| --- | --- |----------------------|
+| Pointer to Cluster (3 bytes) | Flags (1 byte) | Creation Date (6 bytes) | Modification Date (6 bytes) | Filename (240 bytes) |
+| --- | --- | --- | --- |----------------------|
+
 - Flags
-    - TODO
+
+| Deleted? | — | — | — | — | System? | Hidden? | Read-only? |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+
 - Filename
-    - 252 bytes, null-terminated except for the 252-char long name
+  - 240 bytes, null-terminated except for the 240-char long name
 
 ## File Block
 
@@ -78,21 +83,40 @@ e.g. FAT count must be 2→6→14→30→62→126→254→…
 
 Ptr of 0 is used to mark NULL
 
-- Meta bits
+- Meta Byte 1
 
-| Deleted? | — | — | Dirty? | Type ID (0..15) | Unused (8 bits) |
-| --- | --- | --- | --- | --- |-----------------|
 
+| — | — | — | Dirty? | Type ID (0..15) |
+| --- | --- | --- | --- | --- |
+    
+The 4 flags are reserved for flagging bad clusters
+    
 | Type ID | Description |
 | --- | --- |
 | 0 | Binary File |
 | 1 | Directory |
 
+- Meta Byte 2
+
+| — | — | — | — | — | — | — | Not a Head Cluster? |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+
+In order to figure out the true size of the binary/directory, one must traverse the entire cluster chain.
+
 ### Directory File Contents
-| entry size (2 bytes) | repetitoin: cluster numbers (3*n bytes) |
+
+| entry size (2 bytes) | repetition: cluster numbers (3*n bytes) |
 | --- |-----------------------------------------|
 
-entry size cannot exceed 1362 (clusters that actually fits in the remaining bytes — it the length of the directory is longer than that, extra entries must be specified on the next block of the file)
+- Entry size cannot exceed 1362 (cluster IDs that will actually fit in the remaining space)
+- If the length of the directory is longer than that, the extra entries must be written on the next block of the file
+
+### Binary File Contents
+
+| number of bytes in this cluster (2 bytes) | binary data (up to 4086 bytes; unused area shall be filled with 0s but not guaranteed) |
+| --- |----------------------------------------------------------------------------------------|
+
+- If the length of the file is longer than 4086 bytes, the extra entries must be written on the next block of the cluster chain
 
 # Functions
 
