@@ -46,8 +46,8 @@ An archive can have 16777216 blocks (max 64 GB)
 
 - Primary Attribute (1 byte)
 
-| — | — | — | Fixed-size? | — | — | — | Read-only? |
-| --- | --- | --- | --- | --- | --- | --- | --- |
+    | — | — | — | Fixed-size? | — | — | — | Read-only? |
+    | --- | --- | --- | --- | --- | --- | --- | --- |
 
 ## Bootsector Block
 
@@ -68,11 +68,25 @@ e.g. FAT count must be 2→6→14→30→62→126→254→…
 
 - Flags
 
-| Deleted? | — | — | — | — | System? | Hidden? | Read-only? |
+| Deleted? | — | — | Has extra entry? | — | System? | Hidden? | Read-only? |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 
 - Filename
   - 240 bytes, null-terminated except for the 240-char long name
+- Reserved Clusters
+  - File that points to cluster 0x000001 should be interpreted as 0-byte file
+  - File that points to cluster 0x000000 should be considered as uninitialised/invalid and must be discarded
+  - Entry with Pointer of 0x000002 denotes the extra-entry
+
+| 0x00 | 0x00 | 0x02 | Parent ID (3 bytes) | Order (1 byte) | Extra entry type (1 bytes) | Payload (248 bytes) |
+| --- | --- | --- | --- | --- | --- | --- |
+
+  - Type 0 — invalid
+  - Type 1 — Long Filename
+  - Type 2 — Extra time attributes
+  - Type 3 — Extra flags attributes
+  - Type 4 — POSIX Filesystem Permissions
+  - Extra entries must be stored contiguously
 
 ## File Block
 
@@ -82,6 +96,8 @@ e.g. FAT count must be 2→6→14→30→62→126→254→…
 | --- | --- | --- |-----------------------|
 
 Ptr of 0 is used to mark NULL
+
+0-byte file must not have a cluster assigned; see below
 
 - Meta Byte 1
 
@@ -97,6 +113,7 @@ The 4 flags are reserved for flagging bad clusters
 | 1 | Directory |
 
 - Meta Byte 2
+
 
 | — | — | — | — | — | — | — | Not a Head Cluster? |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -117,6 +134,7 @@ In order to figure out the true size of the binary/directory, one must traverse 
 | --- |----------------------------------------------------------------------------------------|
 
 - If the length of the file is longer than 4086 bytes, the extra entries must be written on the next block of the cluster chain
+- Clean 0-byte file will be indistinguishable from the empty cluster; 0-byte files must not have a cluster assigned, and its FAT entry must point to the reserved (0x000001) cluster instead
 
 # Functions
 
