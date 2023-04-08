@@ -33,10 +33,13 @@ class ClusteredFormatArchiver : Archiver {
     }
 }
 
-class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charset) {
+class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charset, val throwErrorOnReadError: Boolean = false) {
 
     private data class FileAttrib(
             val charset: Charset,
+
+            /** if ID is 1, the file is 0-byte file */
+            var entryID: Int,
 
             var readOnly: Boolean,
             var hidden: Boolean,
@@ -45,7 +48,9 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
 
             var creationDate: Long = -1L,
             var modificationDate: Long = -1L,
-            var filename: String = ""
+            var filename: String = "",
+
+            val extraEntries: MutableList<ByteArray> = MutableList<ByteArray>(0) { ByteArray(0) }
     ) {
         companion object {
             /**
@@ -55,6 +60,7 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
              */
             fun fromBytes(charset: Charset, fat256: ByteArray) = if (fat256.size != FAT_ENTRY_SIZE) throw IllegalArgumentException("FAT not $FAT_ENTRY_SIZE bytes long (${fat256.size})") else
                 fat256.toInt24() to FileAttrib(charset,
+                        fat256.toInt24(),
                     fat256[3].and(1.toByte()) != 0.toByte(),
                     fat256[3].and(2.toByte()) != 0.toByte(),
                     fat256[3].and(4.toByte()) != 0.toByte(),
@@ -72,10 +78,15 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
                 deleted.toInt(7)
 
         /**
-         * @return ByteArray(253) in the format of: flags(1) + creation date(6) + modification date(6) + filename(240)
+         * @return List(ByteArray(256) x n)
          */
-        fun toBytes(): ByteArray {
-            val ba = ByteArray(253)
+        fun toBytes(): List<ByteArray> {
+            val ba = ByteArray(256)
+
+            ba[0] =entryID.ushr(16).toByte()
+            ba[1] = entryID.ushr(8).toByte()
+            ba[2] = entryID.ushr(0).toByte()
+
 
             val flags = readOnly.toInt(0) or
                     hidden.toInt(1) or
@@ -85,12 +96,26 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
             val md = modificationDate.toInt48()
             val name = filename.toByteArray(charset)
 
-            ba[0] = flags.toByte()
-            System.arraycopy(cd, 0, ba, 1, 6)
-            System.arraycopy(md, 0, ba, 7, 6)
-            System.arraycopy(name, 0, ba, 13, 240)
+            ba[3] = flags.toByte()
+            System.arraycopy(cd, 0, ba, 4, 6)
+            System.arraycopy(md, 0, ba, 10, 6)
+            System.arraycopy(name, 0, ba, 16, 240)
 
-            return ba
+            return listOf(ba) + extraEntries
+        }
+
+        fun renum(increment: Int) {
+            if (entryID > 2) {
+                entryID += increment
+                extraEntries.forEach {
+                    //val typeId = it[7].toUint()
+
+                    // increment parent ID
+                    it[3] = entryID.ushr(16).toByte()
+                    it[4] = entryID.ushr(8).toByte()
+                    it[5] = entryID.ushr(0).toByte()
+                }
+            }
         }
     }
 
@@ -150,6 +175,13 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
         readFAT()
     }
 
+    fun notifyError(throwable: Throwable) {
+        if (throwErrorOnReadError)
+            throw throwable
+        else
+            throwable.printStackTrace()
+    }
+
     private fun readMeta() {
         file.seek(4L)
         diskSize = file.readInt48()
@@ -169,8 +201,19 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
         file.seek(2L * CLUSTER_SIZE)
         for (block in 2 until 2 + fatClusterCount) {
             for (blockOff in 0 until CLUSTER_SIZE step FAT_ENTRY_SIZE) {
-                val (ptr, attrib) = FileAttrib.fromBytes(charset, file.read(FAT_ENTRY_SIZE))
-                fileTable[ptr] = attrib
+
+                val fat = file.read(FAT_ENTRY_SIZE)
+
+                val mainPtr = fat.toInt24()
+                // extended attribs
+                if (mainPtr == 2) {
+                    val parentPtr = fat.toInt24(3)
+                    fileTable[parentPtr]?.extraEntries?.add(fat) ?: notifyError(IllegalStateException(" but no main FAT entry for ID $mainPtr is found"))
+                }
+                // normal entries (incl. 0-byte file)
+                else if (mainPtr == 1 || mainPtr >= 2 + fatClusterCount) {
+                    fileTable[mainPtr] = FileAttrib.fromBytes(charset, fat).second
+                }
             }
         }
     }
@@ -190,7 +233,10 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
 
         // renumber my FAT
         HashMap<Int, FileAttrib>().let { newFileTable ->
-            fileTable.entries.forEach { (clusternum, attribs) -> newFileTable[clusternum + increment] = attribs }
+            fileTable.entries.forEach { (clusternum, attribs) ->
+                attribs.renum(increment)
+                newFileTable[clusternum + increment] = attribs
+            }
             fileTable = newFileTable
         }
 
@@ -223,20 +269,24 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
         fatClusterCount += increment
 
         // renumber (actually re-write) FAT on the archive
-        fileTable.entries.sortedBy { it.key }.let { newFAT ->
+        fileTable.entries.sortedBy { it.key }.let { FATs ->
             // try to rewrite every entry on the FAT
-            for (index in 0 until (CLUSTER_SIZE / FAT_ENTRY_SIZE) * (fatClusterCount)) {
+            var index = 0
+            while (index in 0 until (CLUSTER_SIZE / FAT_ENTRY_SIZE) * (fatClusterCount)) {
                 file.seek(CLUSTER_SIZE * 2L + FAT_ENTRY_SIZE * index)
 
                 // if the entry is real, write some values
-                if (index < newFAT.size) {
-                    val (ptr, attribs) = newFAT[index]
-                    file.writeInt24(ptr)
-                    file.write(attribs.toBytes())
+                if (index < FATs.size) {
+                    // single FileAttrib may have multiple FATs associated
+                    FATs[index].value.toBytes().let { newFATs ->
+                        newFATs.forEach { file.write(it) }
+                        index += newFATs.size
+                    }
                 }
                 // if not, fill with zeros
                 else {
                     file.write(EMPTY_FAT_ENTRY)
+                    index += 1
                 }
             }
         }
@@ -390,7 +440,7 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
     private fun RandomAccessFile.readInt24(): Int {
         val buffer = ByteArray(3)
         val readStatus = readBytes(buffer)
-        if (readStatus != 3) throw InternalError("Unexpected error -- EOF reached? (expected 6, got $readStatus)")
+        if (readStatus != 3) throw InternalError("Unexpected error -- EOF reached? (expected 3, got $readStatus)")
         return buffer.toInt24()
     }
     private fun RandomAccessFile.seekToCluster(clusterNum: Int, offset: Int = 0) {
@@ -434,36 +484,36 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
     }
 }
 
-internal fun ByteArray.toShortBig(): Int {
-    return  this[0].toUint().shl(8) or
-            this[1].toUint()
+internal fun ByteArray.toShortBig(offset: Int = 0): Int {
+    return  this[0 + offset].toUint().shl(8) or
+            this[1 + offset].toUint()
 }
-internal fun ByteArray.toIntBig(): Int {
-    return  this[0].toUint().shl(24) or
-            this[1].toUint().shl(16) or
-            this[2].toUint().shl(8) or
-            this[3].toUint()
+internal fun ByteArray.toIntBig(offset: Int = 0): Int {
+    return  this[0 + offset].toUint().shl(24) or
+            this[1 + offset].toUint().shl(16) or
+            this[2 + offset].toUint().shl(8) or
+            this[3 + offset].toUint()
 }
-internal fun ByteArray.toInt48(): Long {
-    return  this[0].toUlong().shl(40) or
-            this[1].toUlong().shl(32) or
-            this[2].toUlong().shl(24) or
-            this[3].toUlong().shl(16) or
-            this[4].toUlong().shl(8) or
-            this[5].toUlong()
+internal fun ByteArray.toInt48(offset: Int = 0): Long {
+    return  this[0 + offset].toUlong().shl(40) or
+            this[1 + offset].toUlong().shl(32) or
+            this[2 + offset].toUlong().shl(24) or
+            this[3 + offset].toUlong().shl(16) or
+            this[4 + offset].toUlong().shl(8) or
+            this[5 + offset].toUlong()
 }
-internal fun ByteArray.toInt24(): Int {
-    return  this[0].toUint().shl(16) or
-            this[1].toUint().shl(8) or
-            this[2].toUint()
+internal fun ByteArray.toInt24(offset: Int = 0): Int {
+    return  this[0 + offset].toUint().shl(16) or
+            this[1 + offset].toUint().shl(8) or
+            this[2 + offset].toUint()
 }
-internal fun ByteArray.toInt64(): Long {
-    return  this[0].toUlong().shl(56) or
-            this[1].toUlong().shl(48) or
-            this[2].toUlong().shl(40) or
-            this[3].toUlong().shl(32) or
-            this[4].toUlong().shl(24) or
-            this[5].toUlong().shl(16) or
-            this[6].toUlong().shl(8) or
-            this[7].toUlong()
+internal fun ByteArray.toInt64(offset: Int = 0): Long {
+    return  this[0 + offset].toUlong().shl(56) or
+            this[1 + offset].toUlong().shl(48) or
+            this[2 + offset].toUlong().shl(40) or
+            this[3 + offset].toUlong().shl(32) or
+            this[4 + offset].toUlong().shl(24) or
+            this[5 + offset].toUlong().shl(16) or
+            this[6 + offset].toUlong().shl(8) or
+            this[7 + offset].toUlong()
 }
