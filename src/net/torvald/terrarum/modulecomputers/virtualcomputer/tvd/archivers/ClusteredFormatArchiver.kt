@@ -5,9 +5,11 @@ import net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.DiskSkimmer.Comp
 import net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.VirtualDisk.Companion.ATTRIBS_LENGTH
 import net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.VirtualDisk.Companion.NAME_LENGTH
 import java.io.File
+import java.io.FileNotFoundException
 import java.io.RandomAccessFile
 import java.nio.charset.Charset
 import kotlin.experimental.and
+import kotlin.math.ceil
 
 /**
  * Created by minjaesong on 2023-03-31.
@@ -35,7 +37,7 @@ class ClusteredFormatArchiver : Archiver {
 
 class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charset, val throwErrorOnReadError: Boolean = false) {
 
-    private data class FileAttrib(
+    data class FATEntry(
             val charset: Charset,
 
             /** if ID is 1, the file is 0-byte file */
@@ -56,20 +58,20 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
             /**
              * @param charset Charset
              * @param fat256 The entire 256 byte of the FAT entry
-             * @return Pair of Clusternum to [FileAttrib]
+             * @return Pair of Clusternum to [FATEntry]
              */
-            fun fromBytes(charset: Charset, fat256: ByteArray) = if (fat256.size != FAT_ENTRY_SIZE) throw IllegalArgumentException("FAT not $FAT_ENTRY_SIZE bytes long (${fat256.size})") else
-                fat256.toInt24() to FileAttrib(charset,
+            fun fromBytes(charset: Charset, fat256: ByteArray) = if (fat256.size != ClusteredFormatDOM.FAT_ENTRY_SIZE) throw IllegalArgumentException("FAT not ${ClusteredFormatDOM.FAT_ENTRY_SIZE} bytes long (${fat256.size})") else
+                fat256.toInt24() to FATEntry(charset,
                         fat256.toInt24(),
-                    fat256[3].and(1.toByte()) != 0.toByte(),
-                    fat256[3].and(2.toByte()) != 0.toByte(),
-                    fat256[3].and(4.toByte()) != 0.toByte(),
-                    fat256[3].and(128.toByte()) != 0.toByte(),
+                        fat256[3].and(1.toByte()) != 0.toByte(),
+                        fat256[3].and(2.toByte()) != 0.toByte(),
+                        fat256[3].and(4.toByte()) != 0.toByte(),
+                        fat256[3].and(128.toByte()) != 0.toByte(),
 
-                    fat256.sliceArray(4..9).toInt48(),
-                    fat256.sliceArray(10..15).toInt48(),
-                    fat256.sliceArray(16..255).toCanonicalString(charset)
-            )
+                        fat256.sliceArray(4..9).toInt48(),
+                        fat256.sliceArray(10..15).toInt48(),
+                        fat256.sliceArray(16..255).toCanonicalString(charset)
+                )
         }
 
         fun toFlag() = readOnly.toInt(0) or
@@ -104,7 +106,10 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
             return listOf(ba) + extraEntries
         }
 
-        fun renum(increment: Int) {
+        /**
+         * Called by ClusteredFormatDOM, this function assists the global renum operation.
+         */
+        internal fun renum(increment: Int) {
             if (entryID > 2) {
                 entryID += increment
                 extraEntries.forEach {
@@ -124,9 +129,15 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
         const val FAT_ENTRY_SIZE = 256 // as per spec
         private val EMPTY_CLUSTER = ByteArray(CLUSTER_SIZE)
         private val EMPTY_FAT_ENTRY = ByteArray(FAT_ENTRY_SIZE)
+
+        const val FILE_BLOCK_HEADER_SIZE = 10 // as per spec
+        const val FILE_BLOCK_CONTENTS_SIZE = CLUSTER_SIZE - FILE_BLOCK_HEADER_SIZE
+
+        const val NULL_CLUSTER = 0
+        const val ZERO_LENGTH_FILE_CLUSTER = 1
     }
 
-    private var fileTable = HashMap<Int, FileAttrib>() // path is unknown until the path tree is traversed
+    private var fileTable = HashMap<Int, FATEntry>() // path is unknown until the path tree is traversed
     /** Formatted size of the disk. Archive offset 4 */
     private var diskSize = -1L
     /** How many clusters FAT is taking up. Archive offset 64 */
@@ -212,15 +223,15 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
                 }
                 // normal entries (incl. 0-byte file)
                 else if (mainPtr == 1 || mainPtr >= 2 + fatClusterCount) {
-                    fileTable[mainPtr] = FileAttrib.fromBytes(charset, fat).second
+                    fileTable[mainPtr] = FATEntry.fromBytes(charset, fat).second
                 }
             }
         }
     }
 
-    private fun checkDiskCapacity() {
-        val usedBytes = CLUSTER_SIZE * usedClusterCount
-        TODO()
+    private fun checkDiskCapacity(bytesToAdd: Int) {
+        val usedBytes = CLUSTER_SIZE * usedClusterCount + bytesToAdd
+        if (usedBytes > diskSize) throw Error()
     }
 
     /**
@@ -229,10 +240,10 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
      */
     fun renum(increment: Int) {
         usedClusterCount += increment
-        expandFile(increment)
+        expandArchive(increment)
 
         // renumber my FAT
-        HashMap<Int, FileAttrib>().let { newFileTable ->
+        HashMap<Int, FATEntry>().let { newFileTable ->
             fileTable.entries.forEach { (clusternum, attribs) ->
                 attribs.renum(increment)
                 newFileTable[clusternum + increment] = attribs
@@ -297,16 +308,57 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
 
     }
 
+    fun getFile(clusterNum: Int): FATEntry? {
+        return fileTable[clusterNum]
+    }
+
     /**
      * Mark the cluster as to-be-deleted
      */
-    fun discard(clusterNum: Int) {
+    fun deleteFile(clusterNum: Int) {
         if (clusterNum < 2 + fatClusterCount) throw IllegalArgumentException("Cannot discard cluster #$clusterNum -- is Meta/Bootsector/FAT")
 
-        file.seekToCluster(clusterNum)
-        val flags = file.read()
-        file.seekToCluster(clusterNum)
-        file.write(flags or 0x80)
+        (fileTable[clusterNum] ?: throw FileNotFoundException("No file is associated with cluster #$clusterNum")).let {
+            it.deleted = true
+
+            file.seekToCluster(clusterNum)
+            val flags = file.read()
+            file.seekToCluster(clusterNum)
+            file.write(flags or 0x80)
+        }
+    }
+
+    fun allocateFile(size: Int): FATEntry {
+        checkDiskCapacity(size)
+
+        val ptr = if (size == 0) ZERO_LENGTH_FILE_CLUSTER else (file.length() / CLUSTER_SIZE).toInt()
+
+        val timeNow = System.currentTimeMillis() / 1000
+
+        FATEntry(charset, ptr, false, false, false, false, timeNow, timeNow).let {
+            fileTable[ptr] = it
+
+            // actually create zero-filled clusters
+            if (size > 0) {
+                val clustersToAdd = ceil(size.toDouble() / CLUSTER_SIZE).toInt()
+                val newPtr = expandArchive(clustersToAdd)
+                initClusters(ptr, newPtr, clustersToAdd)
+            }
+
+            return it
+        }
+    }
+
+    private fun initClusters(parentPtr: Int, clusterStart: Int, clusterCount: Int) {
+        val ptrs = listOf(parentPtr) + (clusterStart until clusterStart+clusterCount) + listOf(NULL_CLUSTER)
+
+        for (k in 0 until clusterCount) {
+            file.seekToCluster(clusterStart + k)
+            file.write(0)
+            file.write((parentPtr != NULL_CLUSTER || k != 0).toInt())
+            file.writeInt24(ptrs[k])
+            file.writeInt24(ptrs[k+1])
+        }
     }
 
     /**
@@ -333,12 +385,98 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
         file.write(flags and 0xEF)
     }
 
-    private fun expandFile(clusterCount: Int) {
-        file.seek(file.length())
+    private fun expandArchive(clusterCount: Int): Int {
+        val newPtr = file.length().toInt()
+        file.seek(newPtr.toLong())
         repeat(clusterCount) {
             file.write(EMPTY_CLUSTER)
         }
+        return newPtr
     }
+
+    fun growFAT() {
+        val nextFatSize = (2 + fatClusterCount) * 2 - 2
+        val fatSizeDelta = nextFatSize - fatClusterCount
+        renum(fatSizeDelta)
+    }
+
+    fun writeBytes(entry: FATEntry, buffer: ByteArray, bufferOffset: Int, writeLength: Int, writeOffset: Int) {
+        var writeCursor = writeOffset
+        var remaining = writeLength
+
+        var ptr = entry.entryID
+        file.seekToCluster(ptr)
+        var meta1 = file.read()
+        var meta2 = file.read()
+
+        file.readInt24()
+        var nextPtr = file.readInt24()
+
+        var firstClusterOfWriting = true
+        var firstClusterOfFile = true
+
+        var cursorInClusterFileArea = writeOffset
+        while (writeCursor < writeLength + writeOffset) {
+            // seek to next cluster
+            // if cursorInCluster is larger than FILE_BLOCK_CONTENTS_SIZE, this operation will loop until the file cursor is on the right cluster
+            while (cursorInClusterFileArea >= FILE_BLOCK_CONTENTS_SIZE) {
+                if (nextPtr == 0) {
+                    // allocate new cluster and then modify the nextPtr on the archive
+                    checkDiskCapacity(remaining)
+
+                    val clustersToAdd = ceil(remaining.toDouble() / CLUSTER_SIZE).toInt()
+                    val newPtr = expandArchive(clustersToAdd)
+                    initClusters(ptr, newPtr, clustersToAdd)
+                }
+                ptr = nextPtr
+                file.seekToCluster(ptr)
+                meta1 = file.read()
+                meta2 = file.read()
+                file.readInt24()
+                nextPtr = file.readInt24()
+
+                cursorInClusterFileArea -= FILE_BLOCK_CONTENTS_SIZE
+
+                firstClusterOfFile = false
+            }
+
+
+            // mark the cluster as "dirty"
+            file.seekToCluster(ptr)
+            file.write(meta1.and(0xEF) or 32)
+            file.write(meta2.and(0xFE) or firstClusterOfFile.toInt())
+
+
+            // at the end of the skip-run, position the file to the right place
+            file.seekToCluster(ptr, FILE_BLOCK_HEADER_SIZE + cursorInClusterFileArea)
+
+            // cursor is moved to the right place, do the writing
+            val writeLengthOnThisCluster = minOf(remaining, FILE_BLOCK_CONTENTS_SIZE - cursorInClusterFileArea)
+            // actually write
+            file.write(buffer, bufferOffset + writeCursor - writeOffset, writeLengthOnThisCluster)
+            remaining -= writeLengthOnThisCluster
+            writeCursor += writeLengthOnThisCluster
+            cursorInClusterFileArea += writeLengthOnThisCluster
+            // update the 'number of bytes in this cluster' number on the file
+            file.seekToCluster(ptr, FILE_BLOCK_HEADER_SIZE - 2)
+            file.writeInt16(
+                    if (firstClusterOfWriting)
+                        writeLengthOnThisCluster + writeOffset
+                    else
+                        minOf(FILE_BLOCK_CONTENTS_SIZE, remaining)
+            )
+            firstClusterOfWriting = false
+
+
+            // unset the dirty flag
+            file.seekToCluster(ptr)
+            file.write(meta1 and 0xEF)
+        }
+
+
+    }
+
+
 
 
     fun getFileIterator(clusterNum: Int): ByteIterator {
