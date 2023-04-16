@@ -6,7 +6,6 @@ import net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.VirtualDisk.Comp
 import net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.VirtualDisk.Companion.NAME_LENGTH
 import java.io.File
 import java.io.FileNotFoundException
-import java.io.IOException
 import java.io.RandomAccessFile
 import java.nio.charset.Charset
 import kotlin.experimental.and
@@ -53,7 +52,7 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
             var modificationDate: Long = -1L,
             var filename: String = "",
 
-            val extraEntries: MutableList<ByteArray> = MutableList<ByteArray>(0) { ByteArray(0) }
+            val extendedEntries: MutableList<ByteArray> = MutableList<ByteArray>(0) { ByteArray(0) }
     ) {
         companion object {
             /**
@@ -104,7 +103,7 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
             System.arraycopy(md, 0, ba, 10, 6)
             System.arraycopy(name, 0, ba, 16, 240)
 
-            return listOf(ba) + extraEntries
+            return listOf(ba) + extendedEntries
         }
 
         /**
@@ -113,7 +112,7 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
         internal fun renum(increment: Int) {
             if (entryID > 2) {
                 entryID += increment
-                extraEntries.forEach {
+                extendedEntries.forEach {
                     //val typeId = it[7].toUint()
 
                     // increment parent ID
@@ -143,6 +142,8 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
     private var diskSize = -1L
     /** How many clusters FAT is taking up. Archive offset 64 */
     private var fatClusterCount = -1
+    /** How many FAT entries are there on the FAT area, including Extended Entries */
+    private var fatEntryCount = 0
     /** Disk name in bytes. Archive offset 10 */
     private val diskName = ByteArray(NAME_LENGTH)
     /** Primary flags. Archive offset 47 */
@@ -165,6 +166,7 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
             primaryAttribs = (primaryAttribs and 0xEF) or value.toInt(4)
             file.seek(47L); file.write(primaryAttribs)
         }
+
 
     private fun formatMatches(): Boolean {
         val magic = ByteArray(4)
@@ -218,13 +220,17 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
 
                 val mainPtr = fat.toInt24()
                 // extended attribs
-                if (mainPtr == 2) {
+                if (mainPtr >= 0xFFFF00) {
                     val parentPtr = fat.toInt24(3)
-                    fileTable[parentPtr]?.extraEntries?.add(fat) ?: notifyError(IllegalStateException(" but no main FAT entry for ID $mainPtr is found"))
+                    fileTable[parentPtr]?.extendedEntries?.add(fat) ?: notifyError(IllegalStateException(" but no main FAT entry for ID $mainPtr is found"))
                 }
                 // normal entries (incl. 0-byte file)
-                else if (mainPtr == 1 || mainPtr >= 2 + fatClusterCount) {
+                else if (mainPtr >= 2 + fatClusterCount) {
                     fileTable[mainPtr] = FATEntry.fromBytes(charset, fat).second
+                }
+
+                if (mainPtr != 0) {
+                    fatEntryCount += 1
                 }
             }
         }
@@ -232,7 +238,7 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
 
     private fun checkDiskCapacity(bytesToAdd: Int) {
         val usedBytes = CLUSTER_SIZE * usedClusterCount + bytesToAdd
-        if (usedBytes > diskSize) throw Error()
+        if (usedBytes > diskSize) throw VDIOException("Not enough space on the disk")
     }
 
     /**
@@ -419,6 +425,9 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
      * @return offset from the start of the archive where the first FAT is written
      */
     private fun spliceFAT(insertPos: Int, vararg FATs: ByteArray): Int {
+        checkDiskCapacity(FATs.size * FAT_ENTRY_SIZE)
+        fatEntryCount += FATs.size
+
         val seekpos = 2* CLUSTER_SIZE + insertPos*FAT_ENTRY_SIZE
 
         TODO()
@@ -523,7 +532,7 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
                 // if next cluster is NULL,,,
                 if (nextPtr == 0) {
                     // throw error
-                    throw IOException("Unexpected end-of-cluster reached (file: ${entry.entryID}, read cursor: $readCursor)")
+                    throw VDIOException("Unexpected end-of-cluster reached (file: ${entry.entryID}, read cursor: $readCursor)")
                 }
                 ptr = nextPtr
                 file.seekToCluster(ptr)

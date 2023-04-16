@@ -154,7 +154,7 @@ object VDUtil {
     fun getDirectoryEntries(disk: VirtualDisk, entryID: EntryID): Array<DiskEntry> {
         val entry = disk.entries[entryID]
         if (entry == null) {
-            throw IOException("Entry does not exist")
+            throw VDIOException("Entry does not exist")
         }
         else {
             return getDirectoryEntries(disk, entry)
@@ -314,7 +314,7 @@ object VDUtil {
             throw FileNotFoundException("No such file to delete")
         }
         else if (targetID == 0) {
-            throw IOException("Cannot delete root file system")
+            throw VDIOException("Cannot delete root file system")
         }
         else if (file.contents is EntryDirectory && file.contents.entryCount > 0) {
             deleteDirRecurse(disk, targetID)
@@ -512,7 +512,7 @@ object VDUtil {
             throw FileNotFoundException("No such directory")
         }
         else {
-            throw IOException("The file is not a directory")
+            throw VDIOException("The file is not a directory")
         }
     }
 
@@ -521,7 +521,7 @@ object VDUtil {
      */
     fun importFile(file: File, newID: EntryID, charset: Charset): DiskEntry {
         if (file.isDirectory) {
-            throw IOException("The file is a directory")
+            throw VDIOException("The file is a directory")
         }
 
         return DiskEntry(
@@ -704,14 +704,14 @@ object VDUtil {
      */
     fun VirtualDisk.checkReadOnly() {
         if (this.isReadOnly)
-            throw IOException("Disk is read-only")
+            throw VDIOException("Disk is read-only")
     }
     /**
      * Throws an exception if specified size cannot fit into the disk
      */
     fun VirtualDisk.checkCapacity(newSize: Long) {
         if (this.usedBytes + newSize > this.capacity)
-            throw IOException("Not enough space on the disk")
+            throw VDIOException("Not enough space on the disk")
     }
     fun ByteArray64.toIntBig(): Int {
         if (this.size != 4L)
@@ -740,7 +740,7 @@ object VDUtil {
     fun String.sanitisePath(): String {
         val invalidChars = Regex("""[<>:"|?*\u0000-\u001F]""")
         if (this.contains(invalidChars))
-            throw IOException("path contains invalid characters")
+            throw VDIOException("path contains invalid characters")
 
         val path1 = this.replace('\\', '/')
         return path1
@@ -748,7 +748,7 @@ object VDUtil {
 
     fun resolveIfSymlink(disk: VirtualDisk, indexNumber: EntryID, recurse: Boolean = false): DiskEntry {
         var entry: DiskEntry? = disk.entries[indexNumber]
-        if (entry == null) throw IOException("File does not exist")
+        if (entry == null) throw VDIOException("File does not exist")
         if (entry.contents !is EntrySymlink) return entry
         if (recurse) {
             while (entry!!.contents is EntrySymlink) {
@@ -759,7 +759,7 @@ object VDUtil {
         else {
             entry = disk.entries[(entry.contents as EntrySymlink).target]
         }
-        if (entry == null) throw IOException("Pointing file does not exist")
+        if (entry == null) throw VDIOException("Pointing file does not exist")
         return entry
     }
 
@@ -956,3 +956,5 @@ class VDFileOutputStream(private val fileEntry: DiskEntry, private val append: B
         closed = true
     }
 }
+
+class VDIOException(msg: String) : Exception(msg)

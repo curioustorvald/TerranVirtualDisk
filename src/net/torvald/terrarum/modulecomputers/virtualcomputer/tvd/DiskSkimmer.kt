@@ -489,7 +489,7 @@ removefile:
             }
             else {
                 if (parentFile.contents !is EntryDirectory)
-                    throw IOException("The disk entry $appendParent (${parentFile.filename.toCanonicalString(charset)}) is not a directory")
+                    throw VDIOException("The disk entry $appendParent (${parentFile.filename.toCanonicalString(charset)}) is not a directory")
 
                 parentFile.contents.add(bottomupFile.entryID)
 
@@ -509,7 +509,7 @@ removefile:
             return returnEntryID
         }
         else {
-            if (!overwriteExisting) throw IOException("The file already exists")
+            if (!overwriteExisting) throw VDIOException("The file already exists")
 
             // at this point, 'appendParent' is the conflicting file
 

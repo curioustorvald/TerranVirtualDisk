@@ -1,6 +1,5 @@
 package net.torvald.terrarum.modulecomputers.virtualcomputer.tvd
 
-import java.io.IOException
 import java.nio.charset.Charset
 import java.util.*
 import java.util.zip.CRC32
@@ -247,7 +246,7 @@ class EntryDirectory(private val entries: ArrayList<EntryID> = ArrayList<EntryID
     override fun getSizeEntry() = getSizePure() + 2
     private fun checkCapacity(toAdd: Int = 1) {
         if (entries.size + toAdd > 65535)
-            throw IOException("Directory entries limit exceeded.")
+            throw VDIOException("Directory entries limit exceeded.")
     }
 
     fun add(entryID: EntryID) {

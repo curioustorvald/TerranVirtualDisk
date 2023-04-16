@@ -7,7 +7,6 @@ import net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.VDUtil.toIntBig
 import net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.VDUtil.toShortBig
 import net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.VDUtil.writeBytes64
 import java.io.File
-import java.io.IOException
 import java.nio.charset.Charset
 import java.util.logging.Level
 
@@ -158,7 +157,7 @@ class Format3Archiver : Archiver {
                     println("CRC failed; entry info:\n$diskEntry")
 
                     if (crcWarnLevel == Level.SEVERE)
-                        throw IOException(crcMsg)
+                        throw VDIOException(crcMsg)
                     else if (warningFunc != null)
                         warningFunc(crcMsg)
                 }
@@ -177,7 +176,7 @@ class Format3Archiver : Archiver {
 
             if (calculatedCRC != diskCRC) {
                 if (crcWarnLevel == Level.SEVERE)
-                    throw IOException(crcMsg)
+                    throw VDIOException(crcMsg)
                 else if (warningFunc != null)
                     warningFunc(crcMsg)
             }

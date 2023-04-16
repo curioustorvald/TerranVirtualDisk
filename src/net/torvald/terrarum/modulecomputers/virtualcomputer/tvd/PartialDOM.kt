@@ -3,7 +3,6 @@ package net.torvald.terrarum.modulecomputers.virtualcomputer.tvd
 import net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.VDUtil.sanitisePath
 import java.io.File
 import java.io.FileNotFoundException
-import java.io.IOException
 import java.nio.charset.Charset
 import java.util.*
 import kotlin.collections.HashMap
@@ -131,11 +130,11 @@ class PartialDOM(private val diskFile: File, val charset: Charset = Charset.defa
 
     fun checkReadOnly() {
         if (isReadOnly)
-            throw IOException("Disk is read-only")
+            throw VDIOException("Disk is read-only")
     }
     fun checkCapacity(newSize: Long) {
         if (usedBytes + newSize > capacity)
-            throw IOException("Not enough space on the disk")
+            throw VDIOException("Not enough space on the disk")
     }
 
 
