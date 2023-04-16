@@ -411,6 +411,22 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
         renum(fatSizeDelta)
     }
 
+    /**
+     * Inserts given FAT entries to the FAT area. The area will grow if required. The file will be seeked to the position
+     * where the first newly-inserted FAT entry begins.
+     * @param insertPos where the new FATs will be inserted, FAT index-wise
+     * @param FATs actual FAT data
+     * @return offset from the start of the archive where the first FAT is written
+     */
+    private fun spliceFAT(insertPos: Int, vararg FATs: ByteArray): Int {
+        val seekpos = 2* CLUSTER_SIZE + insertPos*FAT_ENTRY_SIZE
+
+        TODO()
+
+        file.seek(seekpos.toLong())
+        return seekpos
+    }
+
     fun writeBytes(entry: FATEntry, buffer: ByteArray, bufferOffset: Int, writeLength: Int, writeStartOffset: Int) {
         var writeCursor = writeStartOffset
         var remaining = writeLength
