@@ -35,7 +35,30 @@ class ClusteredFormatArchiver : Archiver {
     }
 }
 
+private fun Int.incClusterNum(increment: Int) = when (this) {
+    in 0x000004 until 0xF00000 -> this + increment
+    else -> this
+}
+
+private fun ByteArray.renumFAT(increment: Int) {
+    val entryID = this.toInt24()
+    val newID = entryID.incClusterNum(increment)
+    // increment parent ID
+    this.writeInt24(newID, 3)
+
+    // increment parent IDs on the Extended Entries
+    // inline directories
+    if (entryID == 0xFFFF11) {
+        for (offset in 8 until 256 step 3) {
+            val originalID = this.toInt24(offset)
+            val newFileID = originalID.incClusterNum(increment)
+            this.writeInt24(newFileID, offset)
+        }
+    }
+}
+
 class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charset, val throwErrorOnReadError: Boolean = false) {
+
 
     data class FATEntry(
             val charset: Charset,
@@ -85,9 +108,7 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
         fun toBytes(): List<ByteArray> {
             val ba = ByteArray(256)
 
-            ba[0] =entryID.ushr(16).toByte()
-            ba[1] = entryID.ushr(8).toByte()
-            ba[2] = entryID.ushr(0).toByte()
+            ba.writeInt24(entryID, 0)
 
 
             val flags = readOnly.toInt(0) or
@@ -113,12 +134,7 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
             if (entryID > 2) {
                 entryID += increment
                 extendedEntries.forEach {
-                    //val typeId = it[7].toUint()
-
-                    // increment parent ID
-                    it[3] = entryID.ushr(16).toByte()
-                    it[4] = entryID.ushr(8).toByte()
-                    it[5] = entryID.ushr(0).toByte()
+                    it.renumFAT(increment)
                 }
             }
         }
@@ -264,17 +280,17 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
 
             // do the actual renumbering on the cluster contents
             val clusterContents = file.read(CLUSTER_SIZE)
-            val prevPtr = clusterContents.sliceArray(2..4).toInt24().let { if (it > 1) it + increment else it }.toInt24()
-            val nextPtr = clusterContents.sliceArray(5..7).toInt24().let { if (it > 1) it + increment else it }.toInt24()
+            val prevPtr = clusterContents.toInt24(2).incClusterNum(increment).toInt24Arr()
+            val nextPtr = clusterContents.toInt24(5).incClusterNum(increment).toInt24Arr()
 
             System.arraycopy(prevPtr, 0, clusterContents, 2, 3)
             System.arraycopy(nextPtr, 0, clusterContents, 5, 3)
 
             // renumber clusternum on the directory files
             if (clusterContents[0].toInt().and(15) == 1) {
-                val entrySize = clusterContents.sliceArray(8..9).toShortBig()
+                val entrySize = clusterContents.toInt16(8)
                 for (entryOffset in 10 until 10 + 3*entrySize step 3) {
-                    val clusterNum = clusterContents.sliceArray(entryOffset..entryOffset+2).toInt24().let { if (it > 1) it + increment else it }.toInt24()
+                    val clusterNum = clusterContents.toInt24(entryOffset).incClusterNum(increment).toInt24Arr()
                     System.arraycopy(clusterNum, 0, clusterContents, entryOffset, 3)
                 }
             }
@@ -411,10 +427,14 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
         return newPtr
     }
 
-    fun growFAT() {
+    /**
+     * @return how many FAT clusters were added
+     */
+    fun growFAT(): Int {
         val nextFatSize = (2 + fatClusterCount) * 2 - 2
         val fatSizeDelta = nextFatSize - fatClusterCount
         renum(fatSizeDelta)
+        return fatSizeDelta
     }
 
     /**
@@ -429,8 +449,20 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
         fatEntryCount += FATs.size
 
         val seekpos = 2* CLUSTER_SIZE + insertPos*FAT_ENTRY_SIZE
+        val shiftDelta = FATs.size * FAT_ENTRY_SIZE
 
+        // grow FAT area?
+        if (fatEntryCount.toFloat() * FAT_ENTRY_SIZE / CLUSTER_SIZE > fatClusterCount) {
+            val fatRenumDelta = growFAT()
+            // renum inserting FATs
+            FATs.forEach {
+                it.renumFAT(fatRenumDelta)
+            }
+        }
+
+        // shift FATS on the archive
         TODO()
+
 
         file.seek(seekpos.toLong())
         return seekpos
@@ -792,6 +824,10 @@ internal fun ByteArray.toInt48(offset: Int = 0): Long {
             this[4 + offset].toUlong().shl(8) or
             this[5 + offset].toUlong()
 }
+internal fun ByteArray.toInt16(offset: Int = 0): Int {
+    return  this[0 + offset].toUint().shl(8) or
+            this[1 + offset].toUint()
+}
 internal fun ByteArray.toInt24(offset: Int = 0): Int {
     return  this[0 + offset].toUint().shl(16) or
             this[1 + offset].toUint().shl(8) or
@@ -806,4 +842,9 @@ internal fun ByteArray.toInt64(offset: Int = 0): Long {
             this[5 + offset].toUlong().shl(16) or
             this[6 + offset].toUlong().shl(8) or
             this[7 + offset].toUlong()
+}
+internal fun ByteArray.writeInt24(value: Int, offset: Int) {
+    this[offset+0] = value.ushr(16).toByte()
+    this[offset+1] = value.ushr(8).toByte()
+    this[offset+2] = value.ushr(0).toByte()
 }
