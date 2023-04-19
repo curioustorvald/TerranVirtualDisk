@@ -438,21 +438,17 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
     }
 
     /**
-     * Inserts given FAT entries to the FAT area. The area will grow if required. The file will be seeked to the position
-     * where the first newly-inserted FAT entry begins.
+     * Inserts given FAT entries to the FAT area. The area will grow if required. After the copying operation, the file
+     * will be seeked to the position where the first newly-inserted FAT entry begins.
      * @param insertPos where the new FATs will be inserted, FAT index-wise
      * @param FATs actual FAT data
-     * @return offset from the start of the archive where the first FAT is written
+     * @return offset from the start of the archive where the first new FAT is written
      */
-    private fun spliceFAT(insertPos: Int, vararg FATs: ByteArray): Int {
+    private fun spliceFAT(insertPos: Int, vararg FATs: ByteArray): Long {
         checkDiskCapacity(FATs.size * FAT_ENTRY_SIZE)
-        fatEntryCount += FATs.size
-
-        val seekpos = 2* CLUSTER_SIZE + insertPos*FAT_ENTRY_SIZE
-        val shiftDelta = FATs.size * FAT_ENTRY_SIZE
 
         // grow FAT area?
-        if (fatEntryCount.toFloat() * FAT_ENTRY_SIZE / CLUSTER_SIZE > fatClusterCount) {
+        if ((fatEntryCount + FATs.size).toFloat() * FAT_ENTRY_SIZE / CLUSTER_SIZE > fatClusterCount) {
             val fatRenumDelta = growFAT()
             // renum inserting FATs
             FATs.forEach {
@@ -461,10 +457,26 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
         }
 
         // shift FATS on the archive
-        TODO()
+        val stride = FATs.size * FAT_ENTRY_SIZE
+        val seekpos = 2L* CLUSTER_SIZE + insertPos*FAT_ENTRY_SIZE
 
+        // moving one FAT at a time to constrain the memory footprint
+        for (startOffset in 2L*CLUSTER_SIZE + fatEntryCount* FAT_ENTRY_SIZE downTo seekpos step CLUSTER_SIZE.toLong()) {
+            file.seek(startOffset)
+            val bytes = file.read(CLUSTER_SIZE)
+            file.seek(startOffset + stride)
+            file.write(bytes)
+        }
 
-        file.seek(seekpos.toLong())
+        // write new FATs
+        file.seek(seekpos)
+        FATs.forEach { bytes ->
+            file.write(bytes)
+        }
+
+        fatEntryCount += FATs.size
+
+        file.seek(seekpos)
         return seekpos
     }
 
