@@ -6,6 +6,7 @@ import net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.VirtualDisk.Comp
 import net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.VirtualDisk.Companion.NAME_LENGTH
 import java.io.File
 import java.io.FileNotFoundException
+import java.io.IOException
 import java.io.RandomAccessFile
 import java.nio.charset.Charset
 import kotlin.experimental.and
@@ -351,7 +352,7 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
         }
     }
 
-    fun allocateFile(size: Int): FATEntry {
+    fun allocateFile(size: Int, fileType: Int): FATEntry {
         checkDiskCapacity(size)
 
         val ptr = if (size == 0) ZERO_LENGTH_FILE_CLUSTER else (file.length() / CLUSTER_SIZE).toInt()
@@ -363,7 +364,7 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
 
             // actually create zero-filled clusters
             if (size > 0) {
-                expandFile(size, ptr)
+                expandFile(size, ptr, fileType)
             }
 
             return it
@@ -371,22 +372,23 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
     }
 
     /**
-     * Expands a file by creating new clusters then returns the pointer to the start of the new clusters
+     * Expands a file by creating new clusters then returns the pointer to the start of the new clusters.
+     * NextPtr of the current cluster will be the beginning of the newly-added clusters
      */
-    private fun expandFile(sizeDelta: Int, currentCluster: Int): Int {
+    private fun expandFile(sizeDelta: Int, currentCluster: Int, fileType: Int): Int {
         checkDiskCapacity(sizeDelta)
         val clustersToAdd = ceil(sizeDelta.toDouble() / CLUSTER_SIZE).toInt()
         val nextCluster = expandArchive(clustersToAdd)
-        initClusters(currentCluster, nextCluster, clustersToAdd)
+        initClusters(currentCluster, nextCluster, clustersToAdd, fileType)
         return nextCluster
     }
 
-    private fun initClusters(parentPtr: Int, clusterStart: Int, clusterCount: Int) {
+    private fun initClusters(parentPtr: Int, clusterStart: Int, clusterCount: Int, fileType: Int) {
         val ptrs = listOf(parentPtr) + (clusterStart until clusterStart+clusterCount) + listOf(NULL_CLUSTER)
 
         for (k in 0 until clusterCount) {
             file.seekToCluster(clusterStart + k)
-            file.write(0)
+            file.write(fileType)
             file.write((parentPtr != NULL_CLUSTER || k != 0).toInt())
             file.writeInt24(ptrs[k])
             file.writeInt24(ptrs[k+1])
@@ -480,7 +482,7 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
         return seekpos
     }
 
-    fun writeBytes(entry: FATEntry, buffer: ByteArray, bufferOffset: Int, writeLength: Int, writeStartOffset: Int) {
+    fun writeBytes(entry: FATEntry, buffer: ByteArray, bufferOffset: Int, writeLength: Int, writeStartOffset: Int, fileType: Int) {
         var writeCursor = writeStartOffset
         var remaining = writeLength
 
@@ -503,7 +505,7 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
                 // if next cluster is NULL,,,
                 if (nextPtr == 0) {
                     // allocate new cluster and then modify the nextPtr on the archive
-                    expandFile(remaining, ptr)
+                    expandFile(remaining, ptr, fileType)
                 }
                 ptr = nextPtr
                 file.seekToCluster(ptr)
@@ -619,7 +621,7 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
     }
 
 
-    fun setFileLength(entry: FATEntry, newLength: Int) {
+    fun setFileLength(entry: FATEntry, newLength: Int, fileType: Int) {
         var remaining = newLength
 
         var cluster = entry.entryID
@@ -643,7 +645,7 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
             }
             // create new cluster if end-of-cluster is prematurely reached
             else if (nextCluster == NULL_CLUSTER) {
-                nextCluster = expandFile(remaining, cluster)
+                nextCluster = expandFile(remaining, cluster, fileType)
             }
 
             cluster = nextCluster
@@ -670,6 +672,20 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
         } while (cluster > 0)
 
         return accumulator
+    }
+
+    fun getFileType(entry: FATEntry): Int = file.let {
+        it.seek(entry.entryID.toLong() * CLUSTER_SIZE)
+        val b = it.read()
+        if (b == -1) throw IOException("The archive cannot be read; offset: ${entry.entryID.toLong() * CLUSTER_SIZE}")
+        return b and 15
+    }
+
+    fun isDirectory(entry: FATEntry) = getFileType(entry) == 1
+    fun isFile(entry: FATEntry) = getFileType(entry) == 0
+
+    fun defrag(option: Int) {
+        TODO()
     }
 
 
