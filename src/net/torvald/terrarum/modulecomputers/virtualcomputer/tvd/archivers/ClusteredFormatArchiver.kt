@@ -151,14 +151,29 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
         const val FILE_BLOCK_CONTENTS_SIZE = CLUSTER_SIZE - FILE_BLOCK_HEADER_SIZE
 
         const val NULL_CLUSTER = 0
-        const val ZERO_LENGTH_FILE_CLUSTER = 1
+        const val INLINE_FILE_CLUSTER_BASE = 0xF00000
+        const val INLINE_FILE_CLUSTER_LAST = 0xFFFDFF
+
+        const val INLINING_THRESHOLD = 248 * 8
+    }
+
+    /**
+     * @return ID between 0xF00000 and 0xFFFDFF if the reserved area is not full; normal cluster ID otherwise
+     */
+    fun getNextFreeInlineCluster(): Int {
+        var i = INLINE_FILE_CLUSTER_BASE
+        while (i <= INLINE_FILE_CLUSTER_LAST) {
+            if (!fileTable.containsKey(i)) return i
+            i += 1
+        }
+        return usedClusterCount
     }
 
     private var fileTable = HashMap<Int, FATEntry>() // path is unknown until the path tree is traversed
     /** Formatted size of the disk. Archive offset 4 */
     private var diskSize = -1L
     /** How many clusters FAT is taking up. Archive offset 64 */
-    private var fatClusterCount = -1
+    private var fatClusterCount = 2
     /** How many FAT entries are there on the FAT area, including Extended Entries */
     private var fatEntryCount = 0
     /** Disk name in bytes. Archive offset 10 */
@@ -170,7 +185,7 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
 
     private var usedClusterCount = -1 // only to tally the disk usage. NOT THE ACTUAL SIZE OF THE ARCHIVE!
 
-    private var isReadOnly: Boolean
+    var isReadOnly: Boolean
         get() = primaryAttribs.and(1) != 0
         set(value) {
             primaryAttribs = (primaryAttribs and 0xFE) or value.toInt()
@@ -276,6 +291,7 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
         }
 
         // copy over clusters, renumber any applicable cluster numbers before copying
+        // using file.length().div(CLUSTER_SIZE) instead of usedClusterCount to really access every clusters
         for (clusternum in file.length().div(CLUSTER_SIZE) - increment - 1L downTo 2 + fatClusterCount) {
             file.seekToCluster(clusternum)
 
@@ -354,20 +370,24 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
 
     fun allocateFile(size: Int, fileType: Int): FATEntry {
         checkDiskCapacity(size)
-
-        val ptr = if (size == 0) ZERO_LENGTH_FILE_CLUSTER else (file.length() / CLUSTER_SIZE).toInt()
-
         val timeNow = System.currentTimeMillis() / 1000
 
-        FATEntry(charset, ptr, false, false, false, false, timeNow, timeNow).let {
-            fileTable[ptr] = it
+        val ptr = if (size < INLINING_THRESHOLD) getNextFreeInlineCluster() else usedClusterCount
 
-            // actually create zero-filled clusters
-            if (size > 0) {
-                expandFile(size, ptr, fileType)
+        if (ptr in INLINE_FILE_CLUSTER_BASE..INLINE_FILE_CLUSTER_LAST) {
+            TODO()
+        }
+        else {
+            FATEntry(charset, ptr, false, false, false, false, timeNow, timeNow).let {
+                fileTable[ptr] = it
+
+                // actually create zero-filled clusters
+                if (size > 0) {
+                    expandFile(size, ptr, fileType)
+                }
+
+                return it
             }
-
-            return it
         }
     }
 
@@ -420,7 +440,7 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
     }
 
     private fun expandArchive(clusterCount: Int): Int {
-        val newPtr = file.length().toInt()
+        val newPtr = usedClusterCount
         file.seek(newPtr.toLong())
         repeat(clusterCount) {
             file.write(EMPTY_CLUSTER)
@@ -443,14 +463,17 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
      * Inserts given FAT entries to the FAT area. The area will grow if required. After the copying operation, the file
      * will be seeked to the position where the first newly-inserted FAT entry begins.
      * @param insertPos where the new FATs will be inserted, FAT index-wise
+     * @param deleteCount how many FATs, starting from the `insertPos`, must be deleted before adding
      * @param FATs actual FAT data
      * @return offset from the start of the archive where the first new FAT is written
      */
-    private fun spliceFAT(insertPos: Int, vararg FATs: ByteArray): Long {
+    private fun spliceFAT(insertPos: Int, deleteCount: Int, vararg FATs: ByteArray): Long {
         checkDiskCapacity(FATs.size * FAT_ENTRY_SIZE)
 
+        if (deleteCount > fatEntryCount) throw IllegalArgumentException("deleteCount ($deleteCount) is larger than the number of FAT entries in the archive ($fatEntryCount)")
+
         // grow FAT area?
-        if ((fatEntryCount + FATs.size).toFloat() * FAT_ENTRY_SIZE / CLUSTER_SIZE > fatClusterCount) {
+        if (insertPos * FAT_ENTRY_SIZE / CLUSTER_SIZE >= fatClusterCount) {
             val fatRenumDelta = growFAT()
             // renum inserting FATs
             FATs.forEach {
@@ -459,15 +482,30 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
         }
 
         // shift FATS on the archive
-        val stride = FATs.size * FAT_ENTRY_SIZE
+        val stride = (FATs.size - deleteCount) * FAT_ENTRY_SIZE
         val seekpos = 2L* CLUSTER_SIZE + insertPos*FAT_ENTRY_SIZE
 
         // moving one FAT at a time to constrain the memory footprint
-        for (startOffset in 2L*CLUSTER_SIZE + fatEntryCount* FAT_ENTRY_SIZE downTo seekpos step CLUSTER_SIZE.toLong()) {
+        val forRange = if (stride > 0)
+            2L*CLUSTER_SIZE + fatEntryCount* FAT_ENTRY_SIZE downTo seekpos step CLUSTER_SIZE.toLong()
+        else if (stride < 0)
+            seekpos..2L*CLUSTER_SIZE + fatEntryCount* FAT_ENTRY_SIZE step CLUSTER_SIZE.toLong()
+        else
+            LongRange.EMPTY
+
+        for (startOffset in forRange) {
             file.seek(startOffset)
             val bytes = file.read(CLUSTER_SIZE)
             file.seek(startOffset + stride)
             file.write(bytes)
+        }
+
+        // delete trailing clusters if stride < 0
+        if (stride < 0) {
+            file.seek(2L * CLUSTER_SIZE + (fatEntryCount + FATs.size - deleteCount) * FAT_ENTRY_SIZE)
+            for (i in 0 until deleteCount - FATs.size) {
+                file.write(EMPTY_CLUSTER)
+            }
         }
 
         // write new FATs
@@ -476,7 +514,7 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
             file.write(bytes)
         }
 
-        fatEntryCount += FATs.size
+        fatEntryCount += FATs.size - deleteCount
 
         file.seek(seekpos)
         return seekpos
@@ -692,7 +730,7 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
 
 
     fun getFileIterator(clusterNum: Int): ByteIterator {
-        if (clusterNum !in 2 + fatClusterCount..file.length() / CLUSTER_SIZE)
+        if (clusterNum !in 2 + fatClusterCount..usedClusterCount)
             throw IllegalArgumentException("Not a valid cluster number: $clusterNum")
 
         file.seekToCluster(clusterNum)
