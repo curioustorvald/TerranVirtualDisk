@@ -106,7 +106,7 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
         /**
          * @return List(ByteArray(256) x n)
          */
-        fun toBytes(): List<ByteArray> {
+        fun toBytes(): Array<ByteArray> {
             val ba = ByteArray(256)
 
             ba.writeInt24(entryID, 0)
@@ -125,7 +125,7 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
             System.arraycopy(md, 0, ba, 10, 6)
             System.arraycopy(name, 0, ba, 16, 240)
 
-            return listOf(ba) + extendedEntries
+            return (listOf(ba) + extendedEntries).toTypedArray()
         }
 
         /**
@@ -278,8 +278,7 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
      * @param increment number of clusters to be inserted
      */
     fun renum(increment: Int) {
-        usedClusterCount += increment
-        expandArchive(increment)
+        expandArchive(increment) // implied: usedClusterCount += increment
 
         // renumber my FAT
         HashMap<Int, FATEntry>().let { newFileTable ->
@@ -320,6 +319,15 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
         fatClusterCount += increment
 
         // renumber (actually re-write) FAT on the archive
+        rewriteFAT()
+
+        // write new metavalues
+        file.seek(64L)
+        file.writeInt32(fatClusterCount)
+
+    }
+
+    private fun rewriteFAT() {
         fileTable.entries.sortedBy { it.key }.let { FATs ->
             // try to rewrite every entry on the FAT
             var index = 0
@@ -341,11 +349,6 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
                 }
             }
         }
-
-        // write new metavalues
-        file.seek(64L)
-        file.writeInt32(fatClusterCount)
-
     }
 
     fun getFile(clusterNum: Int): FATEntry? {
@@ -385,6 +388,13 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
                 if (size > 0) {
                     expandFile(size, ptr, fileType)
                 }
+
+                // sync the FAT region on the archive
+                rewriteFAT()
+                /*
+                TODO("search for the right index")
+                spliceFAT(rightIndex, 0, *it.toBytes())
+                 */
 
                 return it
             }
