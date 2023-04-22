@@ -108,7 +108,7 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
         /**
          * @return List(ByteArray(256) x n)
          */
-        fun toBytes(): Array<ByteArray> {
+        fun toBytes(): List<ByteArray> {
             val ba = ByteArray(256)
 
             ba.writeInt24(entryID, 0)
@@ -127,7 +127,7 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
             System.arraycopy(md, 0, ba, 10, 6)
             System.arraycopy(name, 0, ba, 16, 240)
 
-            return (listOf(ba) + extendedEntries).toTypedArray()
+            return listOf(ba) + extendedEntries
         }
 
         /**
@@ -145,10 +145,30 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
         val isInline: Boolean
             get() = entryID in INLINE_FILE_CLUSTER_BASE..INLINE_FILE_CLUSTER_LAST
 
+        fun copyAttribsFrom(other: FATEntry) {
+            this.entryID = other.entryID
+            this.readOnly = other.readOnly
+            this.hidden = other.hidden
+            this.system = other.system
+            this.deleted = other.deleted
+            this.creationDate = other.creationDate
+            this.modificationDate = other.modificationDate
+        }
+
         fun getInlineBytes(): ByteArray {
             TODO()
         }
+
+        fun hasExtraEntryWithType(type: Int): Boolean {
+            TODO()
+        }
+
+        fun hasExtraEntryWithType(predicate: (Int) -> Boolean): Boolean {
+            TODO()
+        }
     }
+
+    private fun getTimeNow() = System.currentTimeMillis() / 1000
 
     companion object {
         const val CLUSTER_SIZE = 4096 // as per spec
@@ -163,7 +183,9 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
         const val INLINE_FILE_CLUSTER_BASE = 0xF00000
         const val INLINE_FILE_CLUSTER_LAST = 0xFFFDFF
 
-        const val INLINING_THRESHOLD = 248 * 8 // compare with <= -- files up to this size is recommended to be inlined
+        const val INLINED_ENTRY_BYTES = FAT_ENTRY_SIZE - 8
+
+        const val INLINING_THRESHOLD = INLINED_ENTRY_BYTES * 8 // compare with <= -- files up to this size is recommended to be inlined
     }
 
     /**
@@ -284,6 +306,7 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
     }
 
     private fun checkDiskCapacity(bytesToAdd: Int) {
+        if (bytesToAdd <= 0) return
         val usedBytes = CLUSTER_SIZE * usedClusterCount + bytesToAdd
         if (usedBytes > diskSize) throw VDIOException("Not enough space on the disk")
     }
@@ -342,6 +365,11 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
 
     }
 
+    private fun fatmgrUpdateModificationDate(entry: FATEntry, time: Long) {
+        file.seekToFAT(fatEntryIndices[entry.entryID]!!, 10)
+        file.writeInt48(time)
+    }
+
     /**
      * Creates a new FAT entry, adds it to the `fileTable` and the Archive via [fatmgrAddEntry], then returns the newly-created entry.
      */
@@ -367,10 +395,82 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
         // toBytes() creates a clone of the entry and thus now de-synced from what's in the fileTable
         // (remember: spliceFAT may renumber FATs in the fileTable)
         // therefore it should be safe to do this
-        spliceFAT(nextIndex, 0, *entry.toBytes())
+        spliceFAT(nextIndex, 0, entry.toBytes())
 
         // `entry` is contained in the fileTable and thus should have been re-numbered by the spliceFAT
         fatEntryHighest = nextIndex to entry.entryID
+    }
+
+    private fun fatmgrAllocateInlineFile(entry: FATEntry, size: Int, fileType: Int) {
+        val myEntryIndex = fatEntryIndices[entry.entryID]
+                ?: throw IllegalArgumentException("No such file with following ID: ${entry.entryID}")
+
+        if (!entry.isInline) throw IllegalArgumentException("File is not inline (ID: ${entry.entryID})")
+        if (entry.hasExtraEntryWithType { it xor 0xFFFF10 < 16 }) throw IllegalArgumentException("File is already allocated and is inline (ID: ${entry.entryID})")
+
+        val entrySizeDelta = ceil(size.toDouble() / INLINED_ENTRY_BYTES).toInt()
+
+        // create bytearrays to append to
+        val newBytes = List(entrySizeDelta) { ByteArray(FAT_ENTRY_SIZE) }
+        val newBytesStart = entry.extendedEntries.size
+        var allocBytesRemaining = size
+        newBytes.forEachIndexed { index, bytes ->
+            // write Extra Entry Header
+            bytes.writeInt24(0xFFFF10 or fileType, 0)
+            bytes.writeInt24(entry.entryID, 3)
+            bytes[6] = index.toByte()
+            bytes[7] = minOf(INLINED_ENTRY_BYTES, allocBytesRemaining).toByte()
+
+            allocBytesRemaining -= INLINED_ENTRY_BYTES
+        }
+
+        // put the bytearrays to the entry in the memory
+        entry.extendedEntries.addAll(newBytes)
+
+        // shift FAT entries up
+        fatEntryIndices.entries.filter { it.value > myEntryIndex }.forEach { (entryID, fatIndex) ->
+            fatEntryIndices[entryID] = fatIndex + entrySizeDelta
+        }
+        // splice the bytearrays into the Archive
+        spliceFAT(myEntryIndex + newBytesStart + 1, 0, newBytes)
+    }
+
+    private fun fatmgrSetInlineBytes(entry: FATEntry, infileBytes: ByteArray, fileType: Int) {
+        val myEntryIndex = fatEntryIndices[entry.entryID]
+                ?: throw IllegalArgumentException("No such file with following ID: ${entry.entryID}")
+
+        if (!entry.isInline) throw IllegalArgumentException("File is not inline (ID: ${entry.entryID})")
+        if (entry.hasExtraEntryWithType { it xor 0xFFFF10 < 16 }) throw IllegalArgumentException("File is already allocated and is inline (ID: ${entry.entryID})")
+
+        val oldExtendedEntryCount = entry.extendedEntries.size
+
+        val newBytes = List(ceil(infileBytes.size.toDouble() / INLINED_ENTRY_BYTES).toInt()) { ByteArray(FAT_ENTRY_SIZE) }
+
+        // write bytes to the newBytes
+        var remaining = infileBytes.size
+        var written = 0
+        newBytes.forEachIndexed { index, bytes ->
+            val writeSize = minOf(INLINED_ENTRY_BYTES, remaining)
+
+            // write Extra Entry Header
+            bytes.writeInt24(0xFFFF10 or fileType, 0)
+            bytes.writeInt24(entry.entryID, 3)
+            bytes[6] = index.toByte()
+            bytes[7] = writeSize.toByte()
+            System.arraycopy(infileBytes, written, bytes, 8, writeSize)
+
+            remaining -= INLINED_ENTRY_BYTES
+            written += INLINED_ENTRY_BYTES
+        }
+
+
+        // remove any inline bytes of matching type from the entry
+        entry.extendedEntries.removeIf { it.toInt24(0) == 0xFFFF10 or fileType }
+        // then append newBytes
+        entry.extendedEntries.addAll(newBytes)
+
+        // splice up the Archive
+        spliceFAT(myEntryIndex + 1, oldExtendedEntryCount, entry.extendedEntries)
     }
 
     /**
@@ -450,7 +550,7 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
      */
     fun allocateFile(size: Int, fileType: Int): FATEntry {
         checkDiskCapacity(size)
-        val timeNow = System.currentTimeMillis() / 1000
+        val timeNow = getTimeNow()
 
         val ptr = if (size <= INLINING_THRESHOLD) getNextFreeInlineCluster() else usedClusterCount
 
@@ -544,12 +644,14 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
      * Inserts given FAT entries to the FAT area. The area will grow if required. After the copying operation, the file
      * will be seeked to the position where the first newly-inserted FAT entry begins.
      * @param insertPos where the new FATs will be inserted, FAT index-wise
-     * @param deleteCount how many FATs, starting from the `insertPos`, must be deleted before adding
+     * @param deleteCount how many FATs, starting from the `insertPos`, must be deleted before adding. If the value is less than zero, it will be treated as zero
      * @param FATs actual FAT data
      * @return offset from the start of the Archive where the first new FAT is written
      */
-    private fun spliceFAT(insertPos: Int, deleteCount: Int, vararg FATs: ByteArray): Long {
+    private fun spliceFAT(insertPos: Int, deleteCount: Int, FATs: List<ByteArray>): Long {
         checkDiskCapacity(FATs.size * FAT_ENTRY_SIZE)
+
+        val deleteCount = deleteCount.coerceAtLeast(0)
 
         if (deleteCount > fatEntryCount) throw IllegalArgumentException("deleteCount ($deleteCount) is larger than the number of FAT entries in the Archive ($fatEntryCount)")
 
@@ -609,7 +711,8 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
         System.arraycopy(buffer, bufferOffset, fileBytes, writeStartOffset, writeLength)
 
         if (fileBytes.size <= INLINING_THRESHOLD) {
-            fatmgrSetInlineBytes(inlinedFile, fileBytes)
+            inlinedFile.modificationDate = getTimeNow()
+            fatmgrSetInlineBytes(inlinedFile, fileBytes, fileType)
         }
         // un-inline the file
         else {
@@ -624,6 +727,8 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
     }
 
     fun writeBytes(entry: FATEntry, buffer: ByteArray, bufferOffset: Int, writeLength: Int, writeStartOffset: Int, fileType: Int) {
+        checkDiskCapacity(writeStartOffset + writeLength - getFileLength(entry))
+
         if (entry.isInline) return writeBytesInline(entry, buffer, bufferOffset, writeLength, writeStartOffset, fileType)
 
         var writeCursor = writeStartOffset
@@ -694,6 +799,11 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
             // unset the dirty flag
             file.seekToCluster(ptr)
             file.write(meta1 and 0xEF)
+
+            // set modification date on the FAT
+            val timeNow = getTimeNow()
+            entry.modificationDate = timeNow
+            fatmgrUpdateModificationDate(entry, timeNow)
         }
     }
 
@@ -916,13 +1026,13 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
         val buffer = ByteArray(2)
         val readStatus = readBytes(buffer)
         if (readStatus != 2) throw InternalError("Unexpected error -- EOF reached? (expected 2, got $readStatus)")
-        return buffer.toShortBig()
+        return buffer.toInt16()
     }
     private fun RandomAccessFile.readIntBig(): Int {
         val buffer = ByteArray(4)
         val readStatus = readBytes(buffer)
         if (readStatus != 4) throw InternalError("Unexpected error -- EOF reached? (expected 4, got $readStatus)")
-        return buffer.toIntBig()
+        return buffer.toInt32()
     }
     private fun RandomAccessFile.readInt48(): Long {
         val buffer = ByteArray(6)
@@ -942,6 +1052,9 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
     private fun RandomAccessFile.seekToCluster(clusterNum: Long, offset: Int = 0) {
         this.seek(CLUSTER_SIZE * clusterNum + offset)
     }
+    private fun RandomAccessFile.seekToFAT(index: Int, offset: Int = 0) {
+        this.seek(2L * CLUSTER_SIZE + index * FAT_ENTRY_SIZE)
+    }
     private fun RandomAccessFile.writeInt16(value: Int) {
         this.write(value.ushr(8))
         this.write(value.ushr(0))
@@ -957,31 +1070,36 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
         this.write(value.ushr(8))
         this.write(value.ushr(0))
     }
-    private fun RandomAccessFile.writeInt48(value: Int) {
-        this.write(value.ushr(40))
-        this.write(value.ushr(32))
-        this.write(value.ushr(24))
-        this.write(value.ushr(16))
-        this.write(value.ushr(8))
-        this.write(value.ushr(0))
+    private fun RandomAccessFile.writeInt48(value: Long) {
+        this.write(value.ushr(40).toInt())
+        this.write(value.ushr(32).toInt())
+        this.write(value.ushr(24).toInt())
+        this.write(value.ushr(16).toInt())
+        this.write(value.ushr( 8).toInt())
+        this.write(value.ushr( 0).toInt())
     }
-    private fun RandomAccessFile.writeInt64(value: Int) {
-        this.write(value.ushr(56))
-        this.write(value.ushr(48))
-        this.write(value.ushr(40))
-        this.write(value.ushr(32))
-        this.write(value.ushr(24))
-        this.write(value.ushr(16))
-        this.write(value.ushr(8))
-        this.write(value.ushr(0))
+    private fun RandomAccessFile.writeInt64(value: Long) {
+        this.write(value.ushr(56).toInt())
+        this.write(value.ushr(48).toInt())
+        this.write(value.ushr(40).toInt())
+        this.write(value.ushr(32).toInt())
+        this.write(value.ushr(24).toInt())
+        this.write(value.ushr(16).toInt())
+        this.write(value.ushr( 8).toInt())
+        this.write(value.ushr( 0).toInt())
     }
 }
 
-internal fun ByteArray.toShortBig(offset: Int = 0): Int {
+internal fun ByteArray.toInt16(offset: Int = 0): Int {
     return  this[0 + offset].toUint().shl(8) or
             this[1 + offset].toUint()
 }
-internal fun ByteArray.toIntBig(offset: Int = 0): Int {
+internal fun ByteArray.toInt24(offset: Int = 0): Int {
+    return  this[0 + offset].toUint().shl(16) or
+            this[1 + offset].toUint().shl(8) or
+            this[2 + offset].toUint()
+}
+internal fun ByteArray.toInt32(offset: Int = 0): Int {
     return  this[0 + offset].toUint().shl(24) or
             this[1 + offset].toUint().shl(16) or
             this[2 + offset].toUint().shl(8) or
@@ -995,15 +1113,6 @@ internal fun ByteArray.toInt48(offset: Int = 0): Long {
             this[4 + offset].toUlong().shl(8) or
             this[5 + offset].toUlong()
 }
-internal fun ByteArray.toInt16(offset: Int = 0): Int {
-    return  this[0 + offset].toUint().shl(8) or
-            this[1 + offset].toUint()
-}
-internal fun ByteArray.toInt24(offset: Int = 0): Int {
-    return  this[0 + offset].toUint().shl(16) or
-            this[1 + offset].toUint().shl(8) or
-            this[2 + offset].toUint()
-}
 internal fun ByteArray.toInt64(offset: Int = 0): Long {
     return  this[0 + offset].toUlong().shl(56) or
             this[1 + offset].toUlong().shl(48) or
@@ -1014,8 +1123,36 @@ internal fun ByteArray.toInt64(offset: Int = 0): Long {
             this[6 + offset].toUlong().shl(8) or
             this[7 + offset].toUlong()
 }
+internal fun ByteArray.writeInt16(value: Int, offset: Int) {
+    this[offset+0] = value.ushr(8).toByte()
+    this[offset+1] = value.ushr(0).toByte()
+}
 internal fun ByteArray.writeInt24(value: Int, offset: Int) {
     this[offset+0] = value.ushr(16).toByte()
     this[offset+1] = value.ushr(8).toByte()
     this[offset+2] = value.ushr(0).toByte()
+}
+internal fun ByteArray.writeInt32(value: Int, offset: Int) {
+    this[offset+0] = value.ushr(24).toByte()
+    this[offset+1] = value.ushr(16).toByte()
+    this[offset+2] = value.ushr(8).toByte()
+    this[offset+3] = value.ushr(0).toByte()
+}
+internal fun ByteArray.writeInt48(value: Long, offset: Int) {
+    this[offset+0] = value.ushr(40).toByte()
+    this[offset+1] = value.ushr(32).toByte()
+    this[offset+2] = value.ushr(24).toByte()
+    this[offset+3] = value.ushr(16).toByte()
+    this[offset+4] = value.ushr(8).toByte()
+    this[offset+5] = value.ushr(0).toByte()
+}
+internal fun ByteArray.writeInt64(value: Long, offset: Int) {
+    this[offset+0] = value.ushr(56).toByte()
+    this[offset+1] = value.ushr(48).toByte()
+    this[offset+2] = value.ushr(40).toByte()
+    this[offset+3] = value.ushr(32).toByte()
+    this[offset+4] = value.ushr(24).toByte()
+    this[offset+5] = value.ushr(16).toByte()
+    this[offset+6] = value.ushr(8).toByte()
+    this[offset+7] = value.ushr(0).toByte()
 }
