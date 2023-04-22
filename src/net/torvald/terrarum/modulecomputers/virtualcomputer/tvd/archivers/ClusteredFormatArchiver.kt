@@ -145,7 +145,7 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
         val isInline: Boolean
             get() = entryID in INLINE_FILE_CLUSTER_BASE..INLINE_FILE_CLUSTER_LAST
 
-        fun copyAttribsFrom(other: FATEntry) {
+        fun takeAttribsFrom(other: FATEntry) {
             this.entryID = other.entryID
             this.readOnly = other.readOnly
             this.hidden = other.hidden
@@ -155,16 +155,38 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
             this.modificationDate = other.modificationDate
         }
 
-        fun getInlineBytes(): ByteArray {
-            TODO()
+        fun validate() {
+            var inlineType = 0 // 0xFFFF10..0xFFFF1F
+            extendedEntries.forEachIndexed { index, bytes ->
+                val type = bytes.toInt24()
+                if (type xor 0xFFFF10 < 16) {
+                    if (inlineType == 0)
+                        inlineType = type
+                    else if (type != inlineType)
+                        throw IllegalStateException("Contradictory Inlining Extended Entries (both ${type.and(15)} and ${inlineType.and(15)} exist)")
+                }
+            }
         }
 
-        fun hasExtraEntryWithType(type: Int): Boolean {
-            TODO()
+        fun getInlineBytes(): ByteArray {
+            extendedEntries.filter { it.toInt24() xor 0xFFFF10 < 16 }.let {
+                var lengthAkku = 0
+                val ba = ByteArray(INLINED_ENTRY_BYTES * it.size) // must be truncated afterwards
+
+                it.forEach {
+                    val size = it[7].toUint()
+                    System.arraycopy(it, 8, ba, lengthAkku, size)
+                    lengthAkku += size
+                }
+
+                return ba.sliceArray(0 until lengthAkku)
+            }
         }
+
+        fun hasExtraEntryWithType(type: Int): Boolean = hasExtraEntryWithType { it == type }
 
         fun hasExtraEntryWithType(predicate: (Int) -> Boolean): Boolean {
-            TODO()
+            return extendedEntries.any { predicate(it.toInt24()) }
         }
     }
 
@@ -183,7 +205,7 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
         const val INLINE_FILE_CLUSTER_BASE = 0xF00000
         const val INLINE_FILE_CLUSTER_LAST = 0xFFFDFF
 
-        const val INLINED_ENTRY_BYTES = FAT_ENTRY_SIZE - 8
+        const val INLINED_ENTRY_BYTES = FAT_ENTRY_SIZE - 8 // typically 248
 
         const val INLINING_THRESHOLD = INLINED_ENTRY_BYTES * 8 // compare with <= -- files up to this size is recommended to be inlined
     }
@@ -303,6 +325,9 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
                 }
             }
         }
+
+
+        fileTable.forEach { _, fatEntry -> fatEntry.validate() }
     }
 
     private fun checkDiskCapacity(bytesToAdd: Int) {
@@ -717,7 +742,7 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
         // un-inline the file
         else {
             val uninlinedFile = allocateFile(fileBytes.size, fileType)
-            uninlinedFile.copyAttribsFrom(inlinedFile)
+            uninlinedFile.takeAttribsFrom(inlinedFile)
             fileTable.remove(inlinedFile.entryID)
             fatEntryCount -= inlinedFile.extendedEntries.size + 1
 
