@@ -60,12 +60,14 @@ private fun ByteArray.renumFAT(increment: Int) {
 
 class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charset, val throwErrorOnReadError: Boolean = false) {
 
+    private val fatEntryIndices = HashMap<EntryID, Int>() // EntryID, FATIndex
+    private var fatEntryHighest = 2 to 0 // FATIndex, EntryID
 
     data class FATEntry(
             val charset: Charset,
 
             /** if ID is 1, the file is 0-byte file */
-            var entryID: Int,
+            var entryID: EntryID,
 
             var readOnly: Boolean,
             var hidden: Boolean,
@@ -131,13 +133,20 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
         /**
          * Called by ClusteredFormatDOM, this function assists the global renum operation.
          */
-        internal fun renum(increment: Int) {
+        internal fun _fatRenum(increment: Int) {
             if (entryID > 2) {
                 entryID += increment
                 extendedEntries.forEach {
                     it.renumFAT(increment)
                 }
             }
+        }
+
+        val isInline: Boolean
+            get() = entryID in INLINE_FILE_CLUSTER_BASE..INLINE_FILE_CLUSTER_LAST
+
+        fun getInlineBytes(): ByteArray {
+            TODO()
         }
     }
 
@@ -154,7 +163,7 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
         const val INLINE_FILE_CLUSTER_BASE = 0xF00000
         const val INLINE_FILE_CLUSTER_LAST = 0xFFFDFF
 
-        const val INLINING_THRESHOLD = 248 * 8
+        const val INLINING_THRESHOLD = 248 * 8 // compare with <= -- files up to this size is recommended to be inlined
     }
 
     /**
@@ -264,6 +273,12 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
                 if (mainPtr != 0) {
                     fatEntryCount += 1
                 }
+
+                val fatIndex = blockOff / FAT_ENTRY_SIZE + block * FAT_ENTRY_SIZE / CLUSTER_SIZE
+                fatEntryIndices[mainPtr] = fatIndex
+                if (fatIndex > fatEntryHighest.first) {
+                    fatEntryHighest = fatIndex to mainPtr
+                }
             }
         }
     }
@@ -283,7 +298,7 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
         // renumber my FAT
         HashMap<Int, FATEntry>().let { newFileTable ->
             fileTable.entries.forEach { (clusternum, attribs) ->
-                attribs.renum(increment)
+                attribs._fatRenum(increment)
                 newFileTable[clusternum + increment] = attribs
             }
             fileTable = newFileTable
@@ -319,7 +334,7 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
         fatClusterCount += increment
 
         // renumber (actually re-write) FAT on the archive
-        rewriteFAT()
+        fatmgrRewriteFAT()
 
         // write new metavalues
         file.seek(64L)
@@ -327,25 +342,67 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
 
     }
 
-    private fun rewriteFAT() {
+    private fun fatmgrCreateNewEntry(charset: Charset, entryID: EntryID, readOnly: Boolean, hidden: Boolean, system: Boolean, deleted: Boolean, creationTime: Long, modificationTime: Long): FATEntry {
+        FATEntry(charset, entryID, false, false, false, false, creationTime, modificationTime).let {
+            // sync the FAT region on the archive
+            fatmgrAddEntry(it)
+
+            return it
+        }
+    }
+
+    private fun fatmgrAddEntry(entry: FATEntry) {
+        fileTable[entry.entryID] = entry
+
+        // write changes to the disk
+        val nextIndex = 1 + fatEntryHighest.first + fileTable[fatEntryHighest.second]!!.extendedEntries.size
+
+        // toBytes() creates a clone of the entry and thus now de-synced from what's in the fileTable
+        // (remember: spliceFAT may renumber FATs in the fileTable)
+        // therefore it should be safe to do this
+        spliceFAT(nextIndex, 0, *entry.toBytes())
+
+        // `entry` is contained in the fileTable and thus should have been re-numbered by the spliceFAT
+        fatEntryHighest = nextIndex to entry.entryID
+    }
+
+    private fun fatmgrRewriteFAT() {
+
+        fatEntryHighest = 2 to 0
+        fatEntryIndices.clear()
+
         fileTable.entries.sortedBy { it.key }.let { FATs ->
             // try to rewrite every entry on the FAT
-            var index = 0
-            while (index in 0 until (CLUSTER_SIZE / FAT_ENTRY_SIZE) * (fatClusterCount)) {
-                file.seek(CLUSTER_SIZE * 2L + FAT_ENTRY_SIZE * index)
+            var fatIndex = 0
+            while (fatIndex in 0 until (CLUSTER_SIZE / FAT_ENTRY_SIZE) * (fatClusterCount)) {
+                file.seek(CLUSTER_SIZE * 2L + FAT_ENTRY_SIZE * fatIndex)
 
                 // if the entry is real, write some values
-                if (index < FATs.size) {
-                    // single FileAttrib may have multiple FATs associated
-                    FATs[index].value.toBytes().let { newFATs ->
-                        newFATs.forEach { file.write(it) }
-                        index += newFATs.size
+                if (fatIndex < FATs.size) {
+
+                    FATs[fatIndex].let { (ptr, fat) ->
+
+                        // update fatEntryIndices
+                        fatEntryIndices[ptr] = fatIndex
+
+                        // update fatEntryHighest
+                        if (fatIndex > fatEntryHighest.first) {
+                            fatEntryHighest = fatIndex to ptr
+                        }
+
+                        // write bytes to the disk
+                        // single FileAttrib may have multiple FATs associated
+                        fat.toBytes().let { newFATbytes ->
+                            newFATbytes.forEach { file.write(it) }
+                            fatIndex += newFATbytes.size
+                        }
                     }
+
                 }
                 // if not, fill with zeros
                 else {
                     file.write(EMPTY_FAT_ENTRY)
-                    index += 1
+                    fatIndex += 1
                 }
             }
         }
@@ -356,10 +413,12 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
     }
 
     /**
-     * Mark the cluster as to-be-deleted
+     * Mark the cluster and the FAT entry as to-be-deleted. Cluster and FAT changes will be written to the archive.
+     * Deleted FAT will remain on the fileTable; use `fatmgrRewriteFAT()` to purge them.
      */
-    fun deleteFile(clusterNum: Int) {
+    fun discardFile(clusterNum: Int) {
         if (clusterNum < 2 + fatClusterCount) throw IllegalArgumentException("Cannot discard cluster #$clusterNum -- is Meta/Bootsector/FAT")
+        if (clusterNum in INLINE_FILE_CLUSTER_BASE..INLINE_FILE_CLUSTER_LAST) throw IllegalArgumentException("Cannot discard inline file using this function")
 
         (fileTable[clusterNum] ?: throw FileNotFoundException("No file is associated with cluster #$clusterNum")).let {
             it.deleted = true
@@ -371,30 +430,28 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
         }
     }
 
+    /**
+     * Creates new FAT then writes it to the archive. Returned FATEntry will be registered on the fileTable.
+     * @return newly-created FAT entry
+     */
     fun allocateFile(size: Int, fileType: Int): FATEntry {
         checkDiskCapacity(size)
         val timeNow = System.currentTimeMillis() / 1000
 
-        val ptr = if (size < INLINING_THRESHOLD) getNextFreeInlineCluster() else usedClusterCount
+        val ptr = if (size <= INLINING_THRESHOLD) getNextFreeInlineCluster() else usedClusterCount
 
         if (ptr in INLINE_FILE_CLUSTER_BASE..INLINE_FILE_CLUSTER_LAST) {
-            TODO()
+            fatmgrCreateNewEntry(charset, ptr, false, false, false, false, timeNow, timeNow).let {
+                fatmgrAllocateInlineFile(it, size, fileType)
+                return it
+            }
         }
         else {
-            FATEntry(charset, ptr, false, false, false, false, timeNow, timeNow).let {
-                fileTable[ptr] = it
-
+            fatmgrCreateNewEntry(charset, ptr, false, false, false, false, timeNow, timeNow).let {
                 // actually create zero-filled clusters
                 if (size > 0) {
-                    expandFile(size, ptr, fileType)
+                    expandFile(size, ptr, fileType) // will increment usedClusterCount
                 }
-
-                // sync the FAT region on the archive
-                rewriteFAT()
-                /*
-                TODO("search for the right index")
-                spliceFAT(rightIndex, 0, *it.toBytes())
-                 */
 
                 return it
             }
@@ -530,7 +587,31 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
         return seekpos
     }
 
+    private fun writeBytesInline(inlinedFile: FATEntry, buffer: ByteArray, bufferOffset: Int, writeLength: Int, writeStartOffset: Int, fileType: Int) {
+        val fileCopy = inlinedFile.getInlineBytes()
+        val fileBytes = ByteArray(maxOf(fileCopy.size, writeStartOffset + writeLength))
+
+        System.arraycopy(fileCopy, 0, fileBytes, 0, fileCopy.size)
+        System.arraycopy(buffer, bufferOffset, fileBytes, writeStartOffset, writeLength)
+
+        if (fileBytes.size <= INLINING_THRESHOLD) {
+            fatmgrSetInlineBytes(inlinedFile, fileBytes)
+        }
+        // un-inline the file
+        else {
+            val uninlinedFile = allocateFile(fileBytes.size, fileType)
+            uninlinedFile.copyAttribsFrom(inlinedFile)
+            fileTable.remove(inlinedFile.entryID)
+            fatEntryCount -= inlinedFile.extendedEntries.size + 1
+
+            fatmgrRewriteFAT() // must precede the writeBytes
+            writeBytes(uninlinedFile, fileBytes, 0, fileBytes.size, 0, fileType)
+        }
+    }
+
     fun writeBytes(entry: FATEntry, buffer: ByteArray, bufferOffset: Int, writeLength: Int, writeStartOffset: Int, fileType: Int) {
+        if (entry.isInline) return writeBytesInline(entry, buffer, bufferOffset, writeLength, writeStartOffset, fileType)
+
         var writeCursor = writeStartOffset
         var remaining = writeLength
 
