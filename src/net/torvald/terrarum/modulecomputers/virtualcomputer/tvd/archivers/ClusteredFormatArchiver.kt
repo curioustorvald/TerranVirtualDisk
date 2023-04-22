@@ -74,6 +74,8 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
             var system: Boolean,
             var deleted: Boolean,
 
+            var isInlineDirectory: Boolean = false,
+
             var creationDate: Long = -1L,
             var modificationDate: Long = -1L,
             var filename: String = "",
@@ -94,9 +96,12 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
                         fat256[3].and(4.toByte()) != 0.toByte(),
                         fat256[3].and(128.toByte()) != 0.toByte(),
 
+                        fat256[3].and(16.toByte()) != 0.toByte(),
+
                         fat256.sliceArray(4..9).toInt48(),
                         fat256.sliceArray(10..15).toInt48(),
-                        fat256.sliceArray(16..255).toCanonicalString(charset)
+                        fat256.sliceArray(16..255).toCanonicalString(charset),
+
                 )
         }
 
@@ -156,15 +161,11 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
         }
 
         fun validate() {
-            var inlineType = 0 // 0xFFFF10..0xFFFF1F
+            val inlineType = 0xFFFF10 or isInlineDirectory.toInt()
             extendedEntries.forEachIndexed { index, bytes ->
                 val type = bytes.toInt24()
-                if (type xor 0xFFFF10 < 16) {
-                    if (inlineType == 0)
-                        inlineType = type
-                    else if (type != inlineType)
-                        throw IllegalStateException("Contradictory Inlining Extended Entries (both ${type.and(15)} and ${inlineType.and(15)} exist)")
-                }
+                if (type xor 0xFFFF10 < 16 && type != inlineType)
+                    throw IllegalStateException("Contradictory Inlining Extended Entries (both ${type.and(15)} and ${inlineType.and(15)} exist)")
             }
         }
 
@@ -304,12 +305,12 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
                 val fat = file.read(FAT_ENTRY_SIZE)
 
                 val mainPtr = fat.toInt24()
-                // extended attribs
+                // Extended Entries
                 if (mainPtr >= 0xFFFF00) {
                     val parentPtr = fat.toInt24(3)
-                    fileTable[parentPtr]?.extendedEntries?.add(fat) ?: notifyError(IllegalStateException(" but no main FAT entry for ID $mainPtr is found"))
+                    fileTable[parentPtr]?.extendedEntries?.add(fat) ?: notifyError(IllegalStateException("Extended Entry 0x${parentPtr.toHex().drop(2)} is reached but no main FAT entry (ID $parentPtr) was found"))
                 }
-                // normal entries (incl. 0-byte file)
+                // normal entries
                 else if (mainPtr >= 2 + fatClusterCount) {
                     fileTable[mainPtr] = FATEntry.fromBytes(charset, fat).second
                 }
@@ -398,8 +399,8 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
     /**
      * Creates a new FAT entry, adds it to the `fileTable` and the Archive via [fatmgrAddEntry], then returns the newly-created entry.
      */
-    private fun fatmgrCreateNewEntry(charset: Charset, entryID: EntryID, readOnly: Boolean, hidden: Boolean, system: Boolean, deleted: Boolean, creationTime: Long, modificationTime: Long): FATEntry {
-        FATEntry(charset, entryID, false, false, false, false, creationTime, modificationTime).let {
+    private fun fatmgrCreateNewEntry(charset: Charset, entryID: EntryID, readOnly: Boolean, hidden: Boolean, system: Boolean, deleted: Boolean, creationTime: Long, modificationTime: Long, isInlineDir: Boolean = false): FATEntry {
+        FATEntry(charset, entryID, readOnly, hidden, system, deleted, isInlineDir, creationTime, modificationTime).let {
             // sync the FAT region on the Archive
             fatmgrAddEntry(it)
 
@@ -574,13 +575,15 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
      * @return newly-created FAT entry
      */
     fun allocateFile(size: Int, fileType: Int): FATEntry {
+        if (fileType != 0 && fileType != 1) throw IllegalArgumentException("Unknown File type: $fileType")
+
         checkDiskCapacity(size)
         val timeNow = getTimeNow()
 
         val ptr = if (size <= INLINING_THRESHOLD) getNextFreeInlineCluster() else usedClusterCount
 
         if (ptr in INLINE_FILE_CLUSTER_BASE..INLINE_FILE_CLUSTER_LAST) {
-            fatmgrCreateNewEntry(charset, ptr, false, false, false, false, timeNow, timeNow).let {
+            fatmgrCreateNewEntry(charset, ptr, false, false, false, false, timeNow, timeNow, fileType == 1).let {
                 fatmgrAllocateInlineFile(it, size, fileType)
                 return it
             }
