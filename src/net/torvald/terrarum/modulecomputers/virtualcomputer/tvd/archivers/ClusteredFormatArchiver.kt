@@ -326,14 +326,14 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
                 }
             }
 
-            // write modified cluster to the new (forward) position of the archive
+            // write modified cluster to the new (forward) position of the Archive
             file.seekToCluster(clusternum + increment)
             file.write(clusterContents)
         }
 
         fatClusterCount += increment
 
-        // renumber (actually re-write) FAT on the archive
+        // renumber (actually re-write) FAT on the Archive
         fatmgrRewriteFAT()
 
         // write new metavalues
@@ -342,15 +342,22 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
 
     }
 
+    /**
+     * Creates a new FAT entry, adds it to the `fileTable` and the Archive via [fatmgrAddEntry], then returns the newly-created entry.
+     */
     private fun fatmgrCreateNewEntry(charset: Charset, entryID: EntryID, readOnly: Boolean, hidden: Boolean, system: Boolean, deleted: Boolean, creationTime: Long, modificationTime: Long): FATEntry {
         FATEntry(charset, entryID, false, false, false, false, creationTime, modificationTime).let {
-            // sync the FAT region on the archive
+            // sync the FAT region on the Archive
             fatmgrAddEntry(it)
 
             return it
         }
     }
 
+    /**
+     * Adds the given entry to the `fileTable` and to the Archive, then recalculates the `fatEntryHighest`.
+     * The added entry will be inserted to the tail of the FAT region and the modified `fatEntryHighest` will point to the given entry.
+     */
     private fun fatmgrAddEntry(entry: FATEntry) {
         fileTable[entry.entryID] = entry
 
@@ -366,12 +373,19 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
         fatEntryHighest = nextIndex to entry.entryID
     }
 
+    /**
+     * Rewrites FATs on the `fileTable` to the Archive, then updates the `fatEntryIndices` and `fatEntryHighest`.
+     *
+     * Following FAT entries will be discarded:
+     * - Exists on the Archive but somehow not on the `fileTable`
+     * - Marked as `deleted`
+     */
     private fun fatmgrRewriteFAT() {
 
         fatEntryHighest = 2 to 0
         fatEntryIndices.clear()
 
-        fileTable.entries.sortedBy { it.key }.let { FATs ->
+        fileTable.entries.filter { !it.value.deleted }.sortedBy { it.key }.let { FATs ->
             // try to rewrite every entry on the FAT
             var fatIndex = 0
             while (fatIndex in 0 until (CLUSTER_SIZE / FAT_ENTRY_SIZE) * (fatClusterCount)) {
@@ -413,7 +427,7 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
     }
 
     /**
-     * Mark the cluster and the FAT entry as to-be-deleted. Cluster and FAT changes will be written to the archive.
+     * Mark the cluster and the FAT entry as to-be-deleted. Cluster and FAT changes will be written to the Archive.
      * Deleted FAT will remain on the fileTable; use `fatmgrRewriteFAT()` to purge them.
      */
     fun discardFile(clusterNum: Int) {
@@ -431,7 +445,7 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
     }
 
     /**
-     * Creates new FAT then writes it to the archive. Returned FATEntry will be registered on the fileTable.
+     * Creates new FAT then writes it to the Archive. Returned FATEntry will be registered on the fileTable.
      * @return newly-created FAT entry
      */
     fun allocateFile(size: Int, fileType: Int): FATEntry {
@@ -532,12 +546,12 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
      * @param insertPos where the new FATs will be inserted, FAT index-wise
      * @param deleteCount how many FATs, starting from the `insertPos`, must be deleted before adding
      * @param FATs actual FAT data
-     * @return offset from the start of the archive where the first new FAT is written
+     * @return offset from the start of the Archive where the first new FAT is written
      */
     private fun spliceFAT(insertPos: Int, deleteCount: Int, vararg FATs: ByteArray): Long {
         checkDiskCapacity(FATs.size * FAT_ENTRY_SIZE)
 
-        if (deleteCount > fatEntryCount) throw IllegalArgumentException("deleteCount ($deleteCount) is larger than the number of FAT entries in the archive ($fatEntryCount)")
+        if (deleteCount > fatEntryCount) throw IllegalArgumentException("deleteCount ($deleteCount) is larger than the number of FAT entries in the Archive ($fatEntryCount)")
 
         // grow FAT area?
         if (insertPos * FAT_ENTRY_SIZE / CLUSTER_SIZE >= fatClusterCount) {
@@ -548,7 +562,7 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
             }
         }
 
-        // shift FATS on the archive
+        // shift FATS on the Archive
         val stride = (FATs.size - deleteCount) * FAT_ENTRY_SIZE
         val seekpos = 2L* CLUSTER_SIZE + insertPos*FAT_ENTRY_SIZE
 
@@ -633,7 +647,7 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
             while (cursorInClusterFileArea >= FILE_BLOCK_CONTENTS_SIZE) {
                 // if next cluster is NULL,,,
                 if (nextPtr == 0) {
-                    // allocate new cluster and then modify the nextPtr on the archive
+                    // allocate new cluster and then modify the nextPtr on the Archive
                     expandFile(remaining, ptr, fileType)
                 }
                 ptr = nextPtr
@@ -806,7 +820,7 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
     fun getFileType(entry: FATEntry): Int = file.let {
         it.seek(entry.entryID.toLong() * CLUSTER_SIZE)
         val b = it.read()
-        if (b == -1) throw IOException("The archive cannot be read; offset: ${entry.entryID.toLong() * CLUSTER_SIZE}")
+        if (b == -1) throw IOException("The Archive cannot be read; offset: ${entry.entryID.toLong() * CLUSTER_SIZE}")
         return b and 15
     }
 
