@@ -48,10 +48,10 @@ class VirtualDisk(
     fun serialize(): ByteArray64 {
         val entriesBuffer = serializeEntriesOnly()
         val buffer = ByteArray64(HEADER_SIZE + entriesBuffer.size)
-        val crc = hashCode().toBigEndian()
+        val crc = hashCode().toInt32Arr()
 
         buffer.appendBytes(MAGIC)
-        buffer.appendBytes(capacity.toInt48())
+        buffer.appendBytes(capacity.toInt48Arr())
         buffer.appendBytes(diskName.forceSize(NAME_LENGTH))
         buffer.appendBytes(crc)
         buffer.appendByte(0x03)
@@ -151,13 +151,13 @@ class DiskEntry(
         val serialisedContents = contents.serialize()
         val buffer = ByteArray64(HEADER_SIZE + serialisedContents.size)
 
-        buffer.appendBytes(entryID.toBigEndian())
-        buffer.appendBytes(parentEntryID.toBigEndian())
+        buffer.appendBytes(entryID.toInt32Arr())
+        buffer.appendBytes(parentEntryID.toInt32Arr())
         buffer.appendByte(contents.getTypeFlag())
         buffer.appendBytes(filename.forceSize(NAME_LENGTH))
-        buffer.appendBytes(creationDate.toInt48())
-        buffer.appendBytes(modificationDate.toInt48())
-        buffer.appendBytes(this.hashCode().toBigEndian())
+        buffer.appendBytes(creationDate.toInt48Arr())
+        buffer.appendBytes(modificationDate.toInt48Arr())
+        buffer.appendBytes(this.hashCode().toInt32Arr())
         buffer.appendBytes(serialisedContents)
 
         return buffer
@@ -196,7 +196,7 @@ open class EntryFile(internal val bytes: ByteArray64) : DiskEntryContent {
 
     override fun serialize(): ByteArray64 {
         val buffer = ByteArray64(getSizeEntry())
-        buffer.appendBytes(getSizePure().toInt48())
+        buffer.appendBytes(getSizePure().toInt48Arr())
         buffer.appendBytes(bytes)
         return buffer
     }
@@ -268,7 +268,7 @@ class EntryDirectory(private val entries: ArrayList<EntryID> = ArrayList<EntryID
     override fun serialize(): ByteArray64 {
         val buffer = ByteArray64(getSizeEntry())
         buffer.appendBytes(entries.size.toShort().toBigEndian())
-        entries.forEach { indexNumber -> buffer.appendBytes(indexNumber.toBigEndian()) }
+        entries.forEach { indexNumber -> buffer.appendBytes(indexNumber.toInt32Arr()) }
         return buffer
     }
 
@@ -298,7 +298,7 @@ class EntrySymlink(_target: EntryID) : DiskEntryContent {
 
     override fun serialize(): ByteArray64 {
         val buffer = ByteArray64(4)
-        buffer.appendBytes(target.toBigEndian())
+        buffer.appendBytes(target.toInt32Arr())
         return buffer
     }
 
@@ -317,10 +317,10 @@ fun Int.toHex() = this.toLong().and(0xFFFFFFFF).toString(16).padStart(8, '0').to
 fun Int.toInt24Arr(): ByteArray {
     return ByteArray(3) { this.ushr(16 - (8 * it)).toByte() }
 }
-fun Int.toBigEndian(): ByteArray {
+fun Int.toInt32Arr(): ByteArray {
     return ByteArray(4) { this.ushr(24 - (8 * it)).toByte() }
 }
-fun Long.toInt48(): ByteArray {
+fun Long.toInt48Arr(): ByteArray {
     return ByteArray(6) { this.ushr(40 - (8 * it)).toByte() }
 }
 fun Short.toBigEndian(): ByteArray {

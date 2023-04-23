@@ -24,11 +24,11 @@ class Format3Archiver : Archiver {
     override fun serializeToBA64(dom: VirtualDisk): ByteArray64 {
 //        val entriesBuffer = dom.serializeEntriesOnly()
         val buffer = ByteArray64()
-        val crc = dom.hashCode().toBigEndian()
+        val crc = dom.hashCode().toInt32Arr()
 
 
         buffer.appendBytes(VirtualDisk.MAGIC)
-        buffer.appendBytes(dom.capacity.toInt48())
+        buffer.appendBytes(dom.capacity.toInt48Arr())
         buffer.appendBytes(dom.diskName.forceSize(VirtualDisk.NAME_LENGTH))
         buffer.appendBytes(crc)
         buffer.appendByte(specversion)

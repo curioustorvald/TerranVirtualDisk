@@ -6,6 +6,7 @@ import net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.VirtualDisk.Comp
 import net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.VirtualDisk.Companion.NAME_LENGTH
 import java.io.File
 import java.io.FileNotFoundException
+import java.io.FileOutputStream
 import java.io.IOException
 import java.io.RandomAccessFile
 import java.nio.charset.Charset
@@ -59,6 +60,99 @@ private fun ByteArray.renumFAT(increment: Int) {
 }
 
 class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charset, val throwErrorOnReadError: Boolean = false) {
+
+    companion object {
+        const val CLUSTER_SIZE = 4096 // as per spec
+        const val FAT_ENTRY_SIZE = 256 // as per spec
+        private val EMPTY_CLUSTER = ByteArray(CLUSTER_SIZE)
+        private val EMPTY_FAT_ENTRY = ByteArray(FAT_ENTRY_SIZE)
+
+        const val FILE_BLOCK_HEADER_SIZE = 10 // as per spec
+        const val FILE_BLOCK_CONTENTS_SIZE = CLUSTER_SIZE - FILE_BLOCK_HEADER_SIZE
+
+        const val NULL_CLUSTER = 0
+        const val HEAD_CLUSTER = 0
+        const val LEAF_CLUSTER = 0xFFFFFF
+        const val INLINE_FILE_CLUSTER_BASE = 0xF00000
+        const val INLINE_FILE_CLUSTER_LAST = 0xFFFDFF
+
+        const val INLINED_ENTRY_BYTES = FAT_ENTRY_SIZE - 8 // typically 248
+
+        const val INLINING_THRESHOLD = INLINED_ENTRY_BYTES * 8 // compare with <= -- files up to this size is recommended to be inlined
+
+        fun createNewArchive(outPath: File, charset: Charset, diskName: String, capacityInSectors: Int): RandomAccessFile {
+            val timeNow = (System.currentTimeMillis() / 1000L).toInt48Arr()
+            val file = FileOutputStream(outPath)
+
+            //// CLUSTER 0 ////
+            // header
+            file.write(VirtualDisk.MAGIC)
+            // capacity
+            file.write((CLUSTER_SIZE * capacityInSectors).toLong().toInt48Arr())
+            // disk name
+            file.write(diskName.toEntryName(32, charset))
+            // dummy CRC
+            file.write(0.toInt32Arr())
+            // version
+            file.write(ClusteredFormatArchiver.specversion.toInt())
+            // attributes
+            file.write(0)
+            // more attirbutes
+            repeat(16) { file.write(0) }
+            // FAT size (2)
+            file.write(2.toInt32Arr())
+            // cluster filler
+            file.write(ByteArray(4028))
+
+            //// CLUSTER 1 ////
+            // dummy bootsector
+            file.write(EMPTY_CLUSTER)
+
+            //// CLUSTER 2-3 ////
+            // FAT for the root
+            file.write(ROOT_DIR_FAT_PREAMBLE)
+            // creation date
+            file.write(timeNow)
+            // modification date
+            file.write(timeNow)
+            // empty filename
+            file.write(ByteArray(240))
+            // rest of the sectors
+            val remainingSectCnt = 2*CLUSTER_SIZE / FAT_ENTRY_SIZE - 1
+            repeat(remainingSectCnt) { file.write(EMPTY_FAT_ENTRY) }
+
+            //// CLUSTER 4 ////
+            // root directory
+            file.write(ROOT_DIR_CLUSTER)
+
+
+            file.flush(); file.close()
+
+            return RandomAccessFile(outPath, "rw")
+        }
+
+        /** Typically the root dir will sit on ID=4 */
+        internal val ROOT_DIR_CLUSTER = ByteArray(CLUSTER_SIZE).also {
+            // meta1 (type:dir)
+            it[0] = 1
+            // meta2 (persistent:true)
+            it[1] = -128
+            // prev ptr
+            it.writeInt24(HEAD_CLUSTER, 2)
+            // next ptr
+            it.writeInt24(LEAF_CLUSTER, 5)
+        }
+
+        /** Typically the root dir will sit on ID=4 */
+        internal val ROOT_DIR_FAT_PREAMBLE = ByteArray(4).also {
+            // ptr (0x04)
+            it.writeInt24(4, 0)
+            // flags (system:true)
+            it[3] = 4
+        }
+
+
+    }
 
     private val fatEntryIndices = HashMap<EntryID, Int>() // EntryID, FATIndex
     private var fatEntryHighest = 2 to 0 // FATIndex, EntryID
@@ -123,8 +217,8 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
                     hidden.toInt(1) or
                     system.toInt(2) or
                     deleted.toInt(7)
-            val cd = creationDate.toInt48()
-            val md = modificationDate.toInt48()
+            val cd = creationDate.toInt48Arr()
+            val md = modificationDate.toInt48Arr()
             val name = filename.toByteArray(charset)
 
             ba[3] = flags.toByte()
@@ -192,24 +286,6 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
     }
 
     private fun getTimeNow() = System.currentTimeMillis() / 1000
-
-    companion object {
-        const val CLUSTER_SIZE = 4096 // as per spec
-        const val FAT_ENTRY_SIZE = 256 // as per spec
-        private val EMPTY_CLUSTER = ByteArray(CLUSTER_SIZE)
-        private val EMPTY_FAT_ENTRY = ByteArray(FAT_ENTRY_SIZE)
-
-        const val FILE_BLOCK_HEADER_SIZE = 10 // as per spec
-        const val FILE_BLOCK_CONTENTS_SIZE = CLUSTER_SIZE - FILE_BLOCK_HEADER_SIZE
-
-        const val NULL_CLUSTER = 0
-        const val INLINE_FILE_CLUSTER_BASE = 0xF00000
-        const val INLINE_FILE_CLUSTER_LAST = 0xFFFDFF
-
-        const val INLINED_ENTRY_BYTES = FAT_ENTRY_SIZE - 8 // typically 248
-
-        const val INLINING_THRESHOLD = INLINED_ENTRY_BYTES * 8 // compare with <= -- files up to this size is recommended to be inlined
-    }
 
     /**
      * @return ID between 0xF00000 and 0xFFFDFF if the reserved area is not full; normal cluster ID otherwise
@@ -1038,6 +1114,15 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
         }
     }
 
+    fun readBoot(): ByteArray {
+        file.seek(CLUSTER_SIZE.toLong())
+        return file.read(CLUSTER_SIZE)
+    }
+
+    fun writeBoot(code: ByteArray) {
+        file.seek(CLUSTER_SIZE.toLong())
+        file.write(code, 0, minOf(code.size, CLUSTER_SIZE))
+    }
 
 
 
