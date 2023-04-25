@@ -110,7 +110,7 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
 
             //// CLUSTER 2-3 ////
             // FAT for the root
-            file.write(ROOT_DIR_FAT_PREAMBLE)
+            file.write(byteArrayOf(0, 0, 4, 4))
             // creation date
             file.write(timeNow)
             // modification date
@@ -141,14 +141,6 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
             it.writeInt24(HEAD_CLUSTER, 2)
             // next ptr
             it.writeInt24(LEAF_CLUSTER, 5)
-        }
-
-        /** Typically the root dir will sit on ID=4 */
-        internal val ROOT_DIR_FAT_PREAMBLE = ByteArray(4).also {
-            // ptr (0x04)
-            it.writeInt24(4, 0)
-            // flags (system:true)
-            it[3] = 4
         }
 
 
@@ -485,8 +477,9 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
     /**
      * Creates a new FAT entry, adds it to the `fileTable` and the Archive via [fatmgrAddEntry], then returns the newly-created entry.
      */
-    private fun fatmgrCreateNewEntry(charset: Charset, entryID: EntryID, readOnly: Boolean, hidden: Boolean, system: Boolean, deleted: Boolean, creationTime: Long, modificationTime: Long, isInlineDir: Boolean = false): FATEntry {
+    private fun fatmgrCreateNewEntry(charset: Charset, entryID: EntryID, filename: String, readOnly: Boolean, hidden: Boolean, system: Boolean, deleted: Boolean, creationTime: Long, modificationTime: Long, isInlineDir: Boolean = false): FATEntry {
         FATEntry(charset, entryID, readOnly, hidden, system, deleted, isInlineDir, creationTime, modificationTime).let {
+            it.filename = filename
             // sync the FAT region on the Archive
             fatmgrAddEntry(it)
 
@@ -660,7 +653,7 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
      * Creates new FAT then writes it to the Archive. Returned FATEntry will be registered on the fileTable.
      * @return newly-created FAT entry
      */
-    fun allocateFile(size: Int, fileType: Int): FATEntry {
+    fun allocateFile(size: Int, fileType: Int, filename: String): FATEntry {
         if (fileType != 0 && fileType != 1) throw IllegalArgumentException("Unknown File type: $fileType")
 
         checkDiskCapacity(size)
@@ -669,13 +662,13 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
         val ptr = if (size <= INLINING_THRESHOLD) getNextFreeInlineCluster() else usedClusterCount
 
         if (ptr in INLINE_FILE_CLUSTER_BASE..INLINE_FILE_CLUSTER_LAST) {
-            fatmgrCreateNewEntry(charset, ptr, false, false, false, false, timeNow, timeNow, fileType == 1).let {
+            fatmgrCreateNewEntry(charset, ptr, filename, false, false, false, false, timeNow, timeNow, fileType == 1).let {
                 fatmgrAllocateInlineFile(it, size, fileType)
                 return it
             }
         }
         else {
-            fatmgrCreateNewEntry(charset, ptr, false, false, false, false, timeNow, timeNow).let {
+            fatmgrCreateNewEntry(charset, ptr, filename, false, false, false, false, timeNow, timeNow).let {
                 // actually create zero-filled clusters
                 if (size > 0) {
                     expandFile(size, HEAD_CLUSTER, ptr, fileType) // will increment usedClusterCount
@@ -701,7 +694,7 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
     }
 
     private fun initClusters(parent: Int, current: Int, clusterCount: Int, fileType: Int) {
-        val ptrs = listOf(parent) + (current until current+clusterCount) + listOf(NULL_CLUSTER)
+        val ptrs = listOf(parent) + (current until current+clusterCount) + listOf(LEAF_CLUSTER)
 
         for (k in 0 until clusterCount) {
             file.seekToCluster(ptrs[k+1])
@@ -834,7 +827,7 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
         }
         // un-inline the file
         else {
-            val uninlinedFile = allocateFile(fileBytes.size, fileType)
+            val uninlinedFile = allocateFile(fileBytes.size, fileType, inlinedFile.filename)
             uninlinedFile.takeAttribsFrom(inlinedFile)
             fileTable.remove(inlinedFile.entryID)
             fatEntryCount -= inlinedFile.extendedEntries.size + 1
@@ -1066,7 +1059,7 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
 
 
             cluster = nextCluster
-        } while (cluster > 0)
+        } while (cluster > 0 && cluster < LEAF_CLUSTER)
 
         return accumulator
     }
@@ -1206,7 +1199,7 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
         this.seek(CLUSTER_SIZE * clusterNum + offset)
     }
     private fun RandomAccessFile.seekToFAT(index: Int, offset: Int = 0) {
-        this.seek(2L * CLUSTER_SIZE + index * FAT_ENTRY_SIZE)
+        this.seek(2L * CLUSTER_SIZE + index * FAT_ENTRY_SIZE + offset)
     }
     private fun RandomAccessFile.writeInt16(value: Int) {
         this.write(value.ushr(8))

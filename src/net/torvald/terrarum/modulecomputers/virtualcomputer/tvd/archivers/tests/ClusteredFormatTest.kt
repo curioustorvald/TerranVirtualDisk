@@ -19,7 +19,7 @@ fun main(args: Array<String>) {
     val DOM = ClusteredFormatDOM(diskFile, charset)
 
     println("Allocating a longfile")
-    val longfile = DOM.allocateFile(3000, 0)
+    val longfile = DOM.allocateFile(3000, 0, "Longfile3000")
 
     println("Writing a longfile")
     val longtext = "This is a long file!".toByteArray(charset)
