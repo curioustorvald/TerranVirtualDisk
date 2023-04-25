@@ -295,7 +295,7 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
     /** Formatted size of the disk. Archive offset 4 */
     private var diskSize = -1L
     /** How many clusters FAT is taking up. Archive offset 64 */
-    private var fatClusterCount = 2
+    private var fatClusterCount = -1
     /** How many FAT entries are there on the FAT area, including Extended Entries */
     private var fatEntryCount = 0
     /** Disk name in bytes. Archive offset 10 */
@@ -341,6 +341,7 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
 
         readMeta()
         readFAT()
+        tallyClusterCount()
     }
 
     fun notifyError(throwable: Throwable) {
@@ -348,6 +349,19 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
             throw throwable
         else
             throwable.printStackTrace()
+    }
+
+    private fun tallyClusterCount() {
+        if (fatClusterCount < 0) throw InternalError("Uninitialised -- call readMeta() and readFAT() first")
+        usedClusterCount = 2 + fatClusterCount
+
+        fileTable.forEach { id, entry ->
+            var clusterCount = 0
+            traverseClusters(entry.entryID) { clusterCount += 1 }
+            usedClusterCount += 1
+        }
+
+        println("[Clustered] usedClusterCount: $usedClusterCount")
     }
 
     private fun readMeta() {
@@ -358,8 +372,6 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
         primaryAttribs = file.read()
         file.readBytes(userAttribs)
         fatClusterCount = file.readIntBig()
-
-        usedClusterCount = 2 + fatClusterCount
     }
 
     private fun readFAT() {
@@ -504,6 +516,9 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
 
         // `entry` is contained in the fileTable and thus should have been re-numbered by the spliceFAT
         fatEntryHighest = nextIndex to entry.entryID
+        fatEntryIndices[entry.entryID] = nextIndex
+
+        println("[Clustered] fatmgrAddEntry -- entryID: ${entry.entryID}, FAT index: $nextIndex")
     }
 
     private fun fatmgrAllocateInlineFile(entry: FATEntry, size: Int, fileType: Int) {
@@ -661,6 +676,8 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
 
         val ptr = if (size <= INLINING_THRESHOLD) getNextFreeInlineCluster() else usedClusterCount
 
+        println("[Clustered] allocateFile where: $ptr")
+
         if (ptr in INLINE_FILE_CLUSTER_BASE..INLINE_FILE_CLUSTER_LAST) {
             fatmgrCreateNewEntry(charset, ptr, filename, false, false, false, false, timeNow, timeNow, fileType == 1).let {
                 fatmgrAllocateInlineFile(it, size, fileType)
@@ -703,7 +720,7 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
             file.writeInt24(ptrs[k])
             file.writeInt24(ptrs[k+2])
 
-            TODO("Write contents size according to the fileType")
+//            TODO("Write contents size according to the fileType")
         }
     }
 
@@ -733,7 +750,7 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
 
     private fun expandArchive(clusterCount: Int): Int {
         val newPtr = usedClusterCount
-        file.seek(newPtr.toLong())
+        file.seekToCluster(newPtr.toLong())
         repeat(clusterCount) {
             file.write(EMPTY_CLUSTER)
             usedClusterCount += 1
@@ -1036,15 +1053,14 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
         } while (remaining > 0)
     }
 
-    fun getFileLength(entry: FATEntry): Int {
-        var accumulator = 0
-
-        var cluster = entry.entryID
+    /**
+     * @param start cluster number to start traverse
+     * @param action what to do. Argument: Int Current cluster number
+     */
+    private fun traverseClusters(start: Int, action: (Int) -> Unit) {
+        var cluster = start
 
         do {
-            println("[Clustered.getFileLength] current cluster: $cluster")
-
-
             // seek to cluster
             file.seekToCluster(cluster, 5)
             // get next cluster
@@ -1052,14 +1068,21 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
 
             if (cluster == nextCluster) throw VDIOException("Loop to self detected -- prev cluster: $cluster, next cluster: $nextCluster")
 
+            action(cluster)
+
+            cluster = nextCluster
+        } while (cluster in 1 until LEAF_CLUSTER)
+    }
+
+    fun getFileLength(entry: FATEntry): Int {
+        var accumulator = 0
+
+        traverseClusters(entry.entryID) {
             // get length for this cluster
             val len = file.readUnsignedShort()
             // add to accumulator
             accumulator += len
-
-
-            cluster = nextCluster
-        } while (cluster > 0 && cluster < LEAF_CLUSTER)
+        }
 
         return accumulator
     }
