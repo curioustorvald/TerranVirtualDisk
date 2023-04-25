@@ -155,7 +155,7 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
     }
 
     private val fatEntryIndices = HashMap<EntryID, Int>() // EntryID, FATIndex
-    private var fatEntryHighest = 2 to 0 // FATIndex, EntryID
+    private var fatEntryHighest = -1 to -1 // FATIndex, EntryID
 
     data class FATEntry(
             val charset: Charset,
@@ -219,7 +219,7 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
                     deleted.toInt(7)
             val cd = creationDate.toInt48Arr()
             val md = modificationDate.toInt48Arr()
-            val name = filename.toByteArray(charset)
+            val name = filename.toEntryName(240, charset)
 
             ba[3] = flags.toByte()
             System.arraycopy(cd, 0, ba, 4, 6)
@@ -381,6 +381,9 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
                 val fat = file.read(FAT_ENTRY_SIZE)
 
                 val mainPtr = fat.toInt24()
+
+//                println("[Clustered] FAT ptr: $mainPtr")
+
                 // Extended Entries
                 if (mainPtr >= 0xFFFF00) {
                     val parentPtr = fat.toInt24(3)
@@ -393,18 +396,25 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
 
                 if (mainPtr != 0) {
                     fatEntryCount += 1
+
+                    val fatIndex = blockOff / FAT_ENTRY_SIZE + block * FAT_ENTRY_SIZE / CLUSTER_SIZE
+                    fatEntryIndices[mainPtr] = fatIndex
+
+//                    println("[Clustered] - index: $fatIndex")
+
+                    if (fatIndex > fatEntryHighest.first) {
+//                        println("[Clustered] - new fatEntryHighest: $fatIndex to $mainPtr")
+                        fatEntryHighest = fatIndex to mainPtr
+                    }
                 }
 
-                val fatIndex = blockOff / FAT_ENTRY_SIZE + block * FAT_ENTRY_SIZE / CLUSTER_SIZE
-                fatEntryIndices[mainPtr] = fatIndex
-                if (fatIndex > fatEntryHighest.first) {
-                    fatEntryHighest = fatIndex to mainPtr
-                }
             }
         }
 
 
         fileTable.forEach { _, fatEntry -> fatEntry.validate() }
+
+//        println("fatEntryHighest = $fatEntryHighest")
     }
 
     private fun checkDiskCapacity(bytesToAdd: Int) {
@@ -668,7 +678,7 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
             fatmgrCreateNewEntry(charset, ptr, false, false, false, false, timeNow, timeNow).let {
                 // actually create zero-filled clusters
                 if (size > 0) {
-                    expandFile(size, ptr, fileType) // will increment usedClusterCount
+                    expandFile(size, HEAD_CLUSTER, ptr, fileType) // will increment usedClusterCount
                 }
 
                 return it
@@ -680,23 +690,27 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
      * Expands a file by creating new clusters then returns the pointer to the start of the new clusters.
      * NextPtr of the current cluster will be the beginning of the newly-added clusters
      */
-    private fun expandFile(sizeDelta: Int, currentCluster: Int, fileType: Int): Int {
-        checkDiskCapacity(sizeDelta)
+    private fun expandFile(sizeDelta: Int, prevCluster: Int, currentCluster: Int, fileType: Int): Int {
         val clustersToAdd = ceil(sizeDelta.toDouble() / CLUSTER_SIZE).toInt()
         val nextCluster = expandArchive(clustersToAdd)
-        initClusters(currentCluster, nextCluster, clustersToAdd, fileType)
+
+        if (nextCluster != currentCluster) throw InternalError()
+
+        initClusters(prevCluster, currentCluster, clustersToAdd, fileType)
         return nextCluster
     }
 
-    private fun initClusters(parentPtr: Int, clusterStart: Int, clusterCount: Int, fileType: Int) {
-        val ptrs = listOf(parentPtr) + (clusterStart until clusterStart+clusterCount) + listOf(NULL_CLUSTER)
+    private fun initClusters(parent: Int, current: Int, clusterCount: Int, fileType: Int) {
+        val ptrs = listOf(parent) + (current until current+clusterCount) + listOf(NULL_CLUSTER)
 
         for (k in 0 until clusterCount) {
-            file.seekToCluster(clusterStart + k)
+            file.seekToCluster(ptrs[k+1])
             file.write(fileType)
-            file.write((parentPtr != NULL_CLUSTER || k != 0).toInt())
+            file.write((ptrs[k] != NULL_CLUSTER || k != 0).toInt())
             file.writeInt24(ptrs[k])
-            file.writeInt24(ptrs[k+1])
+            file.writeInt24(ptrs[k+2])
+
+            TODO("Write contents size according to the fileType")
         }
     }
 
@@ -842,7 +856,7 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
         file.seekToCluster(ptr)
         var meta1 = file.read()
         var meta2 = file.read()
-        file.readInt24()
+        var prev = file.readInt24()
         var nextPtr = file.readInt24()
         var contentsSizeInThisCluster = file.readUnsignedShort()
 
@@ -850,20 +864,29 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
         var firstClusterOfFile = true
 
         var cursorInClusterFileArea = writeStartOffset
+
+
         while (writeCursor < writeLength + writeStartOffset) {
+            println("[Clustered] writeCursor = $writeCursor < ${writeLength + writeStartOffset}")
+
+
             // seek to next cluster
             // if cursorInCluster is larger than FILE_BLOCK_CONTENTS_SIZE, this operation will loop until the file cursor is on the right cluster
             while (cursorInClusterFileArea >= FILE_BLOCK_CONTENTS_SIZE) {
+
+                println("[Clustered]   cursorInClusterFileArea = $cursorInClusterFileArea")
+
+
                 // if next cluster is NULL,,,
                 if (nextPtr == 0) {
                     // allocate new cluster and then modify the nextPtr on the Archive
-                    expandFile(remaining, ptr, fileType)
+                    expandFile(remaining, prev, ptr, fileType)
                 }
                 ptr = nextPtr
                 file.seekToCluster(ptr)
                 meta1 = file.read()
                 meta2 = file.read()
-                file.readInt24()
+                prev = file.readInt24()
                 nextPtr = file.readInt24()
                 contentsSizeInThisCluster = file.readUnsignedShort()
 
@@ -883,7 +906,10 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
             file.seekToCluster(ptr, FILE_BLOCK_HEADER_SIZE + cursorInClusterFileArea)
 
             // cursor is moved to the right place, do the writing
-            val writeLengthOnThisCluster = minOf(remaining, FILE_BLOCK_CONTENTS_SIZE - cursorInClusterFileArea, contentsSizeInThisCluster)
+            val writeLengthOnThisCluster = minOf(remaining, FILE_BLOCK_CONTENTS_SIZE - cursorInClusterFileArea, FILE_BLOCK_CONTENTS_SIZE - contentsSizeInThisCluster)
+
+            println("[Clustered] writeLengthOnThisCluster = $writeLengthOnThisCluster (minOf $remaining, ${FILE_BLOCK_CONTENTS_SIZE - cursorInClusterFileArea}, ${FILE_BLOCK_CONTENTS_SIZE - contentsSizeInThisCluster})")
+
             // actually write
             file.write(buffer, bufferOffset + writeCursor - writeStartOffset, writeLengthOnThisCluster)
             remaining -= writeLengthOnThisCluster
@@ -891,12 +917,18 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
             cursorInClusterFileArea += writeLengthOnThisCluster
             // update the 'number of bytes in this cluster' number on the file
             file.seekToCluster(ptr, FILE_BLOCK_HEADER_SIZE - 2)
-            file.writeInt16(
-                    if (firstClusterOfWriting)
-                        writeLengthOnThisCluster + writeStartOffset
-                    else
-                        minOf(FILE_BLOCK_CONTENTS_SIZE, remaining)
-            )
+            val thisClusterContentsSizeBefore = file.readUnsignedShort()
+            val thisClusterContentsSizeAfter = if (firstClusterOfWriting)
+                                        writeLengthOnThisCluster + writeStartOffset
+                                    else
+                                        minOf(FILE_BLOCK_CONTENTS_SIZE, remaining)
+
+            println("[Clustered] sizebef: $thisClusterContentsSizeBefore, after: $thisClusterContentsSizeAfter")
+
+            if (thisClusterContentsSizeBefore < thisClusterContentsSizeAfter) {
+                file.seekToCluster(ptr, FILE_BLOCK_HEADER_SIZE - 2)
+                file.writeInt16(thisClusterContentsSizeAfter)
+            }
             firstClusterOfWriting = false
 
 
@@ -981,6 +1013,7 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
     fun setFileLength(entry: FATEntry, newLength: Int, fileType: Int) {
         var remaining = newLength
 
+        var parent = HEAD_CLUSTER
         var cluster = entry.entryID
 
         do {
@@ -1002,9 +1035,10 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
             }
             // create new cluster if end-of-cluster is prematurely reached
             else if (nextCluster == NULL_CLUSTER) {
-                nextCluster = expandFile(remaining, cluster, fileType)
+                nextCluster = expandFile(remaining, parent, cluster, fileType)
             }
 
+            parent = cluster
             cluster = nextCluster
         } while (remaining > 0)
     }
@@ -1015,10 +1049,16 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
         var cluster = entry.entryID
 
         do {
+            println("[Clustered.getFileLength] current cluster: $cluster")
+
+
             // seek to cluster
             file.seekToCluster(cluster, 5)
             // get next cluster
             val nextCluster = file.readInt24()
+
+            if (cluster == nextCluster) throw VDIOException("Loop to self detected -- prev cluster: $cluster, next cluster: $nextCluster")
+
             // get length for this cluster
             val len = file.readUnsignedShort()
             // add to accumulator
