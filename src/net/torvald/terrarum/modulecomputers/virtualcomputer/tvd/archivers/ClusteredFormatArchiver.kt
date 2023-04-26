@@ -136,7 +136,7 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
             // meta1 (type:dir)
             it[0] = 1
             // meta2 (persistent:true)
-            it[1] = -128
+            it[1] = 0x80.toByte()
             // prev ptr
             it.writeInt24(HEAD_CLUSTER, 2)
             // next ptr
@@ -267,6 +267,19 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
                 }
 
                 return ba.sliceArray(0 until lengthAkku)
+            }
+        }
+
+        fun getInlinedLength(): Int {
+            extendedEntries.filter { it.toInt24() xor 0xFFFF10 < 16 }.let {
+                var lengthAkku = 0
+
+                it.forEach {
+                    val size = it[7].toUint()
+                    lengthAkku += size
+                }
+
+                return lengthAkku
             }
         }
 
@@ -555,12 +568,14 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
         spliceFAT(myEntryIndex + newBytesStart + 1, 0, newBytes)
     }
 
+    /**
+     * Unlike [writeBytes], this function will change the length of the file -- all the previous bytes will be replaced!
+     */
     private fun fatmgrSetInlineBytes(entry: FATEntry, infileBytes: ByteArray, fileType: Int) {
         val myEntryIndex = fatEntryIndices[entry.entryID]
-                ?: throw IllegalArgumentException("No such file with following ID: ${entry.entryID}")
+                ?: throw IllegalArgumentException("No such file with following ID: ${entry.entryID.toHex()}")
 
-        if (!entry.isInline) throw IllegalArgumentException("File is not inline (ID: ${entry.entryID})")
-        if (entry.hasExtraEntryWithType { it xor 0xFFFF10 < 16 }) throw IllegalArgumentException("File is already allocated and is inline (ID: ${entry.entryID})")
+        if (!entry.isInline) throw IllegalArgumentException("File is not inline (ID: ${entry.entryID.toHex()})")
 
         val oldExtendedEntryCount = entry.extendedEntries.size
 
@@ -716,7 +731,7 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
         for (k in 0 until clusterCount) {
             file.seekToCluster(ptrs[k+1])
             file.write(fileType)
-            file.write((ptrs[k] != NULL_CLUSTER || k != 0).toInt())
+            file.write(0)
             file.writeInt24(ptrs[k])
             file.writeInt24(ptrs[k+2])
 
@@ -796,15 +811,19 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
         val stride = (FATs.size - deleteCount) * FAT_ENTRY_SIZE
         val seekpos = 2L* CLUSTER_SIZE + insertPos*FAT_ENTRY_SIZE
 
+
         // moving one FAT at a time to constrain the memory footprint
         val forRange = if (stride > 0)
-            2L*CLUSTER_SIZE + fatEntryCount* FAT_ENTRY_SIZE downTo seekpos step CLUSTER_SIZE.toLong()
+            2L*CLUSTER_SIZE + (fatEntryCount - 1) * FAT_ENTRY_SIZE downTo seekpos step CLUSTER_SIZE.toLong()
         else if (stride < 0)
-            seekpos..2L*CLUSTER_SIZE + fatEntryCount* FAT_ENTRY_SIZE step CLUSTER_SIZE.toLong()
+            seekpos..2L*CLUSTER_SIZE + (fatEntryCount - 1) * FAT_ENTRY_SIZE step CLUSTER_SIZE.toLong()
         else
             LongRange.EMPTY
 
+        println("[Clustered] splice delete=$deleteCount, add=${FATs.size}; stride=$stride, fatEntryCount=$fatEntryCount, forRange=${forRange.first.toInt().toHex()} to ${forRange.last.toInt().toHex()}")
+
         for (startOffset in forRange) {
+            println("[Clustered]   moving bytes at ${startOffset.toInt().toHex()} to ${(startOffset + stride).toInt().toHex()}")
             file.seek(startOffset)
             val bytes = file.read(CLUSTER_SIZE)
             file.seek(startOffset + stride)
@@ -871,7 +890,6 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
         var contentsSizeInThisCluster = file.readUnsignedShort()
 
         var firstClusterOfWriting = true
-        var firstClusterOfFile = true
 
         var cursorInClusterFileArea = writeStartOffset
 
@@ -901,22 +919,25 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
                 contentsSizeInThisCluster = file.readUnsignedShort()
 
                 cursorInClusterFileArea -= FILE_BLOCK_CONTENTS_SIZE
-
-                firstClusterOfFile = false
             }
 
 
             // mark the cluster as "dirty"
             file.seekToCluster(ptr)
-            file.write(meta1.and(0xEF) or 32)
-            file.write(meta2.and(0xFE) or firstClusterOfFile.toInt())
+            file.write(meta1.and(0xEF) or 16)
+            file.write(meta2)
 
 
             // at the end of the skip-run, position the file to the right place
             file.seekToCluster(ptr, FILE_BLOCK_HEADER_SIZE + cursorInClusterFileArea)
 
             // cursor is moved to the right place, do the writing
-            val writeLengthOnThisCluster = minOf(remaining, FILE_BLOCK_CONTENTS_SIZE - cursorInClusterFileArea, FILE_BLOCK_CONTENTS_SIZE - contentsSizeInThisCluster)
+            val writeLengthOnThisCluster =
+                    listOf(remaining,
+                            FILE_BLOCK_CONTENTS_SIZE - cursorInClusterFileArea,
+                            FILE_BLOCK_CONTENTS_SIZE - contentsSizeInThisCluster
+                    ).filter { it > 0 }.minOf { it }.toInt()
+
 
             println("[Clustered] writeLengthOnThisCluster = $writeLengthOnThisCluster (minOf $remaining, ${FILE_BLOCK_CONTENTS_SIZE - cursorInClusterFileArea}, ${FILE_BLOCK_CONTENTS_SIZE - contentsSizeInThisCluster})")
 
@@ -1077,11 +1098,16 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
     fun getFileLength(entry: FATEntry): Int {
         var accumulator = 0
 
-        traverseClusters(entry.entryID) {
-            // get length for this cluster
-            val len = file.readUnsignedShort()
-            // add to accumulator
-            accumulator += len
+        if (entry.entryID in INLINE_FILE_CLUSTER_BASE..INLINE_FILE_CLUSTER_LAST) {
+            accumulator += entry.getInlinedLength()
+        }
+        else {
+            traverseClusters(entry.entryID) {
+                // get length for this cluster
+                val len = file.readUnsignedShort()
+                // add to accumulator
+                accumulator += len
+            }
         }
 
         return accumulator
