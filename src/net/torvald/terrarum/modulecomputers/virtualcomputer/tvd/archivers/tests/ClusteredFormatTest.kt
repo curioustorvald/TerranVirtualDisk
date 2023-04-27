@@ -94,6 +94,10 @@ fun main(args: Array<String>) {
 
 
     println("Testing RENUM by allocating more FATs")
-    repeat(32) { DOM.allocateFile(20, 0, "FAT Filler $it") }
+    repeat(32) {
+        val testmarker = "########ContentNum $it".toByteArray(charset)
+        DOM.allocateFile(testmarker.size, 0, "FAT Filler $it").let {
+        DOM.writeBytes(it, testmarker, 0, testmarker.size, 0, 0)
+    } }
     println("== Check the archive now ==")
 }
