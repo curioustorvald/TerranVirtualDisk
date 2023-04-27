@@ -1,5 +1,6 @@
 import net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.archivers.ClusteredFormatDOM
 import java.io.File
+import java.util.*
 
 /**
  * Created by minjaesong on 2023-04-23.
@@ -68,9 +69,31 @@ fun main(args: Array<String>) {
     DOM.writeBytes(multisectorfile, superlongtext, 0, superlongtext.size, 0, 0)
     DOM.writeBytes(multisectorfile, "HAI~".toByteArray(charset), 0, 4, 12, 0)
 
+    val multisectorLength = DOM.getFileLength(multisectorfile)
+    println("Size of the multisector file: $multisectorLength bytes")
+    val whatsWritten2 = DOM.readBytes(multisectorfile, multisectorLength, 0)
+
+
     println("Writing an inline file")
     val shorttext = inlinetext.toByteArray(charset)
     DOM.writeBytes(inlineFile, shorttext, 0, shorttext.size, 0, 0)
 
     println(whatsWritten.toString(charset))
+    println(whatsWritten2.toString(charset))
+
+    println("Using iterator:")
+    DOM.getFileIterator(multisectorfile.entryID).forEach {
+        print(it.toChar())
+    }
+    println()
+
+
+    println("\n\n== Test 1 is complete. Check the archive, then hit Return to continue ==\n\n")
+    print("> "); Scanner(System.`in`).nextLine()
+
+
+
+    println("Testing RENUM by allocating more FATs")
+    repeat(32) { DOM.allocateFile(20, 0, "FAT Filler $it") }
+    println("== Check the archive now ==")
 }

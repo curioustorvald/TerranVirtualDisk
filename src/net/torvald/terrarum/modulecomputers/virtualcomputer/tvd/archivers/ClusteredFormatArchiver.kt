@@ -68,7 +68,7 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
         private val EMPTY_FAT_ENTRY = ByteArray(FAT_ENTRY_SIZE)
 
         const val FILE_BLOCK_HEADER_SIZE = 10 // as per spec
-        const val FILE_BLOCK_CONTENTS_SIZE = CLUSTER_SIZE - FILE_BLOCK_HEADER_SIZE
+        const val FILE_BLOCK_CONTENTS_SIZE = CLUSTER_SIZE - FILE_BLOCK_HEADER_SIZE // typecally 4086
 
         const val NULL_CLUSTER = 0
         const val HEAD_CLUSTER = 0
@@ -77,6 +77,7 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
         const val INLINE_FILE_CLUSTER_LAST = 0xFFFDFF
 
         const val INLINED_ENTRY_BYTES = FAT_ENTRY_SIZE - 8 // typically 248
+        const val FILENAME_PRIMARY_LENGTH = FAT_ENTRY_SIZE - 16 // typically 240
 
         const val INLINING_THRESHOLD = INLINED_ENTRY_BYTES * 8 // compare with <= -- files up to this size is recommended to be inlined
 
@@ -225,7 +226,7 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
          * Called by ClusteredFormatDOM, this function assists the global renum operation.
          */
         internal fun _fatRenum(increment: Int) {
-            if (entryID > 2) {
+            if (entryID > 2 && entryID < INLINE_FILE_CLUSTER_BASE) {
                 entryID += increment
                 extendedEntries.forEach {
                     it.renumFAT(increment)
@@ -608,6 +609,18 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
         spliceFAT(myEntryIndex + 1, oldExtendedEntryCount, entry.extendedEntries)
     }
 
+    private fun fatmgrSetFilename(entry: FATEntry, name: ByteArray) {
+        name.trimNull().let { name ->
+
+            if (name.size <= FILENAME_PRIMARY_LENGTH) {
+
+            }
+            else {
+                val filenameHead = name.sliceArray(0 until FILENAME_PRIMARY_LENGTH)
+            }
+        }
+    }
+
     /**
      * Rewrites FATs on the `fileTable` to the Archive, then updates the `fatEntryIndices` and `fatEntryHighest`.
      *
@@ -863,6 +876,7 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
             file.write(bytes)
         }
 
+        println("[Clustered] incrementing fatEntryCount by ${FATs.size - deleteCount} (${fatEntryCount} -> ${fatEntryCount + FATs.size - deleteCount})")
         fatEntryCount += FATs.size - deleteCount
 
         file.seek(seekpos)
@@ -1301,6 +1315,14 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
         this.write(value.ushr(16).toInt())
         this.write(value.ushr( 8).toInt())
         this.write(value.ushr( 0).toInt())
+    }
+    private fun ByteArray.trimNull(): ByteArray {
+        var cnt = this.size - 1
+        while (cnt >= 0) {
+            if (this[cnt] != 0.toByte()) break
+            cnt -= 1
+        }
+        return this.sliceArray(0..cnt)
     }
 }
 
