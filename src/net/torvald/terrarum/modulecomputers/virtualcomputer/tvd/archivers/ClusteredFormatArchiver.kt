@@ -113,6 +113,7 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
         const val LEAF_CLUSTER = 0xFFFFFF
         const val INLINE_FILE_CLUSTER_BASE = 0xF00000
         const val INLINE_FILE_CLUSTER_LAST = 0xFFFDFF
+        const val EXTENDED_ENTRIES_BASE = 0xFFFF00
 
         const val INLINED_ENTRY_BYTES = FAT_ENTRY_SIZE - 8 // typically 248
         const val FILENAME_PRIMARY_LENGTH = FAT_ENTRY_SIZE - 16 // typically 240
@@ -441,7 +442,7 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
 //                println("[Clustered] FAT ptr: $mainPtr")
 
                 // Extended Entries
-                if (mainPtr >= 0xFFFF00) {
+                if (mainPtr >= EXTENDED_ENTRIES_BASE) {
                     val parentPtr = fat.toInt24(3)
                     fileTable[parentPtr]?.extendedEntries?.add(fat) ?: notifyError(IllegalStateException("Extended Entry 0x${parentPtr.toHex().drop(2)} is reached but no main FAT entry (ID $parentPtr) was found"))
                 }
@@ -490,9 +491,14 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
 
         // renumber my FAT
         HashMap<Int, FATEntry>().let { newFileTable ->
-            fileTable.entries.forEach { (clusternum, attribs) ->
-                attribs._fatRenum(increment)
-                newFileTable[clusternum + increment] = attribs
+            fileTable.entries.forEach { (clusternum, entry) ->
+
+                print("[Clustered] renum($increment) -- writing new fileTable: entryID $clusternum (actual ID: ${entry.entryID}) => ")
+
+                entry._fatRenum(increment)
+                newFileTable[clusternum.incClusterNum(increment)] = entry
+
+                println("entryID ${clusternum.incClusterNum(increment)} (actual ID: ${entry.entryID})")
             }
             fileTable = newFileTable
         }
@@ -519,11 +525,17 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
 
         // renumber FAT on the Archive
         println("[Clustered] renum($increment) -- about to renum FATs (fatClusterCount = $fatClusterCount, FATs: $fatEntryCount/${fatClusterCount * FATS_PER_CLUSTER})")
+        fatEntryIndices.clear()
         for (kluster in 0 until fatEntryCount) {
             file.seekToFAT(kluster)
             val fat = file.read(FAT_ENTRY_SIZE).renumFAT(increment)
             file.seekToFAT(kluster)
             file.write(fat)
+
+            val entryID = fat.toInt24(0)
+            if (entryID < EXTENDED_ENTRIES_BASE) {
+                fatEntryIndices[entryID] = kluster
+            }
         }
         for (qluster in fatEntryCount until fatClusterCount * FATS_PER_CLUSTER) {
             file.seekToFAT(qluster)
@@ -539,6 +551,13 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
     }
 
     private fun fatmgrUpdateModificationDate(entry: FATEntry, time: Long) {
+        println("[Clustered] fatmgrUpdateModificationDate on ${entry.entryID}")
+
+        println("[Clustered] fatEntryIndices:")
+        fatEntryIndices.forEach { id, fatIndex ->
+            println("                entryID ${id.toHex()} -> fatIndex ${(2 * CLUSTER_SIZE + fatIndex * FAT_ENTRY_SIZE).toHex()}")
+        }
+
         file.seekToFAT(fatEntryIndices[entry.entryID]!!, 10)
         file.writeInt48(time)
     }
