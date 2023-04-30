@@ -1,4 +1,5 @@
 import net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.archivers.ClusteredFormatDOM
+import net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.toHex
 import java.io.File
 import java.util.*
 
@@ -38,6 +39,11 @@ val superlongtext = """Zeroth Byte 000011111111111111112222222222222222333333333
 val inlinetext = "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum."
 
 fun main(args: Array<String>) {
+    fun testPause(msg: String) {
+        println("\n\n== $msg ==\n\n")
+        print("> "); Scanner(System.`in`).nextLine()
+    }
+
 
     val archiveFile = File("./testclustered.tevd")
 
@@ -78,26 +84,30 @@ fun main(args: Array<String>) {
     val shorttext = inlinetext.toByteArray(charset)
     DOM.writeBytes(inlineFile, shorttext, 0, shorttext.size, 0, 0)
 
-    println(whatsWritten.toString(charset))
-    println(whatsWritten2.toString(charset))
+//    println(whatsWritten.toString(charset))
+//    println(whatsWritten2.toString(charset))
 
     println("Using iterator:")
-    DOM.getFileIterator(multisectorfile.entryID).forEach {
-        print(it.toChar())
-    }
-    println()
+//    DOM.getFileIterator(multisectorfile.entryID).forEach {
+//        print(it.toChar())
+//    }
+//    println()
 
 
-    println("\n\n== Test 1 is complete. Check the archive, then hit Return to continue ==\n\n")
-    print("> "); Scanner(System.`in`).nextLine()
+
+    testPause("Test 1 is complete. Check the archive, then hit Return to continue")
 
 
 
     println("Testing RENUM by allocating more FATs")
-    repeat(32) {
-        val testmarker = "########ContentNum $it".toByteArray(charset)
-        DOM.allocateFile(testmarker.size, 0, "FAT Filler $it").let {
-        DOM.writeBytes(it, testmarker, 0, testmarker.size, 0, 0)
+    repeat(25) { rpt ->
+        val testmarker = "########ContentNum $rpt".toByteArray(charset)
+        DOM.allocateFile(testmarker.size, 0, "FAT Filler $rpt").let { entry ->
+            println("Entry ${entry.entryID.toHex()}, name: ${entry.filename}, fatEntryIndices: ${DOM.fatEntryIndices[entry.entryID]}")
+            DOM.writeBytes(entry, testmarker, 0, testmarker.size, 0, 0)
     } }
-    println("== Check the archive now ==")
+
+
+
+    testPause("Test 2 is complete. Check the archive, then hit Return to continue")
 }
