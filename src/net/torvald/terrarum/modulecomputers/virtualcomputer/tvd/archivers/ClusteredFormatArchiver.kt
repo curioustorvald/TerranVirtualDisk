@@ -94,8 +94,16 @@ private fun ByteArray.renumCluster(increment: Int): ByteArray {
 
 class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charset, val throwErrorOnReadError: Boolean = false) {
 
-    private inline fun testPause(msg: String) {
-//        println("\n\n== $msg ==\n\n"); print("> "); Scanner(System.`in`).nextLine()
+    private inline fun testPause(msg: Any?) {
+//        dbgprintln("\n\n== $msg ==\n\n"); dbgprint("> "); Scanner(System.`in`).nextLine()
+    }
+
+    private inline fun dbgprint(msg: Any? = "") {
+        print(msg)
+    }
+
+    private inline fun dbgprintln(msg: Any? = "") {
+        println(msg)
     }
 
     companion object {
@@ -106,7 +114,8 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
         private val EMPTY_FAT_ENTRY = ByteArray(FAT_ENTRY_SIZE)
 
         const val FILE_BLOCK_HEADER_SIZE = 10 // as per spec
-        const val FILE_BLOCK_CONTENTS_SIZE = CLUSTER_SIZE - FILE_BLOCK_HEADER_SIZE // typecally 4086
+        const val FILE_BLOCK_OFFSET_CONTENT_LEN = 8 // as per spec
+        const val FILE_BLOCK_CONTENTS_SIZE = CLUSTER_SIZE - FILE_BLOCK_HEADER_SIZE // typically 4086
 
         const val NULL_CLUSTER = 0
         const val HEAD_CLUSTER = 0
@@ -414,7 +423,7 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
             usedClusterCount += 1
         }
 
-        println("[Clustered] usedClusterCount: $usedClusterCount")
+        dbgprintln("[Clustered] usedClusterCount: $usedClusterCount")
     }
 
     private fun readMeta() {
@@ -439,7 +448,7 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
 
                 val mainPtr = fat.toInt24()
 
-//                println("[Clustered] FAT ptr: $mainPtr")
+//                dbgprintln("[Clustered] FAT ptr: $mainPtr")
 
                 // Extended Entries
                 if (mainPtr >= EXTENDED_ENTRIES_BASE) {
@@ -457,10 +466,10 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
                     val fatIndex = blockOff / FAT_ENTRY_SIZE + block * FAT_ENTRY_SIZE / CLUSTER_SIZE
                     fatEntryIndices[mainPtr] = fatIndex
 
-//                    println("[Clustered] - index: $fatIndex")
+//                    dbgprintln("[Clustered] - index: $fatIndex")
 
                     if (fatIndex > fatEntryHighest.first) {
-//                        println("[Clustered] - new fatEntryHighest: $fatIndex to $mainPtr")
+//                        dbgprintln("[Clustered] - new fatEntryHighest: $fatIndex to $mainPtr")
                         fatEntryHighest = fatIndex to mainPtr
                     }
                 }
@@ -471,7 +480,7 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
 
         fileTable.forEach { _, fatEntry -> fatEntry.validate() }
 
-//        println("fatEntryHighest = $fatEntryHighest")
+//        dbgprintln("fatEntryHighest = $fatEntryHighest")
     }
 
     private fun checkDiskCapacity(bytesToAdd: Int) {
@@ -493,12 +502,12 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
         HashMap<Int, FATEntry>().let { newFileTable ->
             fileTable.entries.forEach { (clusternum, entry) ->
 
-                print("[Clustered] renum($increment) -- writing new fileTable: entryID $clusternum (actual ID: ${entry.entryID}) => ")
+                dbgprint("[Clustered] renum($increment) -- writing new fileTable: entryID $clusternum (actual ID: ${entry.entryID}) => ")
 
                 entry._fatRenum(increment)
                 newFileTable[clusternum.incClusterNum(increment)] = entry
 
-                println("entryID ${clusternum.incClusterNum(increment)} (actual ID: ${entry.entryID})")
+                dbgprintln("entryID ${clusternum.incClusterNum(increment)} (actual ID: ${entry.entryID})")
             }
             fileTable = newFileTable
         }
@@ -506,7 +515,7 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
         // copy over clusters, renumber any applicable cluster numbers before copying
         // using file.length().div(CLUSTER_SIZE) instead of usedClusterCount to really access every clusters
         for (clusternum in oldUsedClusterCount - 1L downTo 2 + fatClusterCount) {
-            println("[Clustered] renum($increment) -- moving cluster ${clusternum.toHex()} to ${(clusternum + increment).toHex()}")
+            dbgprintln("[Clustered] renum($increment) -- moving cluster ${clusternum.toHex()} to ${(clusternum + increment).toHex()}")
 
             file.seekToCluster(clusternum)
 
@@ -524,7 +533,7 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
         fatClusterCount += increment
 
         // renumber FAT on the Archive
-        println("[Clustered] renum($increment) -- about to renum FATs (fatClusterCount = $fatClusterCount, FATs: $fatEntryCount/${fatClusterCount * FATS_PER_CLUSTER})")
+        dbgprintln("[Clustered] renum($increment) -- about to renum FATs (fatClusterCount = $fatClusterCount, FATs: $fatEntryCount/${fatClusterCount * FATS_PER_CLUSTER})")
         fatEntryIndices.clear()
         for (kluster in 0 until fatEntryCount) {
             file.seekToFAT(kluster)
@@ -551,12 +560,12 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
     }
 
     private fun fatmgrUpdateModificationDate(entry: FATEntry, time: Long) {
-        println("[Clustered] fatmgrUpdateModificationDate on ${entry.entryID}")
+        dbgprintln("[Clustered] fatmgrUpdateModificationDate on ${entry.entryID}")
 
-        println("[Clustered] fatEntryIndices:")
-        fatEntryIndices.forEach { id, fatIndex ->
-            println("                entryID ${id.toHex()} -> fatIndex ${(2 * CLUSTER_SIZE + fatIndex * FAT_ENTRY_SIZE).toHex()}")
-        }
+//        dbgprintln("[Clustered] fatEntryIndices:")
+//        fatEntryIndices.forEach { id, fatIndex ->
+//            dbgprintln("                entryID ${id.toHex()} -> fatIndex ${(2 * CLUSTER_SIZE + fatIndex * FAT_ENTRY_SIZE).toHex()}")
+//        }
 
         file.seekToFAT(fatEntryIndices[entry.entryID]!!, 10)
         file.writeInt48(time)
@@ -593,7 +602,7 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
         fatEntryHighest = nextIndex to entry.entryID
         fatEntryIndices[entry.entryID] = nextIndex
 
-        println("[Clustered] fatmgrAddEntry -- entryID: ${entry.entryID.toHex()}, FAT index: ${fatEntryIndices[entry.entryID]}")
+        dbgprintln("[Clustered] fatmgrAddEntry -- entryID: ${entry.entryID.toHex()}, FAT index: ${fatEntryIndices[entry.entryID]}")
     }
 
     private fun fatmgrAllocateInlineFile(entry: FATEntry, size: Int, fileType: Int) {
@@ -628,13 +637,13 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
         }
 
 
-        println("[Clustered] fatmgrAllocateInlineFile1 -- entryID: ${entry.entryID.toHex()}, FAT index: ${fatEntryIndices[entry.entryID]}")
+        dbgprintln("[Clustered] fatmgrAllocateInlineFile1 -- entryID: ${entry.entryID.toHex()}, FAT index: ${fatEntryIndices[entry.entryID]}")
 
         // splice the bytearrays into the Archive
         spliceFAT(myEntryIndex + newBytesStart + 1, 0, newBytes)
 
 
-        println("[Clustered] fatmgrAllocateInlineFile2 -- entryID: ${entry.entryID.toHex()}, FAT index: ${fatEntryIndices[entry.entryID]}")
+        dbgprintln("[Clustered] fatmgrAllocateInlineFile2 -- entryID: ${entry.entryID.toHex()}, FAT index: ${fatEntryIndices[entry.entryID]}")
     }
 
     /**
@@ -771,7 +780,7 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
 
         val ptr = if (size <= INLINING_THRESHOLD) getNextFreeInlineCluster() else usedClusterCount
 
-        println("[Clustered] allocateFile where: ${ptr.toHex()}")
+        dbgprintln("[Clustered] allocateFile where: ${ptr.toHex()}")
 
         if (ptr in INLINE_FILE_CLUSTER_BASE..INLINE_FILE_CLUSTER_LAST) {
             fatmgrCreateNewEntry(charset, ptr, filename, false, false, false, false, timeNow, timeNow, fileType == 1).let {
@@ -798,29 +807,50 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
      * @return Cluster ID of the head of the new cluster; `LEAF_CLUSTER` if sizeDelta < 0; `currentCluster` if sizeDelta == 0
      */
     private fun expandFile(sizeDelta: Int, prevCluster: Int, currentCluster: Int, fileType: Int): Int {
+        dbgprintln("[Clustered] expandFile(sizeDelta=$sizeDelta, prevCluster=$prevCluster, currentCluster=$currentCluster, fileType=$fileType)")
+
         if (sizeDelta < 0) return LEAF_CLUSTER
         if (sizeDelta == 0) return currentCluster
 
         val clustersToAdd = ceil(sizeDelta.toDouble() / CLUSTER_SIZE).toInt()
         val nextCluster = expandArchive(clustersToAdd)
 
-        if (nextCluster != currentCluster) throw InternalError()
+        // expanding on existing
+        if (nextCluster != currentCluster) {
+            dbgprintln("[Clustered] expand on existing cluster? (currentCluster=$currentCluster, nextCluster=$nextCluster)")
+
+            // set the next cluster (previously 0xFFFFFF)
+            file.seekToCluster(currentCluster, 5)
+            file.writeInt24(nextCluster)
+        }
 
         // increment content size of this cluster
-        file.seekToCluster(currentCluster, 8)
+        file.seekToCluster(currentCluster, FILE_BLOCK_OFFSET_CONTENT_LEN)
         val currentContentSize = file.readUshortBig()
         val sizeNumToWrite = minOf(FILE_BLOCK_CONTENTS_SIZE, currentContentSize + sizeDelta)
         val sizeDiscount = sizeNumToWrite - currentContentSize
-        file.seekToCluster(currentCluster, 8)
+
+        dbgprintln("[Clustered] sizeNumToWrite=$sizeNumToWrite, currentContentSize=$currentContentSize, sizeDiscount=$sizeDiscount")
+
+        file.seekToCluster(currentCluster, FILE_BLOCK_OFFSET_CONTENT_LEN)
         file.writeInt16(sizeNumToWrite)
 
-        initClusters(sizeDelta - sizeDiscount, prevCluster, currentCluster, clustersToAdd, fileType)
+        dbgprintln("[Clustered] expandFile -- writing contentSize $sizeNumToWrite to cluster ${currentCluster.toHex()}")
+
+        if (nextCluster != currentCluster)
+            initClusters(sizeDelta - sizeDiscount, currentCluster, nextCluster, clustersToAdd, fileType)
+
+        else
+            initClusters(sizeDelta - sizeDiscount, prevCluster, currentCluster, clustersToAdd, fileType)
         
         return nextCluster
     }
 
-    private fun initClusters(sizeDelta: Int, parent: Int, current: Int, clusterCount: Int, fileType: Int) {
-        val ptrs = listOf(parent) + (current until current+clusterCount) + listOf(LEAF_CLUSTER)
+    private fun initClusters(sizeDelta: Int, parent: Int, current: Int, clusterCount: Int, fileType: Int, next: Int? = null) {
+        val ptrs = if (next == null)
+            listOf(parent) + (current until current+clusterCount) + listOf(LEAF_CLUSTER)
+        else
+            listOf(parent, current) + (next until next+clusterCount) + listOf(LEAF_CLUSTER)
 
         var remaining = sizeDelta
         for (k in 0 until clusterCount) {
@@ -833,8 +863,10 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
             val currentContentSize = file.readUshortBig()
             val sizeNumToWrite = minOf(FILE_BLOCK_CONTENTS_SIZE, currentContentSize + remaining)
             remaining -= (sizeNumToWrite - currentContentSize)
-            file.seekToCluster(ptrs[k+1], 8)
+            file.seekToCluster(ptrs[k+1], FILE_BLOCK_OFFSET_CONTENT_LEN)
             file.writeInt16(sizeNumToWrite)
+
+            dbgprintln("[Clustered] initClusters -- writing contentSize $sizeNumToWrite to cluster ${ptrs[k+1].toHex()}")
         }
     }
 
@@ -901,7 +933,7 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
         if (deleteCount > fatEntryCount) throw IllegalArgumentException("deleteCount ($deleteCount) is larger than the number of FAT entries in the Archive ($fatEntryCount)")
 
 
-        println("[Clustered] spliceFAT called; insertPos=$insertPos(foff: ${(2 * CLUSTER_SIZE + insertPos * FAT_ENTRY_SIZE).toHex()}), deleteCount=$deleteCount, FATs=(${FATs.size})[${FATs.joinToString(" ; ") { it.sliceArray(0..15).joinToString(" ") { it.toUint().toString(16).padStart(2, '0').toUpperCase() } }}], current FAT cap: ${fatClusterCount * FATS_PER_CLUSTER}")
+        dbgprintln("[Clustered] spliceFAT called; insertPos=$insertPos(foff: ${(2 * CLUSTER_SIZE + insertPos * FAT_ENTRY_SIZE).toHex()}), deleteCount=$deleteCount, FATs=(${FATs.size})[${FATs.joinToString(" ; ") { it.sliceArray(0..15).joinToString(" ") { it.toUint().toString(16).padStart(2, '0').toUpperCase() } }}], current FAT cap: ${fatClusterCount * FATS_PER_CLUSTER}")
 
 
         // grow FAT area?
@@ -925,7 +957,7 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
         val seekpos = 2L* CLUSTER_SIZE + insertPos*FAT_ENTRY_SIZE
 
 
-        // moving one FAT at a time to constrain the memory footprint
+        // moving one FAT at a time to constrain the memory footdbgprint
         val forRange = if (stride > 0)
             2L*CLUSTER_SIZE + (fatEntryCount - 1) * FAT_ENTRY_SIZE downTo seekpos step FAT_ENTRY_SIZE.toLong()
         else if (stride < 0)
@@ -933,10 +965,10 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
         else
             LongRange.EMPTY
 
-        println("[Clustered]     splice delete=$deleteCount, add=${FATs.size}; stride=$stride, fatEntryCount=$fatEntryCount, forRange=${if (forRange.isEmpty()) "(empty)" else "${forRange.first.toHex()} to ${forRange.last.toHex()}"}")
+        dbgprintln("[Clustered]     splice delete=$deleteCount, add=${FATs.size}; stride=$stride, fatEntryCount=$fatEntryCount, forRange=${if (forRange.isEmpty()) "(empty)" else "${forRange.first.toHex()} to ${forRange.last.toHex()}"}")
 
         for (startOffset in forRange) {
-            println("[Clustered]         moving FAT at ${startOffset.toHex()} to ${(startOffset + stride).toHex()}")
+            dbgprintln("[Clustered]         moving FAT at ${startOffset.toHex()} to ${(startOffset + stride).toHex()}")
             file.seek(startOffset)
             val bytes = file.read(FAT_ENTRY_SIZE)
             file.seek(startOffset + stride)
@@ -944,15 +976,15 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
 
             val entryID = bytes.toInt24()
 
-            println("[Clustered]           FAT at ${startOffset.toHex()}: ${bytes.sliceArray(0..15).joinToString(" ") { it.toUint().toString(16).padStart(2, '0').toUpperCase() }}")
+            dbgprintln("[Clustered]           FAT at ${startOffset.toHex()}: ${bytes.sliceArray(0..15).joinToString(" ") { it.toUint().toString(16).padStart(2, '0').toUpperCase() }}")
 
             if (entryID in 2..INLINE_FILE_CLUSTER_BASE) {
-                print("[Clustered]         trying to change FAT Index for entry $entryID")
+                dbgprint("[Clustered]         trying to change FAT Index for entry $entryID")
                 fatEntryIndices[entryID]?.let {
-                    print("....${it} -> ${(it + strideByEntry)}")
+                    dbgprint("....${it} -> ${(it + strideByEntry)}")
                     fatEntryIndices[entryID] = it + strideByEntry
                 }
-                println()
+                dbgprintln()
             }
         }
 
@@ -966,14 +998,14 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
 
         // write new FATs
         if (FATs.isNotEmpty()) {
-            println("[Clustered]     writing FATs at file offset ${seekpos.toHex()}")
+            dbgprintln("[Clustered]     writing FATs at file offset ${seekpos.toHex()}")
             file.seek(seekpos)
             FATs.forEach { bytes ->
                 file.write(bytes)
             }
         }
 
-        println("[Clustered]     incrementing fatEntryCount by ${FATs.size - deleteCount} (${fatEntryCount} -> ${fatEntryCount + FATs.size - deleteCount})")
+        dbgprintln("[Clustered]     incrementing fatEntryCount by ${FATs.size - deleteCount} (${fatEntryCount} -> ${fatEntryCount + FATs.size - deleteCount})")
         fatEntryCount += FATs.size - deleteCount
 
         file.seek(seekpos)
@@ -1004,7 +1036,9 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
     }
 
     fun writeBytes(entry: FATEntry, buffer: ByteArray, bufferOffset: Int, writeLength: Int, writeStartOffset: Int, fileType: Int) {
-        checkDiskCapacity(writeStartOffset + writeLength - getFileLength(entry))
+        val addedBytes = writeStartOffset + writeLength - getFileLength(entry)
+
+        checkDiskCapacity(addedBytes)
 
         if (entry.isInline) return writeBytesInline(entry, buffer, bufferOffset, writeLength, writeStartOffset, fileType)
 
@@ -1013,6 +1047,7 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
 
         var ptr = entry.entryID
         file.seekToCluster(ptr)
+        dbgprintln("[Clustered]   file.seekToCluster $ptr")
         var meta1 = file.read()
         var meta2 = file.read()
         var prev = file.readInt24()
@@ -1025,23 +1060,28 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
 
 
         while (writeCursor < writeLength + writeStartOffset) {
-            println("[Clustered] writeCursor = $writeCursor < ${writeLength + writeStartOffset}")
+            dbgprintln("[Clustered] writeCursor = $writeCursor < ${writeLength + writeStartOffset}")
 
 
             // seek to next cluster
             // if cursorInCluster is larger than FILE_BLOCK_CONTENTS_SIZE, this operation will loop until the file cursor is on the right cluster
             while (cursorInClusterFileArea >= FILE_BLOCK_CONTENTS_SIZE) {
 
-                println("[Clustered]   cursorInClusterFileArea = $cursorInClusterFileArea")
+                dbgprintln("[Clustered]   cursorInClusterFileArea = $cursorInClusterFileArea")
 
 
                 // if next cluster is NULL,,,
-                if (nextPtr == 0) {
+                if (nextPtr == LEAF_CLUSTER) {
                     // allocate new cluster and then modify the nextPtr on the Archive
-                    expandFile(remaining, prev, ptr, fileType)
+                    val sizeDelta = if (addedBytes > 0) addedBytes - writeLength + remaining else remaining
+                    dbgprintln("[Clustered]   expanding file (sizeDelta=$sizeDelta, prevCluster=$prev, currentCluster=$ptr, fileType=$fileType)")
+                    nextPtr = expandFile(sizeDelta, prev, ptr, fileType)
+
+                    firstClusterOfWriting = false
                 }
                 ptr = nextPtr
                 file.seekToCluster(ptr)
+                dbgprintln("[Clustered]   file.seekToCluster $ptr")
                 meta1 = file.read()
                 meta2 = file.read()
                 prev = file.readInt24()
@@ -1054,6 +1094,7 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
 
             // mark the cluster as "dirty"
             file.seekToCluster(ptr)
+            dbgprintln("[Clustered] file.seekToCluster (to mark dirty) $ptr")
             file.write(meta1.and(0xEF) or 16)
             file.write(meta2)
 
@@ -1069,7 +1110,7 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
                     ).filter { it > 0 }.minOf { it }.toInt()
 
 
-            println("[Clustered] writeLengthOnThisCluster = $writeLengthOnThisCluster (minOf $remaining, ${FILE_BLOCK_CONTENTS_SIZE - cursorInClusterFileArea}, ${FILE_BLOCK_CONTENTS_SIZE - contentsSizeInThisCluster})")
+            dbgprintln("[Clustered] writeLengthOnThisCluster = $writeLengthOnThisCluster (minOf $remaining, ${FILE_BLOCK_CONTENTS_SIZE - cursorInClusterFileArea}, ${FILE_BLOCK_CONTENTS_SIZE - contentsSizeInThisCluster})")
 
             // actually write
             file.write(buffer, bufferOffset + writeCursor - writeStartOffset, writeLengthOnThisCluster)
@@ -1077,18 +1118,19 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
             writeCursor += writeLengthOnThisCluster
             cursorInClusterFileArea += writeLengthOnThisCluster
             // update the 'number of bytes in this cluster' number on the file
-            file.seekToCluster(ptr, FILE_BLOCK_HEADER_SIZE - 2)
+            file.seekToCluster(ptr, FILE_BLOCK_OFFSET_CONTENT_LEN)
             val thisClusterContentsSizeBefore = file.readUshortBig()
             val thisClusterContentsSizeAfter = if (firstClusterOfWriting)
                                         writeLengthOnThisCluster + writeStartOffset
                                     else
                                         minOf(FILE_BLOCK_CONTENTS_SIZE, remaining)
 
-            println("[Clustered] sizebef: $thisClusterContentsSizeBefore, after: $thisClusterContentsSizeAfter")
+            dbgprintln("[Clustered] size before: $thisClusterContentsSizeBefore, after: $thisClusterContentsSizeAfter")
 
             if (thisClusterContentsSizeBefore < thisClusterContentsSizeAfter) {
-                file.seekToCluster(ptr, FILE_BLOCK_HEADER_SIZE - 2)
+                file.seekToCluster(ptr, FILE_BLOCK_OFFSET_CONTENT_LEN)
                 file.writeInt16(thisClusterContentsSizeAfter)
+                dbgprintln("[Clustered] writeBytes -- writing contentSize $thisClusterContentsSizeAfter to cluster ${ptr.toHex()}")
             }
             firstClusterOfWriting = false
 
@@ -1381,6 +1423,18 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
         this.seek(2L * CLUSTER_SIZE + index * FAT_ENTRY_SIZE + offset)
     }
     private fun RandomAccessFile.writeInt16(value: Int) {
+
+        if (value == 4098) {
+            dbgprintln("[WriteInt16] writing 4098")
+            val indentation = " ".repeat("[WriteInt16]".length + 4)
+            Thread.currentThread().stackTrace.forEachIndexed { index, it ->
+                if (index == 1)
+                    dbgprintln("[[WriteInt16]]> $it")
+                else if (index > 1)
+                    dbgprintln("$indentation$it")
+            }
+        }
+
         this.write(value.ushr(8))
         this.write(value.ushr(0))
     }
