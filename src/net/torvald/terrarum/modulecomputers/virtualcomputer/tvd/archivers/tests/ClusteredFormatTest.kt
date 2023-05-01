@@ -114,5 +114,5 @@ fun main(args: Array<String>) {
 
     DOM.writeBytes(longfile, "really long!".toByteArray(charset), 0, 12, 256, 1)
     DOM.writeBytes(longfile, "really long!".toByteArray(charset), 0, 12, 4096, 1)
-    // TODO write long enough bytes to longfile so that new cluster would be allocated -- hopefully setting writeStartOffset > 4096
+    // FIXME above line creates 4 extra empty clusters (0x0C..0x0F)
 }

@@ -344,7 +344,7 @@ class ClusteredFormatDOM(private val ARCHIVE: RandomAccessFile, val charset: Cha
 
     private val freeClusters = HashSet<EntryID>()
 
-    private val fatEntryIndices = HashMap<EntryID, Int>() // EntryID, FATIndex
+    /*private*/ val fatEntryIndices = HashMap<EntryID, Int>() // EntryID, FATIndex
     private var fatEntryHighest = -1 to -1 // FATIndex, EntryID
 
     private fun getTimeNow() = System.currentTimeMillis() / 1000
@@ -1316,17 +1316,24 @@ class ClusteredFormatDOM(private val ARCHIVE: RandomAccessFile, val charset: Cha
         if (freeClusters.isEmpty()) buildFreeClustersMap()
 
         // trim the archive if applicable
-        var ptr = Int.MAX_VALUE
+        var ptr = -1
         freeClusters.sortedDescending().let {
-            val k = 0
+            var k = 0
             while (k < it.size - 1) {
                 if (it[k] - 1 == it[k + 1]) {
                     ptr = it[k+1]
                 }
+
+                k += 1
             }
         }
-        ARCHIVE.setLength(CLUSTER_SIZE * ptr.toLong())
         usedClusterCount = ptr
+
+        if (usedClusterCount == -1) {
+            usedClusterCount = maxOf(2 + fatClusterCount, ARCHIVE.length().toInt() / CLUSTER_SIZE)
+        }
+
+        ARCHIVE.setLength(CLUSTER_SIZE * usedClusterCount.toLong())
 
         freeClusters.removeIf { it > usedClusterCount }
     }
@@ -1335,7 +1342,7 @@ class ClusteredFormatDOM(private val ARCHIVE: RandomAccessFile, val charset: Cha
 
     fun defrag(option: Int): List<Pair<EntryID, EntryID>> {
         defragInterruptRequested = false
-        trimArchive()
+        trimArchive() // will build freeClusters map if the map is empty
 
         val workReport = ArrayList<Pair<EntryID, EntryID>>()
 
@@ -1355,6 +1362,10 @@ class ClusteredFormatDOM(private val ARCHIVE: RandomAccessFile, val charset: Cha
                 freeClusters.add(kluster)
             }
         }
+    }
+
+    fun getFreeClusterMap(): List<EntryID> {
+        return freeClusters.sorted()
     }
 
     private fun checkIfClusterIsFree(clusterNum: Int): Boolean {
