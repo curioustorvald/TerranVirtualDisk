@@ -95,7 +95,7 @@ private fun ByteArray.renumCluster(increment: Int): ByteArray {
 class ClusteredFormatDOM(private val ARCHIVE: RandomAccessFile, val charset: Charset, val throwErrorOnReadError: Boolean = false) {
 
     private inline fun testPause(msg: Any?) {
-//        dbgprintln("\n\n== $msg ==\n\n"); dbgprint("> "); Scanner(System.`in`).nextLine()
+        dbgprintln("\n\n== $msg ==\n\n"); dbgprint("> "); Scanner(System.`in`).nextLine()
     }
 
     private inline fun dbgprint(msg: Any? = "") {
@@ -901,6 +901,12 @@ class ClusteredFormatDOM(private val ARCHIVE: RandomAccessFile, val charset: Cha
     }
 
     private fun expandArchive(clusterCount: Int): Int {
+
+        dbgprintln("[Clustered] expandArchive($clusterCount); usedClusterCount = $usedClusterCount")
+        if (ARCHIVE.length() != usedClusterCount * CLUSTER_SIZE.toLong()) {
+            testPause("Size mismatch detected -- usedClusterCount=$usedClusterCount but actual numbers are ${ARCHIVE.length() / CLUSTER_SIZE}; please check the archive")
+        }
+
         val newPtr = usedClusterCount
         ARCHIVE.seekToCluster(newPtr.toLong())
         repeat(clusterCount) {
@@ -944,7 +950,7 @@ class ClusteredFormatDOM(private val ARCHIVE: RandomAccessFile, val charset: Cha
 
         // grow FAT area?
         if (insertPos + FATs.size - 1 >= fatClusterCount * FATS_PER_CLUSTER) {
-            testPause("about to grow FAT area; check the archive, then hit Return to continue")
+//            testPause("about to grow FAT area; check the archive, then hit Return to continue")
 
 
             val fatRenumDelta = growFAT()
@@ -954,7 +960,7 @@ class ClusteredFormatDOM(private val ARCHIVE: RandomAccessFile, val charset: Cha
             }
 
 
-            testPause("FAT area has grown; check the archive, then hit Return to continue")
+//            testPause("FAT area has grown; check the archive, then hit Return to continue")
         }
 
         // shift FATS on the Archive
@@ -1313,7 +1319,27 @@ class ClusteredFormatDOM(private val ARCHIVE: RandomAccessFile, val charset: Cha
      * that points outside of the archive.
      */
     fun trimArchive() {
+        dbgprintln("[Clustered] usedClusterCount = $usedClusterCount")
+        dbgprintln("[Clustered] freeClusters before: ${freeClusters.sortedDescending()}")
+
+
         if (freeClusters.isEmpty()) buildFreeClustersMap()
+
+
+        dbgprintln("[Clustered] freeClusters after: ${freeClusters.sortedDescending()}")
+
+        if (freeClusters.isEmpty()) {
+            dbgprintln("[Clustered] disk is already as compact as it can be")
+            return
+        }
+
+        (freeClusters.maxOf { it } + 1).let {
+            if (!isThisClusterFree(it)) {
+                dbgprintln("[Clustered] cannot trim -- cluster $it is occupied")
+                return
+            }
+        }
+
 
         // trim the archive if applicable
         var ptr = -1
@@ -1327,6 +1353,7 @@ class ClusteredFormatDOM(private val ARCHIVE: RandomAccessFile, val charset: Cha
                 k += 1
             }
         }
+        dbgprintln("[Clustered] trim point: ${ptr}")
         usedClusterCount = ptr
 
         if (usedClusterCount == -1) {
@@ -1340,7 +1367,7 @@ class ClusteredFormatDOM(private val ARCHIVE: RandomAccessFile, val charset: Cha
 
     var defragInterruptRequested = false
 
-    fun defrag(option: Int): List<Pair<EntryID, EntryID>> {
+    fun defrag(option: Int = 0): List<Pair<EntryID, EntryID>> {
         defragInterruptRequested = false
         trimArchive() // will build freeClusters map if the map is empty
 
@@ -1349,16 +1376,19 @@ class ClusteredFormatDOM(private val ARCHIVE: RandomAccessFile, val charset: Cha
         for (target in freeClusters.sorted()) {
             if (defragInterruptRequested) break
             val src = usedClusterCount - 1
+            if (src <= target) break
             changeClusterNum(src, target)
             workReport.add(src to target)
         }
+
+        freeClusters.clear(); trimArchive()
 
         return workReport
     }
 
     fun buildFreeClustersMap() {
         for (kluster in 2 + fatClusterCount until ARCHIVE.length().toInt() / CLUSTER_SIZE) {
-            if (checkIfClusterIsFree(kluster)) {
+            if (isThisClusterFree(kluster)) {
                 freeClusters.add(kluster)
             }
         }
@@ -1368,7 +1398,7 @@ class ClusteredFormatDOM(private val ARCHIVE: RandomAccessFile, val charset: Cha
         return freeClusters.sorted()
     }
 
-    private fun checkIfClusterIsFree(clusterNum: Int): Boolean {
+    private fun isThisClusterFree(clusterNum: Int): Boolean {
         if (clusterNum < fatClusterCount + 2) return false
         if (clusterNum >= usedClusterCount) return true
 
@@ -1394,7 +1424,7 @@ class ClusteredFormatDOM(private val ARCHIVE: RandomAccessFile, val charset: Cha
     }
 
     private fun changeClusterNum(from: Int, to: Int) {
-        if (!checkIfClusterIsFree(to)) throw IllegalStateException("Target cluster $to(${to.toHex()}) is not free to overwrite")
+        if (!isThisClusterFree(to)) throw IllegalStateException("Target cluster $to(${to.toHex()}) is not free to overwrite")
 
         //// Step 1. copy over cluster
         // copy over a cluster
@@ -1452,15 +1482,18 @@ class ClusteredFormatDOM(private val ARCHIVE: RandomAccessFile, val charset: Cha
 
         //// Step 6-2. trim the file size/zero-fill the cluster
         var isThisLastCluster = true
-        for (offset in from until ARCHIVE.length() / CLUSTER_SIZE) {
-            if (!checkIfClusterIsFree(offset.toInt())) {
+        for (offset in from+1 until ARCHIVE.length() / CLUSTER_SIZE) {
+            if (!isThisClusterFree(offset.toInt())) {
                 isThisLastCluster = false
                 break
             }
         }
+        dbgprintln("[Clustered.defrag] was cluster $from the last cluster? $isThisLastCluster")
         // trim file size
         if (isThisLastCluster) {
             ARCHIVE.setLength(from * CLUSTER_SIZE.toLong())
+            usedClusterCount = from
+            dbgprintln("[Clustered.defrag]     usedClusterCount <- $usedClusterCount")
         }
         // zero-fill
         else {
