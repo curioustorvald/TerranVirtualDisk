@@ -867,10 +867,7 @@ class ClusteredFormatDOM(private val ARCHIVE: RandomAccessFile, val charset: Cha
         var remaining = sizeDelta
         for (k in 0 until clusterCount) {
             ARCHIVE.seekToCluster(ptrs[k+1])
-            ARCHIVE.write(fileType)
-            ARCHIVE.write(0)
-            ARCHIVE.writeInt24(ptrs[k])
-            ARCHIVE.writeInt24(ptrs[k+2])
+            ARCHIVE.write(byteArrayOf(fileType.toByte(), 0) + ptrs[k].toInt24Arr() + ptrs[k+2].toInt24Arr())
             // write content size for the clusters
             val currentContentSize = ARCHIVE.readUshortBig()
             val sizeNumToWrite = minOf(FILE_BLOCK_CONTENTS_SIZE, currentContentSize + remaining)
@@ -1062,13 +1059,15 @@ class ClusteredFormatDOM(private val ARCHIVE: RandomAccessFile, val charset: Cha
         var remaining = writeLength
 
         var ptr = entry.entryID
+        val infoReadbuf = ByteArray(FILE_BLOCK_HEADER_SIZE)
         ARCHIVE.seekToCluster(ptr)
         dbgprintln("[Clustered]   file.seekToCluster $ptr")
-        var meta1 = ARCHIVE.read()
-        var meta2 = ARCHIVE.read()
-        var prev = ARCHIVE.readInt24()
-        var nextPtr = ARCHIVE.readInt24()
-        var contentsSizeInThisCluster = ARCHIVE.readUshortBig()
+        ARCHIVE.read(infoReadbuf)
+        var meta1 = infoReadbuf[0].toUint()
+        var meta2 = infoReadbuf[1].toUint()
+        var prev = infoReadbuf.toInt24(2)
+        var nextPtr = infoReadbuf.toInt24(5)
+        var contentsSizeInThisCluster = infoReadbuf.toInt16(8)
 
         var firstClusterOfWriting = true
 
@@ -1098,11 +1097,12 @@ class ClusteredFormatDOM(private val ARCHIVE: RandomAccessFile, val charset: Cha
                 ptr = nextPtr
                 ARCHIVE.seekToCluster(ptr)
                 dbgprintln("[Clustered]   file.seekToCluster $ptr")
-                meta1 = ARCHIVE.read()
-                meta2 = ARCHIVE.read()
-                prev = ARCHIVE.readInt24()
-                nextPtr = ARCHIVE.readInt24()
-                contentsSizeInThisCluster = ARCHIVE.readUshortBig()
+                ARCHIVE.read(infoReadbuf)
+                meta1 = infoReadbuf[0].toUint()
+                meta2 = infoReadbuf[1].toUint()
+                prev = infoReadbuf.toInt24(2)
+                nextPtr = infoReadbuf.toInt24(5)
+                contentsSizeInThisCluster = infoReadbuf.toInt16(8)
 
                 cursorInClusterFileArea -= FILE_BLOCK_CONTENTS_SIZE
             }
@@ -1111,8 +1111,7 @@ class ClusteredFormatDOM(private val ARCHIVE: RandomAccessFile, val charset: Cha
             // mark the cluster as "dirty"
             ARCHIVE.seekToCluster(ptr)
             dbgprintln("[Clustered] file.seekToCluster (to mark dirty) $ptr")
-            ARCHIVE.write(meta1.and(0xEF) or 16)
-            ARCHIVE.write(meta2)
+            ARCHIVE.write(byteArrayOf(meta1.and(0xEF).or(16).toByte(), meta2.toByte()))
             freeClusters.remove(ptr)
 
 
@@ -1168,12 +1167,13 @@ class ClusteredFormatDOM(private val ARCHIVE: RandomAccessFile, val charset: Cha
         var remaining = readLength
 
         var ptr = entry.entryID
+        val infoReadbuf = ByteArray(FILE_BLOCK_HEADER_SIZE)
         ARCHIVE.seekToCluster(ptr)
-        var meta1 = ARCHIVE.read()
-        var meta2 = ARCHIVE.read()
-        ARCHIVE.readInt24()
-        var nextPtr = ARCHIVE.readInt24()
-        var contentsSizeInThisCluster = ARCHIVE.readUshortBig()
+        ARCHIVE.read(infoReadbuf)
+        var meta1 = infoReadbuf[0].toUint()
+        var meta2 = infoReadbuf[1].toUint()
+        var nextPtr = infoReadbuf.toInt24(5)
+        var contentsSizeInThisCluster = infoReadbuf.toInt16(8)
 
         var firstClusterOfFile = true
 
@@ -1191,11 +1191,11 @@ class ClusteredFormatDOM(private val ARCHIVE: RandomAccessFile, val charset: Cha
                 }
                 ptr = nextPtr
                 ARCHIVE.seekToCluster(ptr)
-                meta1 = ARCHIVE.read()
-                meta2 = ARCHIVE.read()
-                ARCHIVE.readInt24()
-                nextPtr = ARCHIVE.readInt24()
-                contentsSizeInThisCluster = ARCHIVE.readUshortBig()
+                ARCHIVE.read(infoReadbuf)
+                meta1 = infoReadbuf[0].toUint()
+                meta2 = infoReadbuf[1].toUint()
+                nextPtr = infoReadbuf.toInt24(5)
+                contentsSizeInThisCluster = infoReadbuf.toInt16(8)
 
                 cursorInClusterFileArea -= FILE_BLOCK_CONTENTS_SIZE
 

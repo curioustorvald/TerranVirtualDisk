@@ -113,7 +113,7 @@ fun main(args: Array<String>) {
 
 
     DOM.writeBytes(longfile, "really long!".toByteArray(charset), 0, 12, 256, 1)
-    DOM.writeBytes(longfile, "really long!".toByteArray(charset), 0, 12, 4096, 1)
+    DOM.writeBytes(longfile, "reeeeeally long!".toByteArray(charset), 0, 16, 4092, 1)
     // FIXME above line creates 4 extra empty clusters (0x0C..0x0F)
 
 //    val defragWorkReport = DOM.defrag()
