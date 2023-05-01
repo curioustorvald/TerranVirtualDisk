@@ -56,9 +56,9 @@ fun main(args: Array<String>) {
     val DOM = ClusteredFormatDOM(diskFile, charset)
 
     println("Allocating a longfile")
-    val longfile = DOM.allocateFile(3000, 0, "Longfile3000")
-    val inlineFile = DOM.allocateFile(10, 0, "InlineFile120")
-    val multisectorfile = DOM.allocateFile(7000, 0, "TwoSectorFile7000")
+    val longfile = DOM.allocateFile(3000, 1, "Longfile3000")
+    val inlineFile = DOM.allocateFile(10, 1, "InlineFile120")
+    val multisectorfile = DOM.allocateFile(7000, 1, "TwoSectorFile7000")
 
     println("Writing a bootloader")
     val boottext = "println(\"Hello, BIOS!\")".toByteArray(charset)
@@ -66,14 +66,14 @@ fun main(args: Array<String>) {
 
     println("Writing a longfile")
     val longtext = "This is a long file!".toByteArray(charset)
-    DOM.writeBytes(longfile, longtext, 0, longtext.size, 0, 0)
+    DOM.writeBytes(longfile, longtext, 0, longtext.size, 0, 1)
 
     println("Writing done, trying to read what has written")
     val whatsWritten = DOM.readBytes(longfile, longtext.size, 0)
 
     println("Writing a multisector file")
-    DOM.writeBytes(multisectorfile, superlongtext, 0, superlongtext.size, 0, 0)
-    DOM.writeBytes(multisectorfile, "HAI~".toByteArray(charset), 0, 4, 12, 0)
+    DOM.writeBytes(multisectorfile, superlongtext, 0, superlongtext.size, 0, 1)
+    DOM.writeBytes(multisectorfile, "HAI~".toByteArray(charset), 0, 4, 12, 1)
 
     val multisectorLength = DOM.getFileLength(multisectorfile)
     println("Size of the multisector file: $multisectorLength bytes")
@@ -82,7 +82,7 @@ fun main(args: Array<String>) {
 
     println("Writing an inline file")
     val shorttext = inlinetext.toByteArray(charset)
-    DOM.writeBytes(inlineFile, shorttext, 0, shorttext.size, 0, 0)
+    DOM.writeBytes(inlineFile, shorttext, 0, shorttext.size, 0, 1)
 
 //    println(whatsWritten.toString(charset))
 //    println(whatsWritten2.toString(charset))
@@ -102,9 +102,9 @@ fun main(args: Array<String>) {
     println("Testing RENUM by allocating more FATs")
     repeat(25) { rpt ->
         val testmarker = "########ContentNum $rpt".toByteArray(charset)
-        DOM.allocateFile(testmarker.size, 0, "FAT Filler $rpt").let { entry ->
+        DOM.allocateFile(testmarker.size, 1, "FAT Filler $rpt").let { entry ->
             println("Entry ${entry.entryID.toHex()}, name: ${entry.filename}, fatEntryIndices: ${DOM.fatEntryIndices[entry.entryID]}")
-            DOM.writeBytes(entry, testmarker, 0, testmarker.size, 0, 0)
+            DOM.writeBytes(entry, testmarker, 0, testmarker.size, 0, 1)
     } }
 
 
@@ -112,7 +112,7 @@ fun main(args: Array<String>) {
     testPause("Test 2 is complete. Check the archive, then hit Return to continue")
 
 
-    DOM.writeBytes(longfile, "really long!".toByteArray(charset), 0, 12, 256, 0)
-    DOM.writeBytes(longfile, "really long!".toByteArray(charset), 0, 12, 4096, 0)
+    DOM.writeBytes(longfile, "really long!".toByteArray(charset), 0, 12, 256, 1)
+    DOM.writeBytes(longfile, "really long!".toByteArray(charset), 0, 12, 4096, 1)
     // TODO write long enough bytes to longfile so that new cluster would be allocated -- hopefully setting writeStartOffset > 4096
 }

@@ -6,6 +6,7 @@ import net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.VirtualDisk.Comp
 import net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.VirtualDisk.Companion.NAME_LENGTH
 import net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.archivers.ClusteredFormatDOM.Companion.CLUSTER_SIZE
 import net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.archivers.ClusteredFormatDOM.Companion.FAT_ENTRY_SIZE
+import net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.archivers.ClusteredFormatDOM.Companion.INLINE_FILE_CLUSTER_BASE
 import java.io.File
 import java.io.FileNotFoundException
 import java.io.FileOutputStream
@@ -41,10 +42,9 @@ class ClusteredFormatArchiver : Archiver {
     }
 }
 
-private fun Int.incClusterNum(increment: Int) = when (this) {
-    in 0x000004 until 0xF00000 -> this + increment
-    else -> this
-}
+private fun Int.isValidCluster() = this in 0x000004 until INLINE_FILE_CLUSTER_BASE
+
+private fun Int.incClusterNum(increment: Int) = if (this.isValidCluster()) this + increment else this
 
 private fun ByteArray.renumFAT(increment: Int): ByteArray {
     if (this.size != FAT_ENTRY_SIZE) throw IllegalStateException()
@@ -55,7 +55,7 @@ private fun ByteArray.renumFAT(increment: Int): ByteArray {
 
     // increment parent IDs on the Extended Entries
     // inline directories
-    if (entryID == 0xFFFF11) {
+    if (entryID == 0xFFFF12) {
         for (offset in 8 until 256 step 3) {
             val originalID = this.toInt24(offset)
             val newFileID = originalID.incClusterNum(increment)
@@ -81,7 +81,7 @@ private fun ByteArray.renumCluster(increment: Int): ByteArray {
     this.writeInt24(newNextPtr, 5)
 
     // renumber clusternum on the directory files
-    if (filetype == 1) {
+    if (filetype == 2) {
         val entrySize = this.toInt16(8)
         for (entryOffset in 10 until 10 + 3*entrySize step 3) {
             val clusterNum = this.toInt24(entryOffset).incClusterNum(increment).toInt24Arr()
@@ -274,7 +274,7 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
          * Called by ClusteredFormatDOM, this function assists the global renum operation.
          */
         internal fun _fatRenum(increment: Int) {
-            if (entryID > 2 && entryID < INLINE_FILE_CLUSTER_BASE) {
+            if (entryID.isValidCluster()) {
                 entryID += increment
                 extendedEntries.forEach {
                     it.renumFAT(increment)
@@ -535,19 +535,19 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
         // renumber FAT on the Archive
         dbgprintln("[Clustered] renum($increment) -- about to renum FATs (fatClusterCount = $fatClusterCount, FATs: $fatEntryCount/${fatClusterCount * FATS_PER_CLUSTER})")
         fatEntryIndices.clear()
-        for (kluster in 0 until fatEntryCount) {
-            file.seekToFAT(kluster)
+        for (kfat in 0 until fatEntryCount) {
+            file.seekToFAT(kfat)
             val fat = file.read(FAT_ENTRY_SIZE).renumFAT(increment)
-            file.seekToFAT(kluster)
+            file.seekToFAT(kfat)
             file.write(fat)
 
             val entryID = fat.toInt24(0)
             if (entryID < EXTENDED_ENTRIES_BASE) {
-                fatEntryIndices[entryID] = kluster
+                fatEntryIndices[entryID] = kfat
             }
         }
-        for (qluster in fatEntryCount until fatClusterCount * FATS_PER_CLUSTER) {
-            file.seekToFAT(qluster)
+        for (qfat in fatEntryCount until fatClusterCount * FATS_PER_CLUSTER) {
+            file.seekToFAT(qfat)
             file.write(EMPTY_FAT_ENTRY)
         }
         // fatmgrAddEntry() may break write order -- renumber the FATs manually as above
@@ -609,6 +609,7 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
         val myEntryIndex = fatEntryIndices[entry.entryID]
                 ?: throw IllegalArgumentException("No such file with following ID: ${entry.entryID}")
 
+        if (fileType == 0) throw UnsupportedOperationException("Invalid file type: $fileType")
         if (!entry.isInline) throw IllegalArgumentException("File is not inline (ID: ${entry.entryID})")
         if (entry.hasExtraEntryWithType { it xor 0xFFFF10 < 16 }) throw IllegalArgumentException("File is already allocated and is inline (ID: ${entry.entryID})")
 
@@ -653,6 +654,7 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
         val myEntryIndex = fatEntryIndices[entry.entryID]
                 ?: throw IllegalArgumentException("No such file with following ID: ${entry.entryID.toHex()}")
 
+        if (fileType == 0) throw UnsupportedOperationException("Invalid file type: $fileType")
         if (!entry.isInline) throw IllegalArgumentException("File is not inline (ID: ${entry.entryID.toHex()})")
 
         val oldExtendedEntryCount = entry.extendedEntries.size
@@ -738,8 +740,8 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
                 }
             }
 
-            for (qluster in fatEntryCount until fatClusterCount * FATS_PER_CLUSTER) {
-                file.seekToFAT(qluster)
+            for (qfat in fatEntryCount until fatClusterCount * FATS_PER_CLUSTER) {
+                file.seekToFAT(qfat)
                 file.write(EMPTY_FAT_ENTRY)
             }
 
@@ -773,7 +775,7 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
      * @return newly-created FAT entry
      */
     fun allocateFile(size: Int, fileType: Int, filename: String): FATEntry {
-        if (fileType != 0 && fileType != 1) throw IllegalArgumentException("Unknown File type: $fileType")
+        if (fileType != 1 && fileType != 2) throw UnsupportedOperationException("Invalid File type: $fileType")
 
         checkDiskCapacity(size)
         val timeNow = getTimeNow()
@@ -808,6 +810,8 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
      */
     private fun expandFile(sizeDelta: Int, prevCluster: Int, currentCluster: Int, fileType: Int): Int {
         dbgprintln("[Clustered] expandFile(sizeDelta=$sizeDelta, prevCluster=$prevCluster, currentCluster=$currentCluster, fileType=$fileType)")
+
+        if (fileType == 0) throw UnsupportedOperationException("Invalid file type: $fileType")
 
         if (sizeDelta < 0) return LEAF_CLUSTER
         if (sizeDelta == 0) return currentCluster
@@ -847,6 +851,8 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
     }
 
     private fun initClusters(sizeDelta: Int, parent: Int, current: Int, clusterCount: Int, fileType: Int, next: Int? = null) {
+        if (fileType == 0) throw UnsupportedOperationException("Invalid file type: $fileType")
+
         val ptrs = if (next == null)
             listOf(parent) + (current until current+clusterCount) + listOf(LEAF_CLUSTER)
         else
@@ -875,11 +881,7 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
      */
     fun setDirty(clusterNum: Int) {
         if (clusterNum < 2 + fatClusterCount) throw IllegalArgumentException("Cannot modify cluster #$clusterNum -- is Meta/Bootsector/FAT")
-
-        file.seekToCluster(clusterNum)
-        val flags = file.read()
-        file.seekToCluster(clusterNum)
-        file.write(flags or 0x10)
+        file.setClusterMeta1Flag(clusterNum, 0x10, 0x10)
     }
 
     /**
@@ -887,11 +889,7 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
      */
     fun unsetDirty(clusterNum: Int) {
         if (clusterNum < 2 + fatClusterCount) throw IllegalArgumentException("Cannot modify cluster #$clusterNum -- is Meta/Bootsector/FAT")
-
-        file.seekToCluster(clusterNum)
-        val flags = file.read()
-        file.seekToCluster(clusterNum)
-        file.write(flags and 0xEF)
+        file.setClusterMeta1Flag(clusterNum, 0x10, 0x00)
     }
 
     private fun expandArchive(clusterCount: Int): Int {
@@ -978,7 +976,7 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
 
             dbgprintln("[Clustered]           FAT at ${startOffset.toHex()}: ${bytes.sliceArray(0..15).joinToString(" ") { it.toUint().toString(16).padStart(2, '0').toUpperCase() }}")
 
-            if (entryID in 2..INLINE_FILE_CLUSTER_BASE) {
+            if (entryID.isValidCluster()) {
                 dbgprint("[Clustered]         trying to change FAT Index for entry $entryID")
                 fatEntryIndices[entryID]?.let {
                     dbgprint("....${it} -> ${(it + strideByEntry)}")
@@ -1013,6 +1011,8 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
     }
 
     private fun writeBytesInline(inlinedFile: FATEntry, buffer: ByteArray, bufferOffset: Int, writeLength: Int, writeStartOffset: Int, fileType: Int) {
+        if (fileType == 0) throw UnsupportedOperationException("Invalid file type: $fileType")
+
         val fileCopy = inlinedFile.getInlineBytes()
         val fileBytes = ByteArray(maxOf(fileCopy.size, writeStartOffset + writeLength))
 
@@ -1036,6 +1036,8 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
     }
 
     fun writeBytes(entry: FATEntry, buffer: ByteArray, bufferOffset: Int, writeLength: Int, writeStartOffset: Int, fileType: Int) {
+        if (fileType == 0) throw UnsupportedOperationException("Invalid file type: $fileType")
+
         val addedBytes = writeStartOffset + writeLength - getFileLength(entry)
 
         checkDiskCapacity(addedBytes)
@@ -1214,6 +1216,8 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
 
 
     fun setFileLength(entry: FATEntry, newLength: Int, fileType: Int) {
+        if (fileType == 0) throw UnsupportedOperationException("Invalid file type: $fileType")
+
         var remaining = newLength
 
         var parent = HEAD_CLUSTER
@@ -1292,11 +1296,104 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
         return b and 15
     }
 
-    fun isDirectory(entry: FATEntry) = getFileType(entry) == 1
-    fun isFile(entry: FATEntry) = getFileType(entry) == 0
+    fun isDirectory(entry: FATEntry) = getFileType(entry) == 2
+    fun isFile(entry: FATEntry) = getFileType(entry) == 1
 
     fun defrag(option: Int) {
         TODO()
+    }
+
+    private fun checkIfClusterIsFree(clusterNum: Int): Boolean {
+        if (clusterNum < fatClusterCount + 2) return false
+        if (clusterNum >= usedClusterCount) return true
+
+        file.seekToCluster(clusterNum)
+
+        val flag = file.read()
+
+        // marked as discarded
+        if (flag and 0x80 != 0) return true
+        // file type of 0
+        if (flag and 0x0F == 0) return true
+
+        return false
+    }
+
+    private fun changeClusterNum(from: Int, to: Int) {
+        if (!checkIfClusterIsFree(to)) throw IllegalStateException("Target cluster $to(${to.toHex()}) is not free to overwrite")
+
+        //// Step 1. copy over cluster
+        // copy over a cluster
+        file.seekToCluster(from)
+        val cluster = file.read(CLUSTER_SIZE)
+        // mark copied cluster as temporarily duplicated
+        cluster[1] = (cluster[1].toUint() and 0xFE or 1).toByte()
+        // paste the cluster to target position
+        file.seekToCluster(to)
+        file.write(cluster)
+
+        val prevCluster = cluster.toInt24(2)
+        val nextCluster = cluster.toInt24(5)
+
+        //// Step 2. edit prev cluster's fwdlink
+        if (prevCluster.isValidCluster()) {
+            file.seekToCluster(prevCluster, 5)
+            file.writeInt24(to)
+        }
+
+        //// Step 3. edit next cluster's bwdlink
+        if (nextCluster.isValidCluster()) {
+            file.seekToCluster(nextCluster, 2)
+            file.writeInt24(to)
+        }
+
+        //// Step 4. find-replace on all FAT entries
+        for (kfat in 0 until fatEntryCount) {
+            file.seekToFAT(kfat)
+            val ptr = file.readInt24()
+            // Extended Entries?
+            if (ptr >= EXTENDED_ENTRIES_BASE) {
+                if (ptr == 0xFFFF12) {
+                    for (offset in 8 until 256 step 3) {
+                        file.seekToFAT(kfat, offset)
+                        if (file.readInt24() == from) {
+                            file.seekToFAT(kfat, offset)
+                            file.writeInt24(to)
+                        }
+                    }
+                }
+            }
+            // THE Entry?
+            else if (ptr == from) {
+                file.seekToFAT(kfat)
+                file.writeInt24(to)
+            }
+        }
+
+        //// Step 5-1. unset 'temporarily duplicated' flag of the copied cluster
+        file.setClusterMeta2Flag(to, 1, 0)
+
+        //// Step 6-1. set file type of source cluster to 0, and mark as discarded
+        file.setClusterMeta1Flag(from, 0b1000_1111, 0b1000_0000)
+
+        //// Step 6-2. trim the file size/zero-fill the cluster
+        var isThisLastCluster = true
+        for (offset in from until file.length() / CLUSTER_SIZE) {
+            if (!checkIfClusterIsFree(offset.toInt())) {
+                isThisLastCluster = false
+                break
+            }
+        }
+        // trim file size
+        if (isThisLastCluster) {
+            file.setLength(from * CLUSTER_SIZE.toLong())
+        }
+        // zero-fill
+        else {
+            file.seekToCluster(from)
+            file.write(EMPTY_CLUSTER)
+        }
+
     }
 
 
@@ -1309,7 +1406,7 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
         file.seekToCluster(clusterNum)
         val fileType = file.read()
 
-        if (fileType != 0) // will also detect non-zero-ness of the "error flags"
+        if (fileType != 1) // will also detect non-zero-ness of the "error flags"
             throw UnsupportedOperationException("File is not a binary file (type ${fileType and 15}, flags ${fileType.ushr(4) and 15})")
 
         // initial cluster must be clean and not dirty!
@@ -1467,6 +1564,22 @@ class ClusteredFormatDOM(private val file: RandomAccessFile, val charset: Charse
         this.write(value.ushr( 8).toInt())
         this.write(value.ushr( 0).toInt())
     }
+    private fun RandomAccessFile.setClusterMeta1Flag(clusterNum: Long, mask: Int, flag: Int) {
+        this.seekToCluster(clusterNum, 0)
+        val existing = this.read()
+        val newFlag = (existing and (0xFF xor mask)) or flag
+        this.seekToCluster(clusterNum, 0)
+        this.write(newFlag)
+    }
+    private fun RandomAccessFile.setClusterMeta2Flag(clusterNum: Long, mask: Int, flag: Int) {
+        this.seekToCluster(clusterNum, 1)
+        val existing = this.read()
+        val newFlag = (existing and (0xFF xor mask)) or flag
+        this.seekToCluster(clusterNum, 1)
+        this.write(newFlag)
+    }
+    private fun RandomAccessFile.setClusterMeta1Flag(clusterNum: Int, mask: Int, flag: Int) = this.setClusterMeta1Flag(clusterNum.toLong(), mask, flag)
+    private fun RandomAccessFile.setClusterMeta2Flag(clusterNum: Int, mask: Int, flag: Int) = this.setClusterMeta2Flag(clusterNum.toLong(), mask, flag)
     private fun ByteArray.trimNull(): ByteArray {
         var cnt = this.size - 1
         while (cnt >= 0) {
