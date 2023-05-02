@@ -100,7 +100,7 @@ fun main(args: Array<String>) {
 
 
     println("Testing RENUM by allocating more FATs")
-    repeat(25) { rpt ->
+    repeat(45) { rpt ->
         val testmarker = "########ContentNum $rpt".toByteArray(charset)
         DOM.allocateFile(testmarker.size, 1, "FAT Filler $rpt").let { entry ->
             println("Entry ${entry.entryID.toHex()}, name: ${entry.filename}, fatEntryIndices: ${DOM.fatEntryIndices[entry.entryID]}")
@@ -114,10 +114,13 @@ fun main(args: Array<String>) {
 
     DOM.writeBytes(longfile, "really long!".toByteArray(charset), 0, 12, 256, 1)
     DOM.writeBytes(longfile, "reeeeeally long!".toByteArray(charset), 0, 16, 4092, 1)
-    // FIXME above line creates 4 extra empty clusters (0x0C..0x0F)
 
 //    val defragWorkReport = DOM.defrag()
 //    defragWorkReport.forEach { (from, to) ->
 //        println("[Defrag report] moved cluster $from to $to")
 //    }
+
+
+    DOM.writeBytes(inlineFile, shorttext, 0, shorttext.size, shorttext.size, 1)
+    // fixme above line did not expand FAT area
 }
