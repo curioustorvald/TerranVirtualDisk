@@ -120,7 +120,7 @@ fun main(args: Array<String>) {
 //        println("[Defrag report] moved cluster $from to $to")
 //    }
 
+    testPause("Test 3 is complete. Check the archive, then hit Return to continue")
 
     DOM.writeBytes(inlineFile, shorttext, 0, shorttext.size, shorttext.size, 1)
-    // fixme above line did not expand FAT area
 }

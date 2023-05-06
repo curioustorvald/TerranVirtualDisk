@@ -940,6 +940,7 @@ class ClusteredFormatDOM(private val ARCHIVE: RandomAccessFile, val charset: Cha
         checkDiskCapacity(FATs.size * FAT_ENTRY_SIZE)
 
         val deleteCount = deleteCount.coerceAtLeast(0)
+        val fatSizeDelta = FATs.size - deleteCount
 
         if (deleteCount > fatEntryCount) throw IllegalArgumentException("deleteCount ($deleteCount) is larger than the number of FAT entries in the Archive ($fatEntryCount)")
 
@@ -948,9 +949,10 @@ class ClusteredFormatDOM(private val ARCHIVE: RandomAccessFile, val charset: Cha
 
 
         // grow FAT area?
-        if (insertPos + FATs.size - 1 >= fatClusterCount * FATS_PER_CLUSTER) {
+        if (fatEntryCount + fatSizeDelta > fatClusterCount * FATS_PER_CLUSTER) {
 //            testPause("about to grow FAT area; check the archive, then hit Return to continue")
 
+            dbgprintln("[Clustered.spliceFAT]     growing FAT area...")
 
             val fatRenumDelta = growFAT()
             // renum inserting FATs
@@ -963,8 +965,8 @@ class ClusteredFormatDOM(private val ARCHIVE: RandomAccessFile, val charset: Cha
         }
 
         // shift FATS on the Archive
-        val strideByEntry = (FATs.size - deleteCount)
-        val stride = (FATs.size - deleteCount) * FAT_ENTRY_SIZE
+        val strideByEntry = fatSizeDelta
+        val stride = fatSizeDelta * FAT_ENTRY_SIZE
         val seekpos = 2L* CLUSTER_SIZE + insertPos*FAT_ENTRY_SIZE
 
 
@@ -1001,7 +1003,7 @@ class ClusteredFormatDOM(private val ARCHIVE: RandomAccessFile, val charset: Cha
 
         // delete trailing FATs if stride < 0
         if (stride < 0) {
-            ARCHIVE.seek(2L * CLUSTER_SIZE + (fatEntryCount + FATs.size - deleteCount) * FAT_ENTRY_SIZE)
+            ARCHIVE.seek(2L * CLUSTER_SIZE + (fatEntryCount + fatSizeDelta.toLong()) * FAT_ENTRY_SIZE)
             for (i in 0 until deleteCount - FATs.size) {
                 ARCHIVE.write(EMPTY_FAT_ENTRY)
             }
@@ -1016,8 +1018,8 @@ class ClusteredFormatDOM(private val ARCHIVE: RandomAccessFile, val charset: Cha
             }
         }
 
-        dbgprintln("[Clustered]     incrementing fatEntryCount by ${FATs.size - deleteCount} (${fatEntryCount} -> ${fatEntryCount + FATs.size - deleteCount})")
-        fatEntryCount += FATs.size - deleteCount
+        dbgprintln("[Clustered]     incrementing fatEntryCount by ${fatSizeDelta} (${fatEntryCount} -> ${fatEntryCount + fatSizeDelta.toLong()})")
+        fatEntryCount += fatSizeDelta
 
         ARCHIVE.seek(seekpos)
         return seekpos
