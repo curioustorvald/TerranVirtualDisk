@@ -387,7 +387,7 @@ class ClusteredFormatDOM(private val ARCHIVE: RandomAccessFile, val throwErrorOn
         return usedClusterCount
     }
 
-    private val charset: Charset
+    val charset: Charset
 
     private var fileTable = HashMap<Int, FATEntry>() // path is unknown until the path tree is traversed
     /** Formatted size of the disk. Archive offset 4 */
