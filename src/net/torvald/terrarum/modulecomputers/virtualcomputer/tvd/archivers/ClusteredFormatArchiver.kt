@@ -92,7 +92,7 @@ private fun ByteArray.renumCluster(increment: Int): ByteArray {
     return this
 }
 
-class ClusteredFormatDOM(private val ARCHIVE: RandomAccessFile, val charset: Charset, val throwErrorOnReadError: Boolean = false) {
+class ClusteredFormatDOM(private val ARCHIVE: RandomAccessFile, val throwErrorOnReadError: Boolean = false) {
 
     private inline fun testPause(msg: Any?) {
         dbgprintln("\n\n== $msg ==\n\n"); dbgprint("> "); Scanner(System.`in`).nextLine()
@@ -133,6 +133,29 @@ class ClusteredFormatDOM(private val ARCHIVE: RandomAccessFile, val charset: Cha
             val timeNow = (System.currentTimeMillis() / 1000L).toInt48Arr()
             val file = FileOutputStream(outPath)
 
+            val charsetIndex = when (charset.name().toUpperCase()) {
+                "UTF-8" -> 0x1000
+                "UTF-16BE" -> 0x1001
+                "UTF-16LE" -> 0x1002
+                "ISO-8859-1" -> 0x0100
+                "ISO-8859-2" -> 0x0101
+                "ISO-8859-3" -> 0x0102
+                "ISO-8859-4" -> 0x0103
+                "ISO-8859-5" -> 0x0104
+                "ISO-8859-6" -> 0x0105
+                "ISO-8859-7" -> 0x0106
+                "ISO-8859-8" -> 0x0107
+                "ISO-8859-9" -> 0x0108
+                "ISO-8859-10" -> 0x0109
+                "ISO-8859-11" -> 0x010A
+                "ISO-8859-12" -> 0x010B
+                "ISO-8859-13" -> 0x010C
+                "ISO-8859-14" -> 0x010D
+                "ISO-8859-15" -> 0x010E
+                "ISO-8859-16" -> 0x010F
+                else -> 0 // IBM437
+            }
+
             //// CLUSTER 0 ////
             // header
             file.write(VirtualDisk.MAGIC)
@@ -150,8 +173,11 @@ class ClusteredFormatDOM(private val ARCHIVE: RandomAccessFile, val charset: Cha
             repeat(16) { file.write(0) }
             // FAT size (2)
             file.write(2.toInt32Arr())
+            // Charset (2)
+            file.write(charsetIndex ushr 8)
+            file.write(charsetIndex and 255)
             // cluster filler
-            file.write(ByteArray(4028))
+            file.write(ByteArray(4026))
 
             //// CLUSTER 1 ////
             // dummy bootsector
@@ -361,6 +387,8 @@ class ClusteredFormatDOM(private val ARCHIVE: RandomAccessFile, val charset: Cha
         return usedClusterCount
     }
 
+    private val charset: Charset
+
     private var fileTable = HashMap<Int, FATEntry>() // path is unknown until the path tree is traversed
     /** Formatted size of the disk. Archive offset 4 */
     private var diskSize = -1L
@@ -406,8 +434,20 @@ class ClusteredFormatDOM(private val ARCHIVE: RandomAccessFile, val charset: Cha
         ARCHIVE.close()
     }
 
+    private fun toCharset(charsetCode: Int) = when (charsetCode) {
+        in 0x0100..0x010F -> Charset.forName("iso-8859-${charsetCode.and(15) + 1}")
+        0x1000 -> Charset.forName("utf-8")
+        0x1001 -> Charset.forName("utf-16be")
+        0x1002 -> Charset.forName("utf-16le")
+        else -> Charset.forName("cp437")
+    }
+
     init {
         if (!formatMatches()) throw RuntimeException("Invalid Virtual Disk file!")
+
+        // set charset first
+        ARCHIVE.seek(68L)
+        charset = toCharset(ARCHIVE.readUshortBig())
 
         readMeta()
         readFAT()

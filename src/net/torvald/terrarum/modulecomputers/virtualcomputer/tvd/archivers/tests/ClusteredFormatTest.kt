@@ -1,12 +1,13 @@
 import net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.archivers.ClusteredFormatDOM
 import net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.toHex
 import java.io.File
+import java.nio.charset.Charset
 import java.util.*
 
 /**
  * Created by minjaesong on 2023-04-23.
  */
-val charset = Charsets.UTF_8
+val charset = Charset.forName("cp437")
 val superlongtext = """Zeroth Byte 0000111111111111111122222222222222223333333333333333444444444444444455555555555555556666666666666666777777777777777788888888888888889999999999999999AAAAAAAAAAAAAAAABBBBBBBBBBBBBBBBCCCCCCCCCCCCCCCCDDDDDDDDDDDDDDDDEEEEEEEEEEEEEEEEFFFFFFFFFFFFFFF
 256th Byte 00000111111111111111122222222222222223333333333333333444444444444444455555555555555556666666666666666777777777777777788888888888888889999999999999999AAAAAAAAAAAAAAAABBBBBBBBBBBBBBBBCCCCCCCCCCCCCCCCDDDDDDDDDDDDDDDDEEEEEEEEEEEEEEEEFFFFFFFFFFFFFFF
 512nd Byte 00000111111111111111122222222222222223333333333333333444444444444444455555555555555556666666666666666777777777777777788888888888888889999999999999999AAAAAAAAAAAAAAAABBBBBBBBBBBBBBBBCCCCCCCCCCCCCCCCDDDDDDDDDDDDDDDDEEEEEEEEEEEEEEEEFFFFFFFFFFFFFFF
@@ -44,6 +45,7 @@ fun main(args: Array<String>) {
         print("> "); Scanner(System.`in`).nextLine()
     }
 
+    println("Charset: ${charset.name().toUpperCase()}")
 
     val archiveFile = File("./testclustered.tevd")
 
@@ -53,7 +55,7 @@ fun main(args: Array<String>) {
 
     println("Creating Archive")
     val diskFile = ClusteredFormatDOM.createNewArchive(archiveFile, charset, "TEST DRIVE", 600)
-    val DOM = ClusteredFormatDOM(diskFile, charset)
+    val DOM = ClusteredFormatDOM(diskFile)
 
     println("Allocating a longfile")
     val longfile = DOM.allocateFile(3000, 1, "Longfile3000")
