@@ -126,4 +126,9 @@ fun main(args: Array<String>) {
     testPause("Test 3 is complete. Check the archive, then hit Return to continue")
 
     DOM.writeBytes(inlineFile, shorttext, 0, shorttext.size, shorttext.size, FILETYPE_BINARY)
+
+    testPause("Test 4 is complete. Check the archive, then hit Return to continue")
+
+    val singleClusterFile = DOM.allocateFile(4086, FILETYPE_BINARY, "4086ByteFile")
+    DOM.writeBytes(singleClusterFile, ByteArray(4086) { '#'.toByte() }, 0, 4086, 0, FILETYPE_BINARY)
 }

@@ -206,7 +206,7 @@ open class Clustfile(private val DOM: ClusteredFormatDOM, absolutePath: String) 
             val defaultDirs = ByteArray(6)
             defaultDirs.writeInt24(FAT.entryID, 0)
             defaultDirs.writeInt24(parentFAT!!.entryID, 3)
-            DOM.writeBytes(FAT, defaultDirs, 0, 6, 0, 2)
+            DOM.writeBytes(FAT, defaultDirs, 0, 6, 0, FILETYPE_DIRECTORY)
             DOM.commitFATchangeToDisk(FAT)
         }
         return true
@@ -229,11 +229,12 @@ open class Clustfile(private val DOM: ClusteredFormatDOM, absolutePath: String) 
             FAT.let { FAT ->
                 if (FAT == null) false
                 else {
+                    val dirListing = DOM.getDirListing(FAT)!!
                     // if the entry is not already there, write one
-                    if (!DOM.getDirListing(FAT)!!.contains(file.FAT!!.entryID)) {
+                    if (!dirListing.contains(file.FAT!!.entryID)) {
                         val defaultDirs = ByteArray(3)
                         defaultDirs.writeInt24(file.FAT!!.entryID, 0)
-                        DOM.writeBytes(FAT, defaultDirs, 0, 3, , 2)
+                        DOM.writeBytes(FAT, defaultDirs, 0, 3, dirListing.size * 3, FILETYPE_DIRECTORY)
 
                         DOM.commitFATchangeToDisk(FAT)
                     }
@@ -291,6 +292,7 @@ open class Clustfile(private val DOM: ClusteredFormatDOM, absolutePath: String) 
 
     open fun mkdirs(): Boolean {
         // create dirs if those parent dirs don't exist
+        TODO()
     }
 
 
