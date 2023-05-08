@@ -96,33 +96,88 @@ open class Clustfile(private val DOM: ClusteredFormatDOM, absolutePath: String) 
 
 
 
-    open fun pread(buf: ByteArray, bufOffset: Int, count: Int, fileOffset: Int) {
 
+    open fun pread(buf: ByteArray, bufOffset: Int, count: Int, fileOffset: Int): Int {
+        FAT.let { FAT ->
+            return if (FAT == null) -1
+            else DOM.readBytes(FAT, buf, bufOffset, count, fileOffset)
+        }
     }
 
-    open fun pread(buf: ByteBuffer, bufOffset: Int, count: Int, fileOffset: Int) {
-
+    open fun pread(buf: ByteBuffer, bufOffset: Int, count: Int, fileOffset: Int): Int {
+        FAT.let { FAT ->
+            return if (FAT == null) -1
+            else {
+                val bbuf = ByteArray(count)
+                val readCount = DOM.readBytes(FAT, bbuf, 0, count, fileOffset)
+                buf.put(bbuf, bufOffset, readCount)
+                readCount
+            }
+        }
     }
 
-    open fun pread(unsafe: sun.misc.Unsafe, bufptr: Long, count: Int, fileOffset: Int) {
-
+    open fun pread(unsafe: sun.misc.Unsafe, bufptr: Long, count: Int, fileOffset: Int): Int {
+        FAT.let { FAT ->
+            return if (FAT == null) -1
+            else {
+                val bbuf = ByteArray(count)
+                val readCount = DOM.readBytes(FAT, bbuf, 0, count, fileOffset)
+                unsafe.copyMemory(bbuf, unsafe.arrayBaseOffset(bbuf.javaClass).toLong(), null, bufptr, readCount.toLong())
+                readCount
+            }
+        }
     }
 
 
 
 
 
-
-    open fun pwrite(buf: ByteArray, bufOffset: Int, count: Int, fileOffset: Int) {
-
+    open fun pwrite(buf: ByteArray, bufOffset: Int, count: Int, fileOffset: Int): Boolean {
+        FAT.let { FAT ->
+            return if (FAT == null) false
+            else {
+                require(type == FileType.BinaryFile)
+                DOM.writeBytes(FAT, buf, bufOffset, count, fileOffset, FILETYPE_BINARY)
+                true
+            }
+        }
     }
 
-    open fun pwrite(buf: ByteBuffer, bufOffset: Int, count: Int, fileOffset: Int) {
-
+    open fun pwrite(buf: ByteBuffer, bufOffset: Int, count: Int, fileOffset: Int): Boolean {
+        FAT.let { FAT ->
+            return if (FAT == null) false
+            else {
+                val bbuf = ByteArray(count) { buf[bufOffset + it] }
+                return pwrite(bbuf, 0, count, fileOffset)
+            }
+        }
     }
 
-    open fun pwrite(unsafe: sun.misc.Unsafe, bufptr: Long, count: Int, fileOffset: Int) {
+    open fun pwrite(unsafe: sun.misc.Unsafe, bufptr: Long, count: Int, fileOffset: Int): Boolean {
+        FAT.let { FAT ->
+            return if (FAT == null) false
+            else {
+                val bbuf = ByteArray(count)
+                unsafe.copyMemory(null, bufptr, bbuf, unsafe.arrayBaseOffset(bbuf.javaClass).toLong(), count.toLong())
+                return pwrite(bbuf, 0, count, fileOffset)
+            }
+        }
+    }
 
+
+
+    open fun overwrite(buf: ByteArray) {
+        requireNotNull(FAT)
+        FAT?.let { FAT ->
+            DOM.setFileLength(FAT, buf.size, filetypeToNum())
+            DOM.writeBytes(FAT, buf, 0, buf.size, 0, filetypeToNum())
+        }
+    }
+
+    open fun overwrite(unsafe: sun.misc.Unsafe, bufptr: Long, count: Int) {
+        val ba = ByteArray(count)
+        unsafe.copyMemory(null, bufptr, ba, unsafe.arrayBaseOffset(ba.javaClass).toLong(), count.toLong())
+        return overwrite(ba)
     }
 
 
@@ -258,8 +313,8 @@ open class Clustfile(private val DOM: ClusteredFormatDOM, absolutePath: String) 
 
     private fun filetypeToNum() = when (type) {
         FileType.Undefined -> 0
-        FileType.BinaryFile -> 1
-        FileType.Directory -> 2
+        FileType.BinaryFile -> FILETYPE_BINARY
+        FileType.Directory -> FILETYPE_DIRECTORY
     }
 
     /**

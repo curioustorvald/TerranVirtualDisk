@@ -815,8 +815,9 @@ class ClusteredFormatDOM(private val ARCHIVE: RandomAccessFile, val throwErrorOn
 
     fun commitFATchangeToDisk(fat: FATEntry) {
         var oldFATentryCount = 1
-        var insertionPos = fatEntryIndices[fat.entryID]!!
+        val insertionPos = fatEntryIndices[fat.entryID]!!
         ARCHIVE.seekToFAT(insertionPos + 1)
+        // tally oldFATentryCount
         while (true) {
             val id = ARCHIVE.readInt24()
             if (id >= EXTENDED_ENTRIES_BASE)
@@ -1130,6 +1131,10 @@ class ClusteredFormatDOM(private val ARCHIVE: RandomAccessFile, val throwErrorOn
         }
     }
 
+    /**
+     * Writes bytes to the file. If the write operation reaches outside the file's allocated size, length of the file
+     * will be increased (i.e. new clusters will be allocated) to fit
+     */
     fun writeBytes(entry: FATEntry, buffer: ByteArray, bufferOffset: Int, writeLength: Int, writeStartOffset: Int, fileType: Int) {
         if (fileType == 0) throw UnsupportedOperationException("Invalid file type: $fileType")
 
@@ -1244,6 +1249,11 @@ class ClusteredFormatDOM(private val ARCHIVE: RandomAccessFile, val throwErrorOn
         }
     }
 
+    /**
+     * Reads the file. Read bytes go to the given buffer. If the read operation reaches outside the file, the operation
+     * will be finished, and the return value will be smaller than the specified readLength.
+     * @return number of bytes actually read
+     */
     fun readBytes(entry: FATEntry, buffer: ByteArray, bufferOffset: Int, readLength: Int, readStartOffset: Int): Int {
         var readCursor = readStartOffset
         var remaining = readLength
@@ -1300,6 +1310,11 @@ class ClusteredFormatDOM(private val ARCHIVE: RandomAccessFile, val throwErrorOn
         return actualBytesWritten
     }
 
+    /**
+     * Reads the file. If the read operation reaches outside the file, the operation
+     * will be finished, and the length of the returning ByteArray will be smaller than the specified readLength.
+     * @return ByteArray containing bytes actually been read. Size of this array may be smaller than the specified length.
+     */
     fun readBytes(entry: FATEntry, length: Int, offset: Int): ByteArray {
         val ba = ByteArray(length)
         val actualSize = readBytes(entry, ba, 0, length, offset)
@@ -1311,7 +1326,10 @@ class ClusteredFormatDOM(private val ARCHIVE: RandomAccessFile, val throwErrorOn
         return ba2
     }
 
-
+    /**
+     * Sets the length of the file. If the new length is smaller, the remaining clusters, if any, will be marked as discarded;
+     * if the new length is longer, new clusters will be allocated. Clusters marked as discarded must be freed using [defrag].
+     */
     fun setFileLength(entry: FATEntry, newLength: Int, fileType: Int) {
         if (fileType == 0) throw UnsupportedOperationException("Invalid file type: $fileType")
 
@@ -1327,10 +1345,18 @@ class ClusteredFormatDOM(private val ARCHIVE: RandomAccessFile, val throwErrorOn
             val thisClusterLen = minOf(remaining, FILE_BLOCK_CONTENTS_SIZE)
             // get next cluster
             var nextCluster = ARCHIVE.readInt24()
-            // write new contents length
-            ARCHIVE.writeInt16(thisClusterLen)
-            // subtract remaining
-            remaining -= thisClusterLen
+
+            if (remaining >= 0) {
+                // write new contents length
+                ARCHIVE.writeInt16(thisClusterLen)
+                // subtract remaining
+                remaining -= thisClusterLen
+            }
+            else {
+                // mark remaining cluster as deleted
+                ARCHIVE.seekToCluster(cluster)
+                ARCHIVE.write(128)
+            }
 
             // mark end-of-cluster if applicable
             if (remaining == 0) {
@@ -1344,7 +1370,7 @@ class ClusteredFormatDOM(private val ARCHIVE: RandomAccessFile, val throwErrorOn
 
             parent = cluster
             cluster = nextCluster
-        } while (remaining > 0)
+        } while (cluster != LEAF_CLUSTER)
     }
 
     /**
@@ -1368,6 +1394,10 @@ class ClusteredFormatDOM(private val ARCHIVE: RandomAccessFile, val throwErrorOn
         } while (cluster in 1 until LEAF_CLUSTER)
     }
 
+    /**
+     * Returns the length of the file. The file's length is only knowable by chain traversal, so store the result of
+     * this function to avoid unnecessary IO operations.
+     */
     fun getFileLength(entry: FATEntry): Int {
         var accumulator = 0
 
@@ -1386,6 +1416,10 @@ class ClusteredFormatDOM(private val ARCHIVE: RandomAccessFile, val throwErrorOn
         return accumulator
     }
 
+    /**
+     * Returns the type of the file.
+     * @return file type, 0 being "undefined"
+     */
     fun getFileType(entry: FATEntry): Int = ARCHIVE.let {
         it.seek(entry.entryID.toLong() * CLUSTER_SIZE)
         val b = it.read()
@@ -1453,6 +1487,12 @@ class ClusteredFormatDOM(private val ARCHIVE: RandomAccessFile, val throwErrorOn
 
     var defragInterruptRequested = false
 
+    /**
+     * Trims the archive (running [trimArchive]) then frees any clusters that are marked as discarded, then fills the
+     * "gaps" made by those free clusters by moving last clusters on the disk into these "gaps".
+     *
+     * The operation essentially compacts the Archive by removing freed space.
+     */
     fun defrag(option: Int = 0): List<Pair<EntryID, EntryID>> {
         defragInterruptRequested = false
         trimArchive() // will build freeClusters map if the map is empty
@@ -1472,6 +1512,9 @@ class ClusteredFormatDOM(private val ARCHIVE: RandomAccessFile, val throwErrorOn
         return workReport
     }
 
+    /**
+     * Constructs the [freeClusters] map. Meant to be used by Disk Defragment softwares.
+     */
     fun buildFreeClustersMap() {
         for (kluster in 2 + fatClusterCount until ARCHIVE.length().toInt() / CLUSTER_SIZE) {
             if (isThisClusterFree(kluster)) {
@@ -1480,6 +1523,9 @@ class ClusteredFormatDOM(private val ARCHIVE: RandomAccessFile, val throwErrorOn
         }
     }
 
+    /**
+     * Gets the copy of the [freeClusters] map. Meant to be used by Disk Defragment softwares.
+     */
     fun getFreeClusterMap(): List<EntryID> {
         return freeClusters.sorted()
     }
