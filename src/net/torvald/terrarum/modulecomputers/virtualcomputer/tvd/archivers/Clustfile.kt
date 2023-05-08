@@ -193,7 +193,7 @@ open class Clustfile(private val DOM: ClusteredFormatDOM, absolutePath: String) 
     private fun initDir(): Boolean {
         if (FAT == null) {
             try {
-                DOM.allocateFile(0, FILETYPE_DIRECTORY, filename)
+                FAT = DOM.allocateFile(0, FILETYPE_DIRECTORY, filename)
             }
             catch (_: VDIOException) {
                 return false
@@ -203,10 +203,6 @@ open class Clustfile(private val DOM: ClusteredFormatDOM, absolutePath: String) 
         type = FileType.Directory
 
         FAT!!.let { FAT ->
-            val defaultDirs = ByteArray(6)
-            defaultDirs.writeInt24(FAT.entryID, 0)
-            defaultDirs.writeInt24(parentFAT!!.entryID, 3)
-            DOM.writeBytes(FAT, defaultDirs, 0, 6, 0, FILETYPE_DIRECTORY)
             DOM.commitFATchangeToDisk(FAT)
         }
         return true
