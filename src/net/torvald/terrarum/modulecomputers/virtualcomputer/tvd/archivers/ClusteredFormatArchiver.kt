@@ -107,6 +107,10 @@ class ClusteredFormatDOM(private val ARCHIVE: RandomAccessFile, val throwErrorOn
     }
 
     companion object {
+
+        const val FILETYPE_BINARY = 1
+        const val FILETYPE_DIRECTORY = 2
+
         const val CLUSTER_SIZE = 4096 // as per spec
         const val FAT_ENTRY_SIZE = 256 // as per spec
         const val FATS_PER_CLUSTER = CLUSTER_SIZE / FAT_ENTRY_SIZE // typically 16
@@ -742,7 +746,13 @@ class ClusteredFormatDOM(private val ARCHIVE: RandomAccessFile, val throwErrorOn
             else {
                 val filenameHead = name.sliceArray(0 until FILENAME_PRIMARY_LENGTH)
             }
+
+            TODO()
         }
+    }
+
+    private fun tallyFATentryCount(): Int {
+        return fileTable.map { it.value }.sumBy { it.extendedEntries.size + 1 }
     }
 
     /**
@@ -755,13 +765,23 @@ class ClusteredFormatDOM(private val ARCHIVE: RandomAccessFile, val throwErrorOn
      * `fatEntryCount` will be inc/decremented accordingly.
      */
     private fun fatmgrRewriteFAT() {
-
         fatEntryHighest = 2 to 0
         fatEntryIndices.clear()
         fatEntryCount = 0
 
 
+        // expand FAT area if required
+        val newSize = tallyFATentryCount()
+        val currentCap = fatClusterCount * FATS_PER_CLUSTER
+
+        if (newSize > currentCap) {
+            dbgprintln("[Clustered.fatmgrRewriteFAT] growing FAT area...")
+            growFAT() // alters fileTable
+        }
+
+
         fileTable.entries.sortedBy { it.key }.let { FATs ->
+
             // try to rewrite every entry on the FAT
             var fatWritePos = 0
             ARCHIVE.seekToFAT(0)
@@ -793,8 +813,28 @@ class ClusteredFormatDOM(private val ARCHIVE: RandomAccessFile, val throwErrorOn
         }
     }
 
+    fun commitFATchangeToDisk(fat: FATEntry) {
+        var oldFATentryCount = 1
+        var insertionPos = fatEntryIndices[fat.entryID]!!
+        ARCHIVE.seekToFAT(insertionPos + 1)
+        while (true) {
+            val id = ARCHIVE.readInt24()
+            if (id >= EXTENDED_ENTRIES_BASE)
+                oldFATentryCount += 1
+            else
+                break
+            ARCHIVE.skipBytes(FAT_ENTRY_SIZE - 3)
+        }
+
+        spliceFAT(insertionPos, oldFATentryCount, fat.toBytes())
+    }
+
     fun getFile(clusterNum: Int): FATEntry? {
         return fileTable[clusterNum]
+    }
+
+    fun getRootDir(): FATEntry {
+        return fileTable[fatClusterCount + 2]!!
     }
 
     /**
@@ -822,7 +862,7 @@ class ClusteredFormatDOM(private val ARCHIVE: RandomAccessFile, val throwErrorOn
      * @return newly-created FAT entry
      */
     fun allocateFile(size: Int, fileType: Int, filename: String): FATEntry {
-        if (fileType != 1 && fileType != 2) throw UnsupportedOperationException("Invalid File type: $fileType")
+        if (fileType != FILETYPE_BINARY && fileType != FILETYPE_DIRECTORY) throw UnsupportedOperationException("Invalid File type: $fileType")
 
         checkDiskCapacity(size)
         val timeNow = getTimeNow()

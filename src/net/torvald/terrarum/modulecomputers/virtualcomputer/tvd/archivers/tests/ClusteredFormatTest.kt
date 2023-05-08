@@ -1,4 +1,5 @@
 import net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.archivers.ClusteredFormatDOM
+import net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.archivers.ClusteredFormatDOM.Companion.FILETYPE_BINARY
 import net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.toHex
 import java.io.File
 import java.nio.charset.Charset
@@ -58,9 +59,9 @@ fun main(args: Array<String>) {
     val DOM = ClusteredFormatDOM(diskFile)
 
     println("Allocating a longfile")
-    val longfile = DOM.allocateFile(3000, 1, "Longfile3000")
-    val inlineFile = DOM.allocateFile(10, 1, "InlineFile120")
-    val multisectorfile = DOM.allocateFile(7000, 1, "TwoSectorFile7000")
+    val longfile = DOM.allocateFile(3000, FILETYPE_BINARY, "Longfile3000")
+    val inlineFile = DOM.allocateFile(10, FILETYPE_BINARY, "InlineFile120")
+    val multisectorfile = DOM.allocateFile(7000, FILETYPE_BINARY, "TwoSectorFile7000")
 
     println("Writing a bootloader")
     val boottext = "println(\"Hello, BIOS!\")".toByteArray(charset)
@@ -68,14 +69,14 @@ fun main(args: Array<String>) {
 
     println("Writing a longfile")
     val longtext = "This is a long file!".toByteArray(charset)
-    DOM.writeBytes(longfile, longtext, 0, longtext.size, 0, 1)
+    DOM.writeBytes(longfile, longtext, 0, longtext.size, 0, FILETYPE_BINARY)
 
     println("Writing done, trying to read what has written")
     val whatsWritten = DOM.readBytes(longfile, longtext.size, 0)
 
     println("Writing a multisector file")
-    DOM.writeBytes(multisectorfile, superlongtext, 0, superlongtext.size, 0, 1)
-    DOM.writeBytes(multisectorfile, "HAI~".toByteArray(charset), 0, 4, 12, 1)
+    DOM.writeBytes(multisectorfile, superlongtext, 0, superlongtext.size, 0, FILETYPE_BINARY)
+    DOM.writeBytes(multisectorfile, "HAI~".toByteArray(charset), 0, 4, 12, FILETYPE_BINARY)
 
     val multisectorLength = DOM.getFileLength(multisectorfile)
     println("Size of the multisector file: $multisectorLength bytes")
@@ -84,7 +85,7 @@ fun main(args: Array<String>) {
 
     println("Writing an inline file")
     val shorttext = inlinetext.toByteArray(charset)
-    DOM.writeBytes(inlineFile, shorttext, 0, shorttext.size, 0, 1)
+    DOM.writeBytes(inlineFile, shorttext, 0, shorttext.size, 0, FILETYPE_BINARY)
 
 //    println(whatsWritten.toString(charset))
 //    println(whatsWritten2.toString(charset))
@@ -104,9 +105,9 @@ fun main(args: Array<String>) {
     println("Testing RENUM by allocating more FATs")
     repeat(45) { rpt ->
         val testmarker = "########ContentNum $rpt".toByteArray(charset)
-        DOM.allocateFile(testmarker.size, 1, "FAT Filler $rpt").let { entry ->
+        DOM.allocateFile(testmarker.size, FILETYPE_BINARY, "FAT Filler $rpt").let { entry ->
             println("Entry ${entry.entryID.toHex()}, name: ${entry.filename}, fatEntryIndices: ${DOM.fatEntryIndices[entry.entryID]}")
-            DOM.writeBytes(entry, testmarker, 0, testmarker.size, 0, 1)
+            DOM.writeBytes(entry, testmarker, 0, testmarker.size, 0, FILETYPE_BINARY)
     } }
 
 
@@ -114,8 +115,8 @@ fun main(args: Array<String>) {
     testPause("Test 2 is complete. Check the archive, then hit Return to continue")
 
 
-    DOM.writeBytes(longfile, "really long!".toByteArray(charset), 0, 12, 256, 1)
-    DOM.writeBytes(longfile, "reeeeeally long!".toByteArray(charset), 0, 16, 4092, 1)
+    DOM.writeBytes(longfile, "really long!".toByteArray(charset), 0, 12, 256, FILETYPE_BINARY)
+    DOM.writeBytes(longfile, "reeeeeally long!".toByteArray(charset), 0, 16, 4092, FILETYPE_BINARY)
 
 //    val defragWorkReport = DOM.defrag()
 //    defragWorkReport.forEach { (from, to) ->
@@ -124,5 +125,5 @@ fun main(args: Array<String>) {
 
     testPause("Test 3 is complete. Check the archive, then hit Return to continue")
 
-    DOM.writeBytes(inlineFile, shorttext, 0, shorttext.size, shorttext.size, 1)
+    DOM.writeBytes(inlineFile, shorttext, 0, shorttext.size, shorttext.size, FILETYPE_BINARY)
 }
