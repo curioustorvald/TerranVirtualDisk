@@ -11,11 +11,13 @@ import java.nio.charset.Charset
  *
  * Created by minjaesong on 2023-03-31.
  */
-interface Archiver {
+abstract class Archiver {
 
-    fun serialize(dom: VirtualDisk, outFile: File)
-    fun serializeToBA64(dom: VirtualDisk): ByteArray64
-    fun deserialize(file: File, charset: Charset): VirtualDisk
-    val specversion: Byte
+
+
+    abstract fun serialize(outFile: File)
+    abstract fun serializeToBA64(): ByteArray64
+    abstract fun deserialize(file: File, charset: Charset): Any
+    abstract val specversion: Byte
 
 }

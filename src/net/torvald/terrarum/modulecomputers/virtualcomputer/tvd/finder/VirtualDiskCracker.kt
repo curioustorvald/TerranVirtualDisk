@@ -298,7 +298,7 @@ class VirtualDiskCracker(val sysCharset: Charset = Charsets.UTF_8) : JFrame() {
                         fileChooser.showOpenDialog(null)
                         if (fileChooser.selectedFile != null) {
                             try {
-                                vdisk = Format3Archiver().readDiskArchive(fileChooser.selectedFile, Level.WARNING, { popupWarning(it) }, sysCharset)
+                                vdisk = Format3Archiver(null).readDiskArchive(fileChooser.selectedFile, Level.WARNING, { popupWarning(it) }, sysCharset)
                                 if (vdisk != null) {
                                     gotoRoot()
                                     updateDiskInfo()
@@ -333,7 +333,7 @@ class VirtualDiskCracker(val sysCharset: Charset = Charsets.UTF_8) : JFrame() {
                         fileChooser.showSaveDialog(null)
                         if (fileChooser.selectedFile != null) {
                             try {
-                                Format3Archiver().serialize(vdisk!!, fileChooser.selectedFile)
+                                Format3Archiver(vdisk).serialize(fileChooser.selectedFile)
                                 setStat("Disk saved")
                             }
                             catch (e: Exception) {

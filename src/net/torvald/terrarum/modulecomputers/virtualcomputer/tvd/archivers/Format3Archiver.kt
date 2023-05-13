@@ -13,35 +13,37 @@ import java.util.logging.Level
 /**
  * Created by minjaesong on 2023-03-31.
  */
-class Format3Archiver : Archiver {
+class Format3Archiver(val dom: VirtualDisk?) : Archiver() {
 
     override val specversion = 0x03.toByte()
 
-    override fun serialize(dom: VirtualDisk, outFile: File) {
-        outFile.writeBytes64(serializeToBA64(dom))
+    override fun serialize(outFile: File) {
+        outFile.writeBytes64(serializeToBA64())
     }
 
-    override fun serializeToBA64(dom: VirtualDisk): ByteArray64 {
+    override fun serializeToBA64(): ByteArray64 {
+        dom!!.let {
 //        val entriesBuffer = dom.serializeEntriesOnly()
-        val buffer = ByteArray64()
-        val crc = dom.hashCode().toInt32Arr()
+            val buffer = ByteArray64()
+            val crc = dom.hashCode().toInt32Arr()
 
 
-        buffer.appendBytes(VirtualDisk.MAGIC)
-        buffer.appendBytes(dom.capacity.toInt48Arr())
-        buffer.appendBytes(dom.diskName.forceSize(VirtualDisk.NAME_LENGTH))
-        buffer.appendBytes(crc)
-        buffer.appendByte(specversion)
-        buffer.appendByte(dom.attribs)
-        buffer.appendBytes(dom.extraAttribs.forceSize(VirtualDisk.ATTRIBS_LENGTH))
+            buffer.appendBytes(VirtualDisk.MAGIC)
+            buffer.appendBytes(dom.capacity.toInt48Arr())
+            buffer.appendBytes(dom.diskName.forceSize(VirtualDisk.NAME_LENGTH))
+            buffer.appendBytes(crc)
+            buffer.appendByte(specversion)
+            buffer.appendByte(dom.attribs)
+            buffer.appendBytes(dom.extraAttribs.forceSize(VirtualDisk.ATTRIBS_LENGTH))
 
 //        buffer.appendBytes(entriesBuffer)
-        dom.entries.forEach {
-            val serialised = it.value.serialize()
-            buffer.appendBytes(serialised)
-        }
+            dom.entries.forEach {
+                val serialised = it.value.serialize()
+                buffer.appendBytes(serialised)
+            }
 
-        return buffer
+            return buffer
+        }
     }
 
     override fun deserialize(file: File, charset: Charset): VirtualDisk {

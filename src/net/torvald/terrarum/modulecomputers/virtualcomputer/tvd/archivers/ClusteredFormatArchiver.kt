@@ -21,20 +21,29 @@ import kotlin.math.ceil
 /**
  * Created by minjaesong on 2023-03-31.
  */
-class ClusteredFormatArchiver : Archiver {
+class ClusteredFormatArchiver(val dom: ClusteredFormatDOM) : Archiver() {
 
     override val specversion = ClusteredFormatArchiver.specversion
 
-    override fun serialize(dom: VirtualDisk, outFile: File) {
+    override fun serialize(outFile: File) {
         TODO("Not yet implemented")
     }
 
-    override fun serializeToBA64(dom: VirtualDisk): ByteArray64 {
-        TODO("Not yet implemented")
+    override fun serializeToBA64(): ByteArray64 {
+        val buffer = ByteArray64(dom.ARCHIVE.length())
+        dom.ARCHIVE.seek(0)
+        for (k in 0 until dom.ARCHIVE.length() step ClusteredFormatDOM.CLUSTER_SIZE.toLong()) {
+            buffer.appendBytes(dom.ARCHIVE.read(4096))
+        }
+        return buffer
     }
 
-    override fun deserialize(file: File, charset: Charset): VirtualDisk {
-        TODO("Not yet implemented")
+    /**
+     * @param file the archive
+     * @param charset does nothing; charset info is stored in the archive itself
+     */
+    override fun deserialize(file: File, charset: Charset): ClusteredFormatDOM {
+        return ClusteredFormatDOM(RandomAccessFile(file, "rw"))
     }
 
     companion object {
@@ -92,7 +101,7 @@ private fun ByteArray.renumCluster(increment: Int): ByteArray {
     return this
 }
 
-class ClusteredFormatDOM(private val ARCHIVE: RandomAccessFile, val throwErrorOnReadError: Boolean = false) {
+class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorOnReadError: Boolean = false) {
 
     private inline fun testPause(msg: Any?) {
         dbgprintln("\n\n== $msg ==\n\n"); dbgprint("> "); Scanner(System.`in`).nextLine()

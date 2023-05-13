@@ -106,14 +106,14 @@ object VDUtil {
     }
 
     fun dumpToRealMachine(format: String, disk: VirtualDisk, outFile: File) {
-        ArchiverFactory.getDomArchiver(format).serialize(disk, outFile)
+        ArchiverFactory.getDomArchiver(format, disk).serialize(outFile)
     }
 
     /**
      * Reads serialised binary and returns corresponding VirtualDisk instance.
      */
     fun readDiskArchive(format: String, infile: File, charset: Charset): VirtualDisk {
-        return ArchiverFactory.getDomArchiver(format).deserialize(infile, charset)
+        return ArchiverFactory.getDomArchiver(format, null).deserialize(infile, charset) as VirtualDisk
     }
 
 
