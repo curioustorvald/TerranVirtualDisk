@@ -21,8 +21,8 @@ open class Clustfile(private val DOM: ClusteredFormatDOM, absolutePath: String) 
         Undefined, BinaryFile, Directory
     }
 
-    private var FAT: ClusteredFormatDOM.FATEntry? = null
-    private var parentFAT: ClusteredFormatDOM.FATEntry? = null
+    internal var FAT: ClusteredFormatDOM.FATEntry? = null
+    internal var parentFAT: ClusteredFormatDOM.FATEntry? = null
 
     private var charset = DOM.charset
 
@@ -136,18 +136,21 @@ open class Clustfile(private val DOM: ClusteredFormatDOM, absolutePath: String) 
 
     open fun pwrite(buf: ByteArray, bufOffset: Int, count: Int, fileOffset: Int): Boolean {
         FAT.let { FAT ->
-            return if (FAT == null) false
+            return if (FAT == null || !canWrite()) false
             else {
                 require(type == FileType.BinaryFile)
-                DOM.writeBytes(FAT, buf, bufOffset, count, fileOffset, FILETYPE_BINARY)
-                true
+                try {
+                    DOM.writeBytes(FAT, buf, bufOffset, count, fileOffset, FILETYPE_BINARY)
+                    true
+                }
+                catch (_: Throwable) { false }
             }
         }
     }
 
     open fun pwrite(buf: ByteBuffer, bufOffset: Int, count: Int, fileOffset: Int): Boolean {
         FAT.let { FAT ->
-            return if (FAT == null) false
+            return if (FAT == null || !canWrite()) false
             else {
                 val bbuf = ByteArray(count) { buf[bufOffset + it] }
                 return pwrite(bbuf, 0, count, fileOffset)
@@ -156,27 +159,30 @@ open class Clustfile(private val DOM: ClusteredFormatDOM, absolutePath: String) 
     }
 
     open fun pwrite(unsafe: sun.misc.Unsafe, bufptr: Long, count: Int, fileOffset: Int): Boolean {
-        FAT.let { FAT ->
-            return if (FAT == null) false
+        return FAT.let { FAT ->
+            if (FAT == null || !canWrite()) false
             else {
                 val bbuf = ByteArray(count)
                 unsafe.copyMemory(null, bufptr, bbuf, unsafe.arrayBaseOffset(bbuf.javaClass).toLong(), count.toLong())
-                return pwrite(bbuf, 0, count, fileOffset)
+                pwrite(bbuf, 0, count, fileOffset)
             }
         }
     }
 
 
 
-    open fun overwrite(buf: ByteArray) {
-        requireNotNull(FAT)
-        FAT?.let { FAT ->
-            DOM.setFileLength(FAT, buf.size, filetypeToNum())
-            DOM.writeBytes(FAT, buf, 0, buf.size, 0, filetypeToNum())
-        }
+    open fun overwrite(buf: ByteArray): Boolean {
+        return FAT?.let { FAT ->
+            try {
+                DOM.setFileLength(FAT, buf.size, filetypeToNum())
+                DOM.writeBytes(FAT, buf, 0, buf.size, 0, filetypeToNum())
+                true
+            }
+            catch (_: Throwable) { false }
+        } ?: false
     }
 
-    open fun overwrite(unsafe: sun.misc.Unsafe, bufptr: Long, count: Int) {
+    open fun overwrite(unsafe: sun.misc.Unsafe, bufptr: Long, count: Int): Boolean {
         val ba = ByteArray(count)
         unsafe.copyMemory(null, bufptr, ba, unsafe.arrayBaseOffset(ba.javaClass).toLong(), count.toLong())
         return overwrite(ba)
