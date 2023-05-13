@@ -1714,6 +1714,11 @@ class ClusteredFormatDOM(private val ARCHIVE: RandomAccessFile, val throwErrorOn
         ARCHIVE.write(code, 0, minOf(code.size, CLUSTER_SIZE))
     }
 
+    val totalSpace: Long = diskSize
+    val usedSpace: Long = usedClusterCount * 4096L
+    val freeSpace: Long = diskSize - (usedClusterCount * 4096L)
+    val usableSpace: Long = diskSize - ARCHIVE.length()
+
 
 
 

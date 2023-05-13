@@ -51,7 +51,9 @@ open class Clustfile(private val DOM: ClusteredFormatDOM, absolutePath: String) 
 
     private fun rebuildSelfPath(absolutePath: String) {
         fullpath = absolutePath.replace('\\', '/').replace(Regex("//+"), "/").let {
-            return@let if (it.startsWith('/')) it.substring(1) else it
+            (if (it.startsWith('/')) it.drop(1) else it).let {
+                if (it.endsWith('/')) it.dropLast(1) else it
+            }
         }
         val pathWords = fullpath.split('/')
         filename = pathWords.last()
@@ -182,10 +184,35 @@ open class Clustfile(private val DOM: ClusteredFormatDOM, absolutePath: String) 
 
 
 
-    open fun exists(): Boolean {
-        return (FAT != null)
-    }
 
+
+    open fun getName() = filename
+    open fun getParent() = parentPath
+    open fun getParentFile() = Clustfile(DOM, parentPath)
+    open fun getPath() = fullpath
+
+
+
+    open fun canRead() = true
+    open fun canWrite() = (FAT?.readOnly == false)
+    open fun exists() = (FAT != null)
+    open fun isDirectory() = (exists() && type == FileType.Directory)
+    open fun isFile() = (exists() && type == FileType.BinaryFile)
+    open fun isHidden() = (exists() && FAT!!.hidden)
+    open fun lastModified() = FAT?.modificationDate ?: 0L
+    open fun length() = if (exists()) DOM.getFileLength(FAT!!).toLong() else 0L
+    open fun list(nameFilter: (String) -> Boolean = { true }): Array<String>? {
+        if (!exists()) return arrayOf<String>()
+        return DOM.getDirListing(this.FAT!!)?.map { id -> DOM.getFile(id)!! }?.filter { fat -> !fat.deleted }?.map { fat ->
+            "${this.fullpath}/${fat.filename}" }?.filter(nameFilter)?.toTypedArray()
+    }
+    open fun listFiles(nameFilter: (String) -> Boolean = { true }): Array<Clustfile>? {
+        if (!exists()) return arrayOf<Clustfile>()
+        return DOM.getDirListing(this.FAT!!)?.map { id -> DOM.getFile(id)!! }?.filter { fat -> !fat.deleted }?.mapNotNull { fat ->
+            val fullFilePath = "${this.fullpath}/${fat.filename}"
+            if (nameFilter(fullFilePath)) Clustfile(DOM, fullFilePath) else null
+        }?.toTypedArray()
+    }
 
     /**
      * Dir content initialiser for mkdir
@@ -265,8 +292,6 @@ open class Clustfile(private val DOM: ClusteredFormatDOM, absolutePath: String) 
         }
     }
 
-
-
     open fun renameTo(dest: Clustfile): Boolean {
 
         val destParent = Clustfile(DOM, dest.parentPath)
@@ -288,16 +313,22 @@ open class Clustfile(private val DOM: ClusteredFormatDOM, absolutePath: String) 
 
     open fun mkdirs(): Boolean {
         // create dirs if those parent dirs don't exist
-        TODO()
+        return if (this.exists())
+            false
+        else if (this.mkdir())
+            true
+        else {
+            val parent = getParentFile()
+            (parent.mkdirs() || parent.exists()) && this.mkdir()
+        }
     }
 
-
     open fun mkdir(): Boolean {
-        if (Clustfile(DOM, parentPath).exists()) {
+        val parent = getParentFile()
+        if (parent.exists()) {
             type = FileType.Directory
-            val parentFile = Clustfile(DOM, parentPath)
 
-            return continueIfTrue { parentFile.addChild(this) } // implies commitFATchangeToDisk
+            return continueIfTrue { parent.addChild(this) } // implies commitFATchangeToDisk
                   .continueIfTrue { this.initDir() } // implies commitFATchangeToDisk
                   .continueIfTrue { updateFATreference(); true }
         }
@@ -305,6 +336,29 @@ open class Clustfile(private val DOM: ClusteredFormatDOM, absolutePath: String) 
             return false
         }
     }
+
+
+
+    open fun setLastModified(time: Long): Boolean {
+        FAT?.modificationDate = time
+        return exists()
+    }
+
+    open fun setReadOnly(): Boolean {
+        FAT?.readOnly = true
+        return exists()
+    }
+
+    open fun setWritable(state: Boolean): Boolean {
+        FAT?.readOnly = !state
+        return exists()
+    }
+
+    open fun getTotalSpace() = DOM.totalSpace
+    open fun getFreeSpace() = DOM.freeSpace
+    open fun getUsedSpace() = DOM.usedSpace
+    open fun getUsableSpace() = DOM.usableSpace
+
 
 
 
@@ -319,9 +373,7 @@ open class Clustfile(private val DOM: ClusteredFormatDOM, absolutePath: String) 
      * Creates new binary file. To create a new directory, call [mkdir]
      */
     open fun createNewFile(): Boolean {
-        if (FAT != null) {
-            TODO("delete existing file")
-        }
+        if (this.exists()) return false
 
         // create new 0-byte file
         try {
@@ -337,6 +389,12 @@ open class Clustfile(private val DOM: ClusteredFormatDOM, absolutePath: String) 
             type = FileType.Undefined
             return false
         }
+    }
+
+    open fun delete(): Boolean {
+        if (!this.exists()) return false
+        DOM.discardFile(FAT!!.entryID)
+        return true
     }
 
 
