@@ -276,6 +276,10 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
                 )
         }
 
+        override fun toString(): String {
+            return "FATEntry(ID: ${entryID.toHex()}; filename=\"$filename\", #ExtEntries=${extendedEntries.size}; isInlineDirectory=$isInlineDirectory, readOnly=$readOnly, hidden=$hidden, system=$system, deleted=$deleted)"
+        }
+
         fun toFlag() = readOnly.toInt(0) or
                 hidden.toInt(1) or
                 system.toInt(2) or
@@ -293,6 +297,7 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
             val flags = readOnly.toInt(0) or
                     hidden.toInt(1) or
                     system.toInt(2) or
+                    isInlineDirectory.toInt(4)
                     deleted.toInt(7)
             val cd = creationDate.toInt48Arr()
             val md = modificationDate.toInt48Arr()
@@ -649,6 +654,7 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
         // write changes to the disk
         val nextIndex = fatEntryCount
 
+
         // toBytes() creates a clone of the entry and thus now de-synced from what's in the fileTable
         // (remember: spliceFAT may renumber FATs in the fileTable)
         // therefore it should be safe to do this
@@ -665,12 +671,13 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
     private fun fatmgrAllocateInlineFile(entry: FATEntry, size: Int, fileType: Int) {
         val myEntryIndex = fatEntryIndices[entry.entryID]
                 ?: throw IllegalArgumentException("No such file with following ID: ${entry.entryID}")
+        val oldFATentrySize = entry.extendedEntries.size + 1
 
         if (fileType == 0) throw UnsupportedOperationException("Invalid file type: $fileType")
         if (!entry.isInline) throw IllegalArgumentException("File is not inline (ID: ${entry.entryID})")
         if (entry.hasExtraEntryWithType { it xor 0xFFFF10 < 16 }) throw IllegalArgumentException("File is already allocated and is inline (ID: ${entry.entryID})")
 
-        val entrySizeDelta = ceil(size.toDouble() / INLINED_ENTRY_BYTES).toInt()
+        val entrySizeDelta = ceil(size.toDouble() / INLINED_ENTRY_BYTES).toInt().coerceAtLeast(1)
 
         // create bytearrays to append to
         val newBytes = List(entrySizeDelta) { ByteArray(FAT_ENTRY_SIZE) }
@@ -689,19 +696,24 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
         // put the bytearrays to the entry in the memory
         entry.extendedEntries.addAll(newBytes)
 
+        // flag inlinedirectory if applicable
+        if (fileType == FILETYPE_DIRECTORY) {
+            entry.isInlineDirectory = true
+        }
+
         // shift FAT entries up
         fatEntryIndices.entries.filter { it.value > myEntryIndex }.forEach { (entryID, fatIndex) ->
             fatEntryIndices[entryID] = fatIndex + entrySizeDelta
         }
 
 
-//        dbgprintln("[Clustered] fatmgrAllocateInlineFile1 -- entryID: ${entry.entryID.toHex()}, FAT index: ${fatEntryIndices[entry.entryID]}")
+        dbgprintln("[Clustered] fatmgrAllocateInlineFile1 -- entryID: ${entry.entryID.toHex()}, FAT index: ${fatEntryIndices[entry.entryID]}, myEntryIndex = $myEntryIndex")
 
-        // splice the bytearrays into the Archive
-        spliceFAT(myEntryIndex + newBytesStart + 1, 0, newBytes)
+        // overwrite the existing FAT created by allocateFile -> fatmgrAddEntry
+        spliceFAT(myEntryIndex, oldFATentrySize, entry.toBytes())
 
 
-//        dbgprintln("[Clustered] fatmgrAllocateInlineFile2 -- entryID: ${entry.entryID.toHex()}, FAT index: ${fatEntryIndices[entry.entryID]}")
+        dbgprintln("[Clustered] fatmgrAllocateInlineFile2 -- entryID: ${entry.entryID.toHex()}, FAT index: ${fatEntryIndices[entry.entryID]}")
     }
 
     /**
@@ -880,10 +892,10 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
 
         val ptr = if (size <= INLINING_THRESHOLD) getNextFreeInlineCluster() else usedClusterCount
 
-        dbgprintln("[Clustered] allocateFile where: ${ptr.toHex()}")
+        dbgprintln("[Clustered] allocateFile ptr: ${ptr.toHex()}")
 
         if (ptr in INLINE_FILE_CLUSTER_BASE..INLINE_FILE_CLUSTER_LAST) {
-            fatmgrCreateNewEntry(charset, ptr, filename, false, false, false, false, timeNow, timeNow, fileType == 1).let {
+            fatmgrCreateNewEntry(charset, ptr, filename, false, false, false, false, timeNow, timeNow, fileType == FILETYPE_DIRECTORY).let {
                 fatmgrAllocateInlineFile(it, size, fileType)
                 return it
             }
@@ -1268,12 +1280,29 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
         }
     }
 
+    fun readBytesInline(entry: FATEntry, buffer: ByteArray, bufferOffset: Int, readLength: Int, readStartOffset: Int): Int {
+        dbgprintln("[Clustered.readBytesInline] ptr = ${entry.entryID.toHex()}")
+        val bytes = entry.getInlineBytes()
+        var readLength = if (readLength + readStartOffset > bytes.size) bytes.size - readStartOffset else readLength
+        if (readLength + bufferOffset > bytes.size) readLength -= bufferOffset
+
+        dbgprintln("[Clustered.readBytesInline] readLength=$readLength")
+
+        System.arraycopy(bytes, readStartOffset, buffer, bufferOffset, readLength)
+        return readLength
+    }
+
     /**
      * Reads the file. Read bytes go to the given buffer. If the read operation reaches outside the file, the operation
      * will be finished, and the return value will be smaller than the specified readLength.
      * @return number of bytes actually read
      */
     fun readBytes(entry: FATEntry, buffer: ByteArray, bufferOffset: Int, readLength: Int, readStartOffset: Int): Int {
+        if (entry.isInline) {
+            dbgprintln("[Clustered.readBytes] this file (ID ${entry.entryID.toHex()}) is in-lined, calling readBytesInline")
+            return readBytesInline(entry, buffer, bufferOffset, readLength, readStartOffset)
+        }
+
         var readCursor = readStartOffset
         var remaining = readLength
 
@@ -1291,7 +1320,13 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
         var actualBytesWritten = 0
 
         var cursorInClusterFileArea = readStartOffset
+
+        dbgprintln("[Clustered.readBytes] ptr = ${ptr.toHex()}")
+
         while (readCursor < readLength + readStartOffset) {
+
+            dbgprintln("[Clustered.readBytes] while ( $readCursor < ${readLength + readStartOffset} )")
+
             // seek to next cluster
             // if cursorInCluster is larger than FILE_BLOCK_CONTENTS_SIZE, this operation will loop until the file cursor is on the right cluster
             while (cursorInClusterFileArea >= FILE_BLOCK_CONTENTS_SIZE) {
@@ -1314,10 +1349,14 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
             }
 
             // at the end of the skip-run, position the file to the right place
+            dbgprintln("[Clustered.readBytes] seek to ptr ${ptr.toHex()}, offset ${FILE_BLOCK_HEADER_SIZE + cursorInClusterFileArea}")
             ARCHIVE.seekToCluster(ptr, FILE_BLOCK_HEADER_SIZE + cursorInClusterFileArea)
 
             // cursor is moved to the right place, do the reading
-            val readLengthOnThisCluster = minOf(remaining, FILE_BLOCK_CONTENTS_SIZE - cursorInClusterFileArea, contentsSizeInThisCluster)
+            val readLengthOnThisCluster = listOf(remaining, FILE_BLOCK_CONTENTS_SIZE - cursorInClusterFileArea, contentsSizeInThisCluster).filter { it > 0 }.minOf { it  }
+
+            dbgprintln("[Clustered.readBytes] readLengthOnThisCluster = $readLengthOnThisCluster ; minOf $remaining, ${FILE_BLOCK_CONTENTS_SIZE - cursorInClusterFileArea}, $contentsSizeInThisCluster")
+
             // actually read
             ARCHIVE.read(buffer, bufferOffset + readCursor - readStartOffset, readLengthOnThisCluster)
             actualBytesWritten += readLengthOnThisCluster
@@ -1335,9 +1374,10 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
      * @return ByteArray containing bytes actually been read. Size of this array may be smaller than the specified length.
      */
     fun readBytes(entry: FATEntry, length: Int, offset: Int): ByteArray {
+        dbgprintln("[Clustered.readBytes] readBytes ptr=${entry.entryID.toHex()}, len=$length")
         val ba = ByteArray(length)
         val actualSize = readBytes(entry, ba, 0, length, offset)
-
+        dbgprintln("[Clustered.readBytes] readBytes actualSize=$actualSize")
         if (ba.size == actualSize) return ba
 
         val ba2 = ByteArray(actualSize)
@@ -1442,10 +1482,29 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
      * @return file type, 0 being "undefined"
      */
     fun getFileType(entry: FATEntry): Int = ARCHIVE.let {
-        it.seek(entry.entryID.toLong() * CLUSTER_SIZE)
-        val b = it.read()
-        if (b == -1) throw IOException("The Archive cannot be read; offset: ${entry.entryID.toLong() * CLUSTER_SIZE}")
-        return b and 15
+        return if (entry.isInline) {
+            it.seekToFAT(fatEntryIndices[entry.entryID]!!)
+
+            // sanity check
+            it.readInt24().let {
+                if (it != entry.entryID) throw IllegalStateException("fatEntryIndices mismatch -- entry(args) id: ${entry.entryID.toHex()}, entry(FAT) id: ${it.toHex()}")
+            }
+
+            it.seekToFAT(fatEntryIndices[entry.entryID]!! + 1)
+
+            // check for Extended Entry
+            it.readInt24().let {
+                if (it < EXTENDED_ENTRIES_BASE) throw IllegalStateException("inline entry ${entry.entryID.toHex()} is not followed by an Extended Entry (found ${it.toHex()})")
+
+                return it and 15
+            }
+        }
+        else {
+            it.seek(entry.entryID.toLong() * CLUSTER_SIZE)
+            val b = it.read()
+            if (b == -1) throw IOException("The Archive cannot be read; offset: ${entry.entryID.toLong() * CLUSTER_SIZE}")
+            b and 15
+        }
     }
 
     fun isDirectory(entry: FATEntry) = getFileType(entry) == 2

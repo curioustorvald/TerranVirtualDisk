@@ -38,4 +38,20 @@ fun main(args: Array<String>) {
     println("Successful? " + file1.pwrite(superlongtext, 0, superlongtext.size, 256))
 
     println(ClustfileInputStream(file1).readAllBytes().toString(charset))
+
+    testPause("")
+
+    val root_bin = Clustfile(DOM, "/bin").also {
+        it.mkdir()
+    }
+
+    testPause("new file '/bin' created; check the archive")
+
+    val root_bin_file = Clustfile(DOM, "/bin/foo.bar").also {
+        "println('Hello, world!');return 0;".toByteArray(charset).let { t ->
+            it.pwrite(t, 0, t.size, 0)
+        }
+    }
+
+    println(ClustfileInputStream(root_bin_file).readAllBytes().toString(charset))
 }
