@@ -451,7 +451,7 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
         0x1000 -> Charset.forName("utf-8")
         0x1001 -> Charset.forName("utf-16be")
         0x1002 -> Charset.forName("utf-16le")
-        else -> Charset.forName("cp437")
+        else -> Charset.forName("iso-8859-1") // supposed to be ibm437 but using this due to a bug? where ibm437 would not pass high bytes (0x80..0xFF) as-is
     }
 
     init {
@@ -1142,7 +1142,7 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
             fatmgrRewriteFAT() // must precede the writeBytes
 
             writeBytes(uninlinedFile, fileBytes, 0, fileBytes.size, 0, fileType, true)
-            
+
             renameEntryID(inlinedFile.entryID, uninlinedFile.entryID)
         }
     }
