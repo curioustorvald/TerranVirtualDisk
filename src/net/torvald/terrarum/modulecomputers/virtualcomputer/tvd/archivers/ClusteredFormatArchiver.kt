@@ -222,7 +222,7 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
         /** Typically the root dir will sit on ID=4 */
         internal val ROOT_DIR_CLUSTER = ByteArray(CLUSTER_SIZE).also {
             // meta1 (type:dir)
-            it[0] = 1
+            it[0] = FILETYPE_DIRECTORY.toByte()
             // meta2 (persistent:true)
             it[1] = 0x80.toByte()
             // prev ptr
@@ -1342,6 +1342,8 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
     fun setFileLength(entry: FATEntry, newLength: Int, fileType: Int) {
         if (fileType == 0) throw UnsupportedOperationException("Invalid file type: $fileType")
 
+        if (entry.isInline) return
+
         var remaining = newLength
 
         var parent = HEAD_CLUSTER
@@ -1723,11 +1725,26 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
         ARCHIVE.write(code, 0, minOf(code.size, CLUSTER_SIZE))
     }
 
-    val totalSpace: Long = diskSize
-    val usedSpace: Long = usedClusterCount * 4096L
-    val freeSpace: Long = diskSize - (usedClusterCount * 4096L)
-    val usableSpace: Long = diskSize - ARCHIVE.length()
+    val totalSpace: Long; get() = diskSize
+    val usedSpace: Long; get() = usedClusterCount * 4096L
+    val freeSpace: Long; get() = diskSize - (usedClusterCount * 4096L)
+    val usableSpace: Long; get() = diskSize - ARCHIVE.length()
 
+
+    /**
+     * @return Cluster flags in big endian: high 8 bits for Meta1, low 8 bits for Meta2
+     */
+    fun getClusterFlags(clusterNum: Long): Int {
+        ARCHIVE.seekToCluster(clusterNum)
+        return ARCHIVE.readUshortBig()
+    }
+    /**
+     * @return Cluster flags in big endian: high 8 bits for Meta1, low 8 bits for Meta2
+     */
+    fun getClusterFlags(clusterNum: Int): Int {
+        ARCHIVE.seekToCluster(clusterNum)
+        return ARCHIVE.readUshortBig()
+    }
 
 
 
