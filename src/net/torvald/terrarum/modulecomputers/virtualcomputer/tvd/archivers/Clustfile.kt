@@ -55,7 +55,7 @@ open class Clustfile(private val DOM: ClusteredFormatDOM, absolutePath: String) 
         dbgprintln("[Clustfile] FAT: $FAT")
     }
 
-    private fun ClusteredFormatDOM.getDirListing(dir: ClusteredFormatDOM.FATEntry): List<Int>? {
+    private fun getDirListing(dir: ClusteredFormatDOM.FATEntry): List<Int>? {
         if (DOM.getFileType(dir) != FILETYPE_DIRECTORY) return null
         val ba = DOM.readBytes(dir, DOM.getFileLength(dir), 0)
         if (ba.size % 3 != 0) throw IllegalStateException("Length of dir not multiple of 3")
@@ -88,7 +88,7 @@ open class Clustfile(private val DOM: ClusteredFormatDOM, absolutePath: String) 
     private fun updatePropertiesByHeadCluster() {
         if (FAT != null) {
             if (FAT!!.entryID < EXTENDED_ENTRIES_BASE) {
-                type = numToFileType(DOM.getClusterFlags(FAT!!.entryID).ushr(8).and(15))
+                type = numToFileType(DOM.getFileType(FAT!!))
             }
             else {
                 type = if (FAT!!.isInlineDirectory) FileType.Directory else FileType.BinaryFile
@@ -100,15 +100,24 @@ open class Clustfile(private val DOM: ClusteredFormatDOM, absolutePath: String) 
     }
 
     private fun searchForFAT(pathHierarchy: Array<String>): ClusteredFormatDOM.FATEntry? {
+        dbgprintln("[Clustfile.searchForFAT] file path: [${pathHierarchy.joinToString(" > ", transform = { "\"$it\"" })}]")
         var currentDir: ClusteredFormatDOM.FATEntry? = DOM.getRootDir()
         for (dirName in pathHierarchy) {
+            dbgprintln("[Clustfile.searchForFAT] dirName = $dirName")
+
             if (currentDir == null) break
 
-            val dirListing = DOM.getDirListing(currentDir)
+            val dirListing = getDirListing(currentDir)
+
+            dbgprintln("[Clustfile.searchForFAT] ls: ${dirListing?.joinToString()}")
+
             if (dirListing != null) {
                 var found = false
                 for (entryID in dirListing) {
                     val dirFile = DOM.getFile(entryID)
+
+                    dbgprintln("[Clustfile.searchForFAT] entryID = $entryID; dirName $dirName ?= ${DOM.getFile(entryID)?.filename}")
+
                     if (dirFile != null && dirName == DOM.getFile(entryID)?.filename) {
                         currentDir = dirFile
                         found = true
@@ -132,33 +141,27 @@ open class Clustfile(private val DOM: ClusteredFormatDOM, absolutePath: String) 
 
 
     open fun pread(buf: ByteArray, bufOffset: Int, count: Int, fileOffset: Int): Int {
-        FAT.let { FAT ->
-            return if (FAT == null) -1
-            else DOM.readBytes(FAT, buf, bufOffset, count, fileOffset)
-        }
+        return if (FAT == null) -1
+        else DOM.readBytes(FAT!!, buf, bufOffset, count, fileOffset)
     }
 
     open fun pread(buf: ByteBuffer, bufOffset: Int, count: Int, fileOffset: Int): Int {
-        FAT.let { FAT ->
-            return if (FAT == null) -1
-            else {
-                val bbuf = ByteArray(count)
-                val readCount = DOM.readBytes(FAT, bbuf, 0, count, fileOffset)
-                buf.put(bbuf, bufOffset, readCount)
-                readCount
-            }
+        return if (FAT == null) -1
+        else {
+            val bbuf = ByteArray(count)
+            val readCount = DOM.readBytes(FAT!!, bbuf, 0, count, fileOffset)
+            buf.put(bbuf, bufOffset, readCount)
+            readCount
         }
     }
 
     open fun pread(unsafe: sun.misc.Unsafe, bufptr: Long, count: Int, fileOffset: Int): Int {
-        FAT.let { FAT ->
-            return if (FAT == null) -1
-            else {
-                val bbuf = ByteArray(count)
-                val readCount = DOM.readBytes(FAT, bbuf, 0, count, fileOffset)
-                unsafe.copyMemory(bbuf, unsafe.arrayBaseOffset(bbuf.javaClass).toLong(), null, bufptr, readCount.toLong())
-                readCount
-            }
+        return if (FAT == null) -1
+        else {
+            val bbuf = ByteArray(count)
+            val readCount = DOM.readBytes(FAT!!, bbuf, 0, count, fileOffset)
+            unsafe.copyMemory(bbuf, unsafe.arrayBaseOffset(bbuf.javaClass).toLong(), null, bufptr, readCount.toLong())
+            readCount
         }
     }
 
@@ -167,41 +170,37 @@ open class Clustfile(private val DOM: ClusteredFormatDOM, absolutePath: String) 
 
 
     open fun pwrite(buf: ByteArray, bufOffset: Int, count: Int, fileOffset: Int): Boolean {
-        FAT.let { FAT ->
-            return if (FAT == null || !canWrite()) false
-            else {
-                require(type == FileType.BinaryFile)
-                try {
-                    DOM.writeBytes(FAT, buf, bufOffset, count, fileOffset, FILETYPE_BINARY)
-                    DOM.commitFATchangeToDisk(FAT)
-                    true
-                }
-                catch (e: Throwable) {
-                    e.printStackTrace()
-                    false }
-
+        return if (FAT == null || !canWrite()) false
+        else {
+            require(type == FileType.BinaryFile)
+            try {
+                DOM.writeBytes(FAT!!, buf, bufOffset, count, fileOffset, FILETYPE_BINARY)
+                updateFATreference()
+                dbgprintln("[Clustfile.pwrite] FAT update: $FAT")
+                DOM.commitFATchangeToDisk(FAT!!)
+                true
+            }
+            catch (e: Throwable) {
+                e.printStackTrace()
+                false
             }
         }
     }
 
     open fun pwrite(buf: ByteBuffer, bufOffset: Int, count: Int, fileOffset: Int): Boolean {
-        FAT.let { FAT ->
-            return if (FAT == null || !canWrite()) false
-            else {
-                val bbuf = ByteArray(count) { buf[bufOffset + it] }
-                return pwrite(bbuf, 0, count, fileOffset)
-            }
+        return if (FAT == null || !canWrite()) false
+        else {
+            val bbuf = ByteArray(count) { buf[bufOffset + it] }
+            return pwrite(bbuf, 0, count, fileOffset)
         }
     }
 
     open fun pwrite(unsafe: sun.misc.Unsafe, bufptr: Long, count: Int, fileOffset: Int): Boolean {
-        return FAT.let { FAT ->
-            if (FAT == null || !canWrite()) false
-            else {
-                val bbuf = ByteArray(count)
-                unsafe.copyMemory(null, bufptr, bbuf, unsafe.arrayBaseOffset(bbuf.javaClass).toLong(), count.toLong())
-                pwrite(bbuf, 0, count, fileOffset)
-            }
+        return if (FAT == null || !canWrite()) false
+        else {
+            val bbuf = ByteArray(count)
+            unsafe.copyMemory(null, bufptr, bbuf, unsafe.arrayBaseOffset(bbuf.javaClass).toLong(), count.toLong())
+            pwrite(bbuf, 0, count, fileOffset)
         }
     }
 
@@ -210,27 +209,42 @@ open class Clustfile(private val DOM: ClusteredFormatDOM, absolutePath: String) 
     open fun overwrite(buf: ByteArray): Boolean {
         if (!exists()) createNewFile()
         return continueIfTrue {
-                  dbgprintln("[Clustfile.overwrite] FAT: $FAT")
+            dbgprintln("[Clustfile.overwrite] FAT: $FAT")
 
-                  FAT?.let { FAT ->
-                      try {
-                          DOM.setFileLength(FAT, buf.size, filetypeToNum())
-                          DOM.writeBytes(FAT, buf, 0, buf.size, 0, filetypeToNum())
-                          DOM.commitFATchangeToDisk(FAT)
-                          true
-                      }
-                      catch (e: Throwable) {
-                          e.printStackTrace()
-                          false
-                      }
-                  } ?: false
-              }
+            try {
+                DOM.setFileLength(FAT!!, buf.size, filetypeToNum())
+                DOM.writeBytes(FAT!!, buf, 0, buf.size, 0, filetypeToNum())
+                updateFATreference(); DOM.commitFATchangeToDisk(FAT!!)
+                true
+            }
+            catch (e: Throwable) {
+                e.printStackTrace()
+                false
+            }
+        }
     }
 
     open fun overwrite(unsafe: sun.misc.Unsafe, bufptr: Long, count: Int): Boolean {
         val ba = ByteArray(count)
         unsafe.copyMemory(null, bufptr, ba, unsafe.arrayBaseOffset(ba.javaClass).toLong(), count.toLong())
         return overwrite(ba)
+    }
+
+    /**
+     * Sets the length of the file to zero. Binary file only
+     */
+    open fun clear(): Boolean {
+        return if (type == FileType.BinaryFile && FAT != null) {
+            try {
+                DOM.setFileLength(FAT!!, 0, filetypeToNum())
+                true
+            }
+            catch (e: Throwable) {
+                e.printStackTrace()
+                false
+            }
+        }
+        else false
     }
 
 
@@ -254,12 +268,12 @@ open class Clustfile(private val DOM: ClusteredFormatDOM, absolutePath: String) 
     open fun length() = if (exists()) DOM.getFileLength(FAT!!).toLong() else 0L
     open fun list(nameFilter: (String) -> Boolean = { true }): Array<String>? {
         if (!exists()) return arrayOf<String>()
-        return DOM.getDirListing(this.FAT!!)?.map { id -> DOM.getFile(id)!! }?.filter { fat -> !fat.deleted }?.map { fat ->
+        return getDirListing(this.FAT!!)?.map { id -> DOM.getFile(id)!! }?.filter { fat -> !fat.deleted }?.map { fat ->
             "${this.fullpath}/${fat.filename}" }?.filter(nameFilter)?.toTypedArray()
     }
     open fun listFiles(nameFilter: (String) -> Boolean = { true }): Array<Clustfile>? {
         if (!exists()) return arrayOf<Clustfile>()
-        return DOM.getDirListing(this.FAT!!)?.map { id -> DOM.getFile(id)!! }?.filter { fat -> !fat.deleted }?.mapNotNull { fat ->
+        return getDirListing(this.FAT!!)?.map { id -> DOM.getFile(id)!! }?.filter { fat -> !fat.deleted }?.mapNotNull { fat ->
             val fullFilePath = "${this.fullpath}/${fat.filename}"
             if (nameFilter(fullFilePath)) Clustfile(DOM, fullFilePath) else null
         }?.toTypedArray()
@@ -294,21 +308,18 @@ open class Clustfile(private val DOM: ClusteredFormatDOM, absolutePath: String) 
 
         return continueIfTrue {
             // write the child
-            FAT.let { FAT ->
-                if (FAT == null) false
-                else {
-                    val dirListing = DOM.getDirListing(FAT)!!
-                    // if the entry is not already there, write one
-                    if (!dirListing.contains(file.FAT!!.entryID)) {
-                        val defaultDirs = ByteArray(3)
-                        defaultDirs.writeInt24(file.FAT!!.entryID, 0)
-                        DOM.writeBytes(FAT, defaultDirs, 0, 3, dirListing.size * 3, FILETYPE_DIRECTORY)
-
-                        DOM.commitFATchangeToDisk(FAT)
-                    }
-
-                    true
+            if (FAT == null) false
+            else {
+                val dirListing = getDirListing(FAT!!)!!
+                // if the entry is not already there, write one
+                if (!dirListing.contains(file.FAT!!.entryID)) {
+                    val defaultDirs = ByteArray(3)
+                    defaultDirs.writeInt24(file.FAT!!.entryID, 0)
+                    DOM.writeBytes(FAT!!, defaultDirs, 0, 3, dirListing.size * 3, FILETYPE_DIRECTORY)
+                    updateFATreference(); DOM.commitFATchangeToDisk(FAT!!)
                 }
+
+                true
             }
         }
     }
@@ -318,22 +329,19 @@ open class Clustfile(private val DOM: ClusteredFormatDOM, absolutePath: String) 
 
 
         return continueIfTrue {
-            FAT?.let { FAT ->
-                val dirListing = DOM.getDirListing(FAT)!!
-                val fileEntryID = file.FAT!!.entryID
-                if (dirListing.contains(fileEntryID)) {
-                    continueIfTrue {
-                        val newBytes = ByteArray((dirListing.size - 1) * 3)
-                        dirListing.filter { it != fileEntryID }.forEachIndexed { index, id -> newBytes.writeInt24(id, index * 3) }
-                        DOM.setFileLength(FAT, newBytes.size, FILETYPE_DIRECTORY)
-                        DOM.writeBytes(FAT, newBytes, 0, newBytes.size, 0, FILETYPE_DIRECTORY)
-
-                        DOM.commitFATchangeToDisk(FAT)
-                        true
-                    }
+            val dirListing = getDirListing(FAT!!)!!
+            val fileEntryID = file.FAT!!.entryID
+            if (dirListing.contains(fileEntryID)) {
+                continueIfTrue {
+                    val newBytes = ByteArray((dirListing.size - 1) * 3)
+                    dirListing.filter { it != fileEntryID }.forEachIndexed { index, id -> newBytes.writeInt24(id, index * 3) }
+                    DOM.setFileLength(FAT!!, newBytes.size, FILETYPE_DIRECTORY)
+                    DOM.writeBytes(FAT!!, newBytes, 0, newBytes.size, 0, FILETYPE_DIRECTORY)
+                    updateFATreference(); DOM.commitFATchangeToDisk(FAT!!)
+                    true
                 }
-                else true
-            } ?: false
+            }
+            else true
         }
     }
 

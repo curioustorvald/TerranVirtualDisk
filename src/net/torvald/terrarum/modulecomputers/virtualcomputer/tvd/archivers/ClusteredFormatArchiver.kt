@@ -322,7 +322,6 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
             get() = entryID in INLINE_FILE_CLUSTER_BASE..INLINE_FILE_CLUSTER_LAST
 
         fun takeAttribsFrom(other: FATEntry) {
-            this.entryID = other.entryID
             this.readOnly = other.readOnly
             this.hidden = other.hidden
             this.system = other.system
@@ -823,6 +822,8 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
     }
 
     fun commitFATchangeToDisk(fat: FATEntry) {
+        dbgprintln("[Clustered] commitFATchangeToDisk; FAT: $fat")
+
         var oldFATentryCount = 1
         val insertionPos = fatEntryIndices[fat.entryID]!!
         ARCHIVE.seekToFAT(insertionPos + 1)
@@ -957,6 +958,9 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
         for (k in 0 until clusterCount) {
             ARCHIVE.seekToCluster(ptrs[k+1])
             ARCHIVE.write(byteArrayOf(fileType.toByte(), 0) + ptrs[k].toInt24Arr() + ptrs[k+2].toInt24Arr())
+
+            dbgprintln("[Clustered] initClusters -- writing prevPtr ${ptrs[k].toHex()}, nextPtr ${ptrs[k+2].toHex()}")
+
             // write content size for the clusters
             val currentContentSize = ARCHIVE.readUshortBig()
             val sizeNumToWrite = minOf(FILE_BLOCK_CONTENTS_SIZE, currentContentSize + remaining)
@@ -1136,22 +1140,28 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
             fatEntryCount -= inlinedFile.extendedEntries.size + 1
 
             fatmgrRewriteFAT() // must precede the writeBytes
-            writeBytes(uninlinedFile, fileBytes, 0, fileBytes.size, 0, fileType)
+
+            writeBytes(uninlinedFile, fileBytes, 0, fileBytes.size, 0, fileType, true)
+            
+            renameEntryID(inlinedFile.entryID, uninlinedFile.entryID)
         }
     }
 
     /**
      * Writes bytes to the file. If the write operation reaches outside the file's allocated size, length of the file
      * will be increased (i.e. new clusters will be allocated) to fit
+     *
+     * Writing opration may change the FAT reference, if the file was previously inlined then uninlined, or was uninlined then inlined.
+     * The Clustfile must update its FAT reference after this function call.
      */
-    fun writeBytes(entry: FATEntry, buffer: ByteArray, bufferOffset: Int, writeLength: Int, writeStartOffset: Int, fileType: Int) {
+    fun writeBytes(entry: FATEntry, buffer: ByteArray, bufferOffset: Int, writeLength: Int, writeStartOffset: Int, fileType: Int, forceUninline: Boolean = false) {
         if (fileType == 0) throw UnsupportedOperationException("Invalid file type: $fileType")
 
         val addedBytes = writeStartOffset + writeLength - getFileLength(entry)
 
         checkDiskCapacity(addedBytes)
 
-        if (entry.isInline) return writeBytesInline(entry, buffer, bufferOffset, writeLength, writeStartOffset, fileType)
+        if (entry.isInline && !forceUninline) return writeBytesInline(entry, buffer, bufferOffset, writeLength, writeStartOffset, fileType)
 
         var writeCursor = writeStartOffset
         var remaining = writeLength
@@ -1746,7 +1756,44 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
         return ARCHIVE.readUshortBig()
     }
 
+    /**
+     * Renaming targets:
+     * - FAT area: Extended Attributes 0xFFFF12
+     * - File area: every directory
+     */
+    internal fun renameEntryID(old: EntryID, new: EntryID) {
+        dbgprintln("[Clustered.renameEntryID] trying to rename $old to $new")
 
+        // rename FAT area
+        for (fatIndex in 0 until fatEntryCount) {
+            ARCHIVE.seekToFAT(fatIndex)
+            if (ARCHIVE.readInt24() == 0xFFFF12) {
+                for (offset in 8 until FAT_ENTRY_SIZE step 3) {
+                    ARCHIVE.seekToFAT(fatIndex, offset)
+                    if (ARCHIVE.readInt24() == old) {
+                        ARCHIVE.seekToFAT(fatIndex, offset)
+                        ARCHIVE.writeInt24(new)
+                        dbgprintln("[Clustered.renameEntryID] ... at FAT ${fatIndex.toHex()}, offset $offset")
+                    }
+                }
+            }
+        }
+
+        // rename File area
+        for (kluster in 2 + fatClusterCount until ARCHIVE.length().toInt() / CLUSTER_SIZE) {
+            ARCHIVE.seekToCluster(kluster)
+            if (ARCHIVE.read() and 15 == FILETYPE_DIRECTORY) {
+                for (offset in FILE_BLOCK_HEADER_SIZE until CLUSTER_SIZE step 3) {
+                    ARCHIVE.seekToCluster(kluster, offset)
+                    if (ARCHIVE.readInt24() == old) {
+                        ARCHIVE.seekToCluster(kluster, offset)
+                        ARCHIVE.writeInt24(new)
+                        dbgprintln("[Clustered.renameEntryID] ... at Cluster ${kluster.toHex()}, offset $offset")
+                    }
+                }
+            }
+        }
+    }
 
 
 

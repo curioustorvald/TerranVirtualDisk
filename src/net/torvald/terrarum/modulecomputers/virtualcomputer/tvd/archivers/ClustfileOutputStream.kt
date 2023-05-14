@@ -16,7 +16,7 @@ import java.io.OutputStream
  * bytes at the end of the file); if `false`, writing operation will be performed at the beginning of the file (essentially re-writing the file)
  * Created by minjaesong on 2023-05-13.
  */
-class ClustfileOutputStream(private val DOM: ClusteredFormatDOM, private val file: Clustfile, val append: Boolean = false) : OutputStream() {
+class ClustfileOutputStream(private val file: Clustfile, val append: Boolean = false) : OutputStream() {
 
     private var cursor = file.length().toInt()
     private var fileWipedout = append
@@ -26,8 +26,8 @@ class ClustfileOutputStream(private val DOM: ClusteredFormatDOM, private val fil
     }
 
     private fun checkFileWipeout() {
-        if (!fileWipedout && file.FAT != null) {
-            DOM.setFileLength(file.FAT!!, 0, FILETYPE_BINARY)
+        if (!fileWipedout && file.exists()) {
+            file.clear()
             fileWipedout = true
         }
     }
@@ -49,7 +49,7 @@ class ClustfileOutputStream(private val DOM: ClusteredFormatDOM, private val fil
     }
 }
 
-class ClustfileInputStream(private val DOM: ClusteredFormatDOM, private val file: Clustfile) : InputStream() {
+class ClustfileInputStream(private val file: Clustfile) : InputStream() {
     private var cursor = 0
     private var fileLength = file.length().toInt()
     private var markLimit = 0

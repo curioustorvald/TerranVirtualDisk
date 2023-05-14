@@ -1,5 +1,6 @@
 import net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.archivers.ClusteredFormatDOM
 import net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.archivers.Clustfile
+import net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.archivers.ClustfileInputStream
 import java.io.File
 import java.util.*
 
@@ -34,4 +35,7 @@ fun main(args: Array<String>) {
     println("Writing...")
     println("Successful? " + file1.overwrite("Testing! This text should be written on the FAT area!".toByteArray(charset)))
 
+    println("Successful? " + file1.pwrite(superlongtext, 0, superlongtext.size, 256))
+
+    println(ClustfileInputStream(file1).readAllBytes().toString(charset))
 }
