@@ -138,7 +138,7 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
         const val EXTENDED_ENTRIES_BASE = 0xFFFF00
 
         const val INLINED_ENTRY_BYTES = FAT_ENTRY_SIZE - 8 // typically 248
-        const val FILENAME_PRIMARY_LENGTH = FAT_ENTRY_SIZE - 16 // typically 240
+        const val FILENAME_PRIMARY_LENGTH = 220
 
         const val INLINING_THRESHOLD = INLINED_ENTRY_BYTES * 8 // compare with <= -- files up to this size is recommended to be inlined
 
@@ -198,7 +198,7 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
 
             //// CLUSTER 2-3 ////
             // FAT for the root
-            file.write(byteArrayOf(0, 0, 4, 4))
+            file.write(byteArrayOf(0, 0, 4, (FILETYPE_DIRECTORY.shl(4) or 4).toByte()))
             // creation date
             file.write(timeNow)
             // modification date
@@ -234,6 +234,10 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
 
     }
 
+    /**
+     * if given filename and filename stored in the extendedEntries contradicts, 'long filename' entries in
+     * extendedEntries will be replaced
+     */
     data class FATEntry(
             val charset: Charset,
 
@@ -245,7 +249,7 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
             var system: Boolean,
             var deleted: Boolean,
 
-            var isInlineDirectory: Boolean = false,
+            var fileType: Int,
 
             var creationDate: Long = -1L,
             var modificationDate: Long = -1L,
@@ -259,15 +263,17 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
              * @param fat256 The entire 256 byte of the FAT entry
              * @return Pair of Clusternum to [FATEntry]
              */
-            fun fromBytes(charset: Charset, fat256: ByteArray) = if (fat256.size != ClusteredFormatDOM.FAT_ENTRY_SIZE) throw IllegalArgumentException("FAT not ${ClusteredFormatDOM.FAT_ENTRY_SIZE} bytes long (${fat256.size})") else
+            fun fromBytes(charset: Charset, fat256: ByteArray) = if (fat256.size != ClusteredFormatDOM.FAT_ENTRY_SIZE)
+                throw IllegalArgumentException("FAT not ${ClusteredFormatDOM.FAT_ENTRY_SIZE} bytes long (${fat256.size})")
+            else
                 fat256.toInt24() to FATEntry(charset,
                         fat256.toInt24(),
                         fat256[3].and(1.toByte()) != 0.toByte(),
                         fat256[3].and(2.toByte()) != 0.toByte(),
                         fat256[3].and(4.toByte()) != 0.toByte(),
-                        fat256[3].and(128.toByte()) != 0.toByte(),
+                        fat256[3].and(8.toByte()) != 0.toByte(),
 
-                        fat256[3].and(16.toByte()) != 0.toByte(),
+                        fat256[3].toUint().ushr(4).and(15),
 
                         fat256.sliceArray(4..9).toInt48(),
                         fat256.sliceArray(10..15).toInt48(),
@@ -276,8 +282,35 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
                 )
         }
 
+
+        init {
+            if (fileType == 0) throw Error()
+
+            updateFilename(filename)
+        }
+
+        fun updateFilename(fullFilename: String) {
+            // put long filename into the extendedEntries
+            val fnameBytes = fullFilename.toByteArray(charset)
+            if (fnameBytes.size > FILENAME_PRIMARY_LENGTH) {
+                // clear out existing extended entries first
+                extendedEntries.removeIf { it.toInt24() == 0xFFFF11 }
+
+                extendedEntries.addAll(fnameBytes.sliceArray(FILENAME_PRIMARY_LENGTH until minOf(fnameBytes.size, 248 * 256 + FILENAME_PRIMARY_LENGTH))
+                        .chunked(248).mapIndexed { index, bytes ->
+                            val ba = ByteArray(256)
+                            ba.writeInt24(0xFFFF11, 0)
+                            ba.writeInt24(entryID, 3)
+                            ba[6] = index.toByte()
+                            ba[7] = bytes.size.toByte()
+                            System.arraycopy(bytes, 0, ba, 8, bytes.size)
+                            ba
+                        })
+            }
+        }
+
         override fun toString(): String {
-            return "FATEntry(ID: ${entryID.toHex()}; filename=\"$filename\", #ExtEntries=${extendedEntries.size}; isInlineDirectory=$isInlineDirectory, readOnly=$readOnly, hidden=$hidden, system=$system, deleted=$deleted)"
+            return "FATEntry(ID: ${entryID.toHex()}; filename=\"$filename\", #ExtEntries=${extendedEntries.size}; filetype=$fileType, readOnly=$readOnly, hidden=$hidden, system=$system, deleted=$deleted)"
         }
 
         fun toFlag() = readOnly.toInt(0) or
@@ -297,16 +330,16 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
             val flags = readOnly.toInt(0) or
                     hidden.toInt(1) or
                     system.toInt(2) or
-                    isInlineDirectory.toInt(4)
-                    deleted.toInt(7)
+                    deleted.toInt(4) or
+                    fileType.shl(4)
             val cd = creationDate.toInt48Arr()
             val md = modificationDate.toInt48Arr()
-            val name = filename.toEntryName(240, charset)
+            val name = filename.toEntryName(FILENAME_PRIMARY_LENGTH, charset)
 
             ba[3] = flags.toByte()
             System.arraycopy(cd, 0, ba, 4, 6)
             System.arraycopy(md, 0, ba, 10, 6)
-            System.arraycopy(name, 0, ba, 16, 240)
+            System.arraycopy(name, 0, ba, 16, FILENAME_PRIMARY_LENGTH)
 
             return listOf(ba) + extendedEntries
         }
@@ -336,11 +369,11 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
         }
 
         fun validate() {
-            val inlineType = 0xFFFF10 or isInlineDirectory.toInt()
-            extendedEntries.forEachIndexed { index, bytes ->
-                val type = bytes.toInt24()
-                if (type xor 0xFFFF10 < 16 && type != inlineType)
-                    throw IllegalStateException("Contradictory Inlining Extended Entries (both ${type.and(15)} and ${inlineType.and(15)} exist)")
+            val inlineType = 0xFFFF10 or fileType
+            val illegalFiletypes = (0xFFFF10..0xFFFF1F).minus(inlineType)
+            (extendedEntries.map { it.toInt24() } intersect illegalFiletypes).let {
+                if (it.isNotEmpty())
+                    throw IllegalStateException("Contradictory Inlining Extended Entries (expected: only ${inlineType.toHex()}, got: ${it.sorted().joinToString { it.toHex() }})")
             }
         }
 
@@ -629,6 +662,7 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
 //            dbgprintln("                entryID ${id.toHex()} -> fatIndex ${(2 * CLUSTER_SIZE + fatIndex * FAT_ENTRY_SIZE).toHex()}")
 //        }
 
+        entry.modificationDate = time
         ARCHIVE.seekToFAT(fatEntryIndices[entry.entryID]!!, 10)
         ARCHIVE.writeInt48(time)
     }
@@ -636,8 +670,13 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
     /**
      * Creates a new FAT entry, adds it to the `fileTable` and the Archive via [fatmgrAddEntry], then returns the newly-created entry.
      */
-    private fun fatmgrCreateNewEntry(charset: Charset, entryID: EntryID, filename: String, readOnly: Boolean, hidden: Boolean, system: Boolean, deleted: Boolean, creationTime: Long, modificationTime: Long, isInlineDir: Boolean = false): FATEntry {
-        FATEntry(charset, entryID, readOnly, hidden, system, deleted, isInlineDir, creationTime, modificationTime).let {
+    private fun fatmgrCreateNewEntry(
+            charset: Charset, entryID: EntryID, filename: String,
+            readOnly: Boolean, hidden: Boolean, system: Boolean, deleted: Boolean,
+            creationTime: Long, modificationTime: Long,
+            fileType: Int
+    ): FATEntry {
+        FATEntry(charset, entryID, readOnly, hidden, system, deleted, fileType, creationTime, modificationTime).let {
             it.filename = filename
             // sync the FAT region on the Archive
             fatmgrAddEntry(it)
@@ -668,12 +707,12 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
 //        dbgprintln("[Clustered] fatmgrAddEntry -- entryID: ${entry.entryID.toHex()}, FAT index: ${fatEntryIndices[entry.entryID]}")
     }
 
-    private fun fatmgrAllocateInlineFile(entry: FATEntry, size: Int, fileType: Int) {
+    private fun fatmgrAllocateInlineFile(entry: FATEntry, size: Int) {
         val myEntryIndex = fatEntryIndices[entry.entryID]
                 ?: throw IllegalArgumentException("No such file with following ID: ${entry.entryID}")
         val oldFATentrySize = entry.extendedEntries.size + 1
 
-        if (fileType == 0) throw UnsupportedOperationException("Invalid file type: $fileType")
+        if (entry.fileType == 0) throw UnsupportedOperationException("FAT has no file type set (${entry.fileType})")
         if (!entry.isInline) throw IllegalArgumentException("File is not inline (ID: ${entry.entryID})")
         if (entry.hasExtraEntryWithType { it xor 0xFFFF10 < 16 }) throw IllegalArgumentException("File is already allocated and is inline (ID: ${entry.entryID})")
 
@@ -685,7 +724,7 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
         var allocBytesRemaining = size
         newBytes.forEachIndexed { index, bytes ->
             // write Extra Entry Header
-            bytes.writeInt24(0xFFFF10 or fileType, 0)
+            bytes.writeInt24(0xFFFF10 or entry.fileType, 0)
             bytes.writeInt24(entry.entryID, 3)
             bytes[6] = index.toByte()
             bytes[7] = minOf(INLINED_ENTRY_BYTES, allocBytesRemaining).toByte()
@@ -696,10 +735,8 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
         // put the bytearrays to the entry in the memory
         entry.extendedEntries.addAll(newBytes)
 
-        // flag inlinedirectory if applicable
-        if (fileType == FILETYPE_DIRECTORY) {
-            entry.isInlineDirectory = true
-        }
+        // flag filetype
+        entry.fileType = entry.fileType
 
         // shift FAT entries up
         fatEntryIndices.entries.filter { it.value > myEntryIndex }.forEach { (entryID, fatIndex) ->
@@ -719,11 +756,11 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
     /**
      * Unlike [writeBytes], this function will change the length of the file -- all the previous bytes will be replaced!
      */
-    private fun fatmgrSetInlineBytes(entry: FATEntry, infileBytes: ByteArray, fileType: Int) {
+    private fun fatmgrSetInlineBytes(entry: FATEntry, infileBytes: ByteArray) {
         val myEntryIndex = fatEntryIndices[entry.entryID]
                 ?: throw IllegalArgumentException("No such file with following ID: ${entry.entryID.toHex()}")
 
-        if (fileType == 0) throw UnsupportedOperationException("Invalid file type: $fileType")
+        if (entry.fileType == 0) throw UnsupportedOperationException("FAT has no file type set (${entry.fileType})")
         if (!entry.isInline) throw IllegalArgumentException("File is not inline (ID: ${entry.entryID.toHex()})")
 
         val oldExtendedEntryCount = entry.extendedEntries.size
@@ -737,7 +774,7 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
             val writeSize = minOf(INLINED_ENTRY_BYTES, remaining)
 
             // write Extra Entry Header
-            bytes.writeInt24(0xFFFF10 or fileType, 0)
+            bytes.writeInt24(0xFFFF10 or entry.fileType, 0)
             bytes.writeInt24(entry.entryID, 3)
             bytes[6] = index.toByte()
             bytes[7] = writeSize.toByte()
@@ -749,26 +786,12 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
 
 
         // remove any inline bytes of matching type from the entry
-        entry.extendedEntries.removeIf { it.toInt24(0) == 0xFFFF10 or fileType }
+        entry.extendedEntries.removeIf { it.toInt24(0) == 0xFFFF10 or entry.fileType }
         // then append newBytes
         entry.extendedEntries.addAll(newBytes)
 
         // splice up the Archive
         spliceFAT(myEntryIndex + 1, oldExtendedEntryCount, entry.extendedEntries)
-    }
-
-    private fun fatmgrSetFilename(entry: FATEntry, name: ByteArray) {
-        name.trimNull().let { name ->
-
-            if (name.size <= FILENAME_PRIMARY_LENGTH) {
-
-            }
-            else {
-                val filenameHead = name.sliceArray(0 until FILENAME_PRIMARY_LENGTH)
-            }
-
-            TODO()
-        }
     }
 
     private fun tallyFATentryCount(): Int {
@@ -784,7 +807,7 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
      *
      * `fatEntryCount` will be inc/decremented accordingly.
      */
-    private fun fatmgrRewriteFAT() {
+    private fun fatmgrRewriteAllFAT() {
         fatEntryHighest = 2 to 0
         fatEntryIndices.clear()
         fatEntryCount = 0
@@ -864,7 +887,8 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
      * Mark the cluster and the FAT entry as to-be-deleted. Cluster and FAT changes will be written to the Archive.
      * Deleted FAT will remain on the fileTable; use `fatmgrRewriteFAT()` to purge them.
      */
-    fun discardFile(clusterNum: Int) {
+    fun discardFile(fat: FATEntry) {
+        val clusterNum = fat.entryID
         if (clusterNum < 2 + fatClusterCount) throw IllegalArgumentException("Cannot discard cluster #$clusterNum -- is Meta/Bootsector/FAT")
         if (clusterNum in INLINE_FILE_CLUSTER_BASE..INLINE_FILE_CLUSTER_LAST) throw IllegalArgumentException("Cannot discard inline file using this function")
 
@@ -873,11 +897,12 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
 
 
             traverseClusters(clusterNum) {
-                ARCHIVE.setClusterMeta1Flag(it, 0x80, 1)
+                ARCHIVE.setClusterMeta1Flag(it, 0x80, 255)
                 freeClusters.add(it)
             }
-
         }
+
+        spliceFAT(fatEntryIndices[clusterNum]!!, 1, emptyList())
     }
 
     /**
@@ -895,13 +920,13 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
         dbgprintln("[Clustered] allocateFile ptr: ${ptr.toHex()}")
 
         if (ptr in INLINE_FILE_CLUSTER_BASE..INLINE_FILE_CLUSTER_LAST) {
-            fatmgrCreateNewEntry(charset, ptr, filename, false, false, false, false, timeNow, timeNow, fileType == FILETYPE_DIRECTORY).let {
-                fatmgrAllocateInlineFile(it, size, fileType)
+            fatmgrCreateNewEntry(charset, ptr, filename, false, false, false, false, timeNow, timeNow, fileType).let {
+                fatmgrAllocateInlineFile(it, size)
                 return it
             }
         }
         else {
-            fatmgrCreateNewEntry(charset, ptr, filename, false, false, false, false, timeNow, timeNow).let {
+            fatmgrCreateNewEntry(charset, ptr, filename, false, false, false, false, timeNow, timeNow, fileType).let {
                 // actually create zero-filled clusters
                 if (size > 0) {
                     expandFile(size, HEAD_CLUSTER, ptr, fileType) // will increment usedClusterCount
@@ -956,7 +981,7 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
 
         else
             initClusters(sizeDelta - sizeDiscount, prevCluster, currentCluster, clustersToAdd, fileType)
-        
+
         return nextCluster
     }
 
@@ -1131,8 +1156,8 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
         return seekpos
     }
 
-    private fun writeBytesInline(inlinedFile: FATEntry, buffer: ByteArray, bufferOffset: Int, writeLength: Int, writeStartOffset: Int, fileType: Int) {
-        if (fileType == 0) throw UnsupportedOperationException("Invalid file type: $fileType")
+    private fun writeBytesInline(inlinedFile: FATEntry, buffer: ByteArray, bufferOffset: Int, writeLength: Int, writeStartOffset: Int) {
+        if (inlinedFile.fileType == 0) throw UnsupportedOperationException("FAT has no file type set (${inlinedFile.fileType})")
 
         val fileCopy = inlinedFile.getInlineBytes()
         val fileBytes = ByteArray(maxOf(fileCopy.size, writeStartOffset + writeLength))
@@ -1142,18 +1167,18 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
 
         if (fileBytes.size <= INLINING_THRESHOLD) {
             inlinedFile.modificationDate = getTimeNow()
-            fatmgrSetInlineBytes(inlinedFile, fileBytes, fileType)
+            fatmgrSetInlineBytes(inlinedFile, fileBytes)
         }
         // un-inline the file
         else {
-            val uninlinedFile = allocateFile(fileBytes.size, fileType, inlinedFile.filename)
+            val uninlinedFile = allocateFile(fileBytes.size, inlinedFile.fileType, inlinedFile.filename)
             uninlinedFile.takeAttribsFrom(inlinedFile)
             fileTable.remove(inlinedFile.entryID)
             fatEntryCount -= inlinedFile.extendedEntries.size + 1
 
-            fatmgrRewriteFAT() // must precede the writeBytes
+            fatmgrRewriteAllFAT() // must precede the writeBytes
 
-            writeBytes(uninlinedFile, fileBytes, 0, fileBytes.size, 0, fileType, true)
+            writeBytes(uninlinedFile, fileBytes, 0, fileBytes.size, 0, true)
 
             renameEntryID(inlinedFile.entryID, uninlinedFile.entryID)
         }
@@ -1166,14 +1191,14 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
      * Writing opration may change the FAT reference, if the file was previously inlined then uninlined, or was uninlined then inlined.
      * The Clustfile must update its FAT reference after this function call.
      */
-    fun writeBytes(entry: FATEntry, buffer: ByteArray, bufferOffset: Int, writeLength: Int, writeStartOffset: Int, fileType: Int, forceUninline: Boolean = false) {
-        if (fileType == 0) throw UnsupportedOperationException("Invalid file type: $fileType")
+    fun writeBytes(entry: FATEntry, buffer: ByteArray, bufferOffset: Int, writeLength: Int, writeStartOffset: Int, forceUninline: Boolean = false) {
+        if (entry.fileType == 0) throw UnsupportedOperationException("FAT has no file type set (${entry.fileType})")
 
         val addedBytes = writeStartOffset + writeLength - getFileLength(entry)
 
         checkDiskCapacity(addedBytes)
 
-        if (entry.isInline && !forceUninline) return writeBytesInline(entry, buffer, bufferOffset, writeLength, writeStartOffset, fileType)
+        if (entry.isInline && !forceUninline) return writeBytesInline(entry, buffer, bufferOffset, writeLength, writeStartOffset)
 
         var writeCursor = writeStartOffset
         var remaining = writeLength
@@ -1209,8 +1234,8 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
                 if (nextPtr == LEAF_CLUSTER) {
                     // allocate new cluster and then modify the nextPtr on the Archive
                     val sizeDelta = if (addedBytes > 0) addedBytes - writeLength + remaining else remaining
-                    dbgprintln("[Clustered]   expanding file (sizeDelta=$sizeDelta, prevCluster=$prev, currentCluster=$ptr, fileType=$fileType)")
-                    nextPtr = expandFile(sizeDelta, prev, ptr, fileType)
+                    dbgprintln("[Clustered]   expanding file (sizeDelta=$sizeDelta, prevCluster=$prev, currentCluster=$ptr, fileType=${entry.fileType})")
+                    nextPtr = expandFile(sizeDelta, prev, ptr, entry.fileType)
 
                     firstClusterOfWriting = false
                 }
@@ -1389,9 +1414,8 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
      * Sets the length of the file. If the new length is smaller, the remaining clusters, if any, will be marked as discarded;
      * if the new length is longer, new clusters will be allocated. Clusters marked as discarded must be freed using [defrag].
      */
-    fun setFileLength(entry: FATEntry, newLength: Int, fileType: Int) {
-        if (fileType == 0) throw UnsupportedOperationException("Invalid file type: $fileType")
-
+    fun setFileLength(entry: FATEntry, newLength: Int) {
+        if (entry.fileType == 0) throw UnsupportedOperationException("FAT has no file type set (${entry.fileType})")
         if (entry.isInline) return
 
         var remaining = newLength
@@ -1426,7 +1450,7 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
             }
             // create new cluster if end-of-cluster is prematurely reached
             else if (nextCluster == NULL_CLUSTER) {
-                nextCluster = expandFile(remaining, parent, cluster, fileType)
+                nextCluster = expandFile(remaining, parent, cluster, entry.fileType)
             }
 
             parent = cluster
@@ -1968,6 +1992,12 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
         it.substring(0..4).toInt(16).toString(16).toUpperCase().padStart(3, '0') + ":" + it.substring(5..7)
     }
     private fun Int.toHex() = this.toLong().toHex()
+}
+
+private fun ByteArray.chunked(size: Int): List<ByteArray> {
+    return List(this.size / size + 1) {
+        this.sliceArray(size * it until minOf(size * (it + 1), this.size))
+    }
 }
 
 internal fun ByteArray.toInt16(offset: Int = 0): Int {

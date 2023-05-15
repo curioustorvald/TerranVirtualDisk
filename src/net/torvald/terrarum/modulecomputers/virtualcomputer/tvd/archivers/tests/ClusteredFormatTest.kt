@@ -69,14 +69,14 @@ fun main(args: Array<String>) {
 
     println("Writing a longfile")
     val longtext = "This is a long file!".toByteArray(charset)
-    DOM.writeBytes(longfile, longtext, 0, longtext.size, 0, FILETYPE_BINARY)
+    DOM.writeBytes(longfile, longtext, 0, longtext.size, 0)
 
     println("Writing done, trying to read what has written")
     val whatsWritten = DOM.readBytes(longfile, longtext.size, 0)
 
     println("Writing a multisector file")
-    DOM.writeBytes(multisectorfile, superlongtext, 0, superlongtext.size, 0, FILETYPE_BINARY)
-    DOM.writeBytes(multisectorfile, "HAI~".toByteArray(charset), 0, 4, 12, FILETYPE_BINARY)
+    DOM.writeBytes(multisectorfile, superlongtext, 0, superlongtext.size, 0)
+    DOM.writeBytes(multisectorfile, "HAI~".toByteArray(charset), 0, 4, 12)
 
     val multisectorLength = DOM.getFileLength(multisectorfile)
     println("Size of the multisector file: $multisectorLength bytes")
@@ -85,7 +85,7 @@ fun main(args: Array<String>) {
 
     println("Writing an inline file")
     val shorttext = inlinetext.toByteArray(charset)
-    DOM.writeBytes(inlineFile, shorttext, 0, shorttext.size, 0, FILETYPE_BINARY)
+    DOM.writeBytes(inlineFile, shorttext, 0, shorttext.size, 0)
 
 //    println(whatsWritten.toString(charset))
 //    println(whatsWritten2.toString(charset))
@@ -107,7 +107,7 @@ fun main(args: Array<String>) {
         val testmarker = "########ContentNum $rpt".toByteArray(charset)
         DOM.allocateFile(testmarker.size, FILETYPE_BINARY, "FAT Filler $rpt").let { entry ->
             println("Entry ${entry.entryID.toHex()}, name: ${entry.filename}, fatEntryIndices: ${DOM.fatEntryIndices[entry.entryID]}")
-            DOM.writeBytes(entry, testmarker, 0, testmarker.size, 0, FILETYPE_BINARY)
+            DOM.writeBytes(entry, testmarker, 0, testmarker.size, 0)
     } }
 
 
@@ -115,8 +115,8 @@ fun main(args: Array<String>) {
     testPause("Test 2 is complete. Check the archive, then hit Return to continue")
 
 
-    DOM.writeBytes(longfile, "really long!".toByteArray(charset), 0, 12, 256, FILETYPE_BINARY)
-    DOM.writeBytes(longfile, "reeeeeally long!".toByteArray(charset), 0, 16, 4092, FILETYPE_BINARY)
+    DOM.writeBytes(longfile, "really long!".toByteArray(charset), 0, 12, 256)
+    DOM.writeBytes(longfile, "reeeeeally long!".toByteArray(charset), 0, 16, 4092)
 
 //    val defragWorkReport = DOM.defrag()
 //    defragWorkReport.forEach { (from, to) ->
@@ -125,10 +125,10 @@ fun main(args: Array<String>) {
 
     testPause("Test 3 is complete. Check the archive, then hit Return to continue")
 
-    DOM.writeBytes(inlineFile, shorttext, 0, shorttext.size, shorttext.size, FILETYPE_BINARY)
+    DOM.writeBytes(inlineFile, shorttext, 0, shorttext.size, shorttext.size)
 
     testPause("Test 4 is complete. Check the archive, then hit Return to continue")
 
     val singleClusterFile = DOM.allocateFile(4086, FILETYPE_BINARY, "4086ByteFile")
-    DOM.writeBytes(singleClusterFile, ByteArray(4086) { '#'.toByte() }, 0, 4086, 0, FILETYPE_BINARY)
+    DOM.writeBytes(singleClusterFile, ByteArray(4086) { '#'.toByte() }, 0, 4086, 0)
 }

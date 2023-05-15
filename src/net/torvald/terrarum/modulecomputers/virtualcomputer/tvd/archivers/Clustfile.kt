@@ -1,7 +1,6 @@
 package net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.archivers
 
 import net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.VDIOException
-import net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.archivers.ClusteredFormatDOM.Companion.EXTENDED_ENTRIES_BASE
 import net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.archivers.ClusteredFormatDOM.Companion.FILETYPE_BINARY
 import net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.archivers.ClusteredFormatDOM.Companion.FILETYPE_DIRECTORY
 import net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.toHex
@@ -27,10 +26,6 @@ open class Clustfile(private val DOM: ClusteredFormatDOM, absolutePath: String) 
     private fun <T> List<T>.tail() = this.subList(1, this.size)
     private fun <T> List<T>.init() = this.subList(0, this.lastIndex)
 
-    enum class FileType {
-        Undefined, BinaryFile, Directory
-    }
-
     internal var FAT: ClusteredFormatDOM.FATEntry? = null
     internal var parentFAT: ClusteredFormatDOM.FATEntry? = null
 
@@ -44,7 +39,8 @@ open class Clustfile(private val DOM: ClusteredFormatDOM, absolutePath: String) 
     private val filenameBytes: ByteArray
         get() = pathHierarchyBytes.last()
 
-    private lateinit var type: FileType
+    private val type: Int?
+        get() = FAT?.fileType
 
 
     init {
@@ -95,17 +91,7 @@ open class Clustfile(private val DOM: ClusteredFormatDOM, absolutePath: String) 
     }
 
     private fun updatePropertiesByHeadCluster() {
-        if (FAT != null) {
-            if (FAT!!.entryID < EXTENDED_ENTRIES_BASE) {
-                type = numToFileType(DOM.getFileType(FAT!!))
-            }
-            else {
-                type = if (FAT!!.isInlineDirectory) FileType.Directory else FileType.BinaryFile
-            }
-        }
-        else {
-            type = FileType.Undefined
-        }
+
     }
 
     private fun searchForFAT(pathHierarchy: Array<String>): ClusteredFormatDOM.FATEntry? {
@@ -189,9 +175,9 @@ open class Clustfile(private val DOM: ClusteredFormatDOM, absolutePath: String) 
         if (!exists()) createNewFile()
         return if (FAT == null || !canWrite()) false
         else {
-            require(type == FileType.BinaryFile)
+            require(type == FILETYPE_BINARY)
             try {
-                DOM.writeBytes(FAT!!, buf, bufOffset, count, fileOffset, FILETYPE_BINARY)
+                DOM.writeBytes(FAT!!, buf, bufOffset, count, fileOffset)
                 updateFATreference()
                 dbgprintln("[Clustfile.pwrite] FAT update: $FAT")
                 DOM.commitFATchangeToDisk(FAT!!)
@@ -229,8 +215,8 @@ open class Clustfile(private val DOM: ClusteredFormatDOM, absolutePath: String) 
             dbgprintln("[Clustfile.overwrite] FAT: $FAT")
 
             try {
-                DOM.setFileLength(FAT!!, buf.size, filetypeToNum())
-                DOM.writeBytes(FAT!!, buf, 0, buf.size, 0, filetypeToNum())
+                DOM.setFileLength(FAT!!, buf.size)
+                DOM.writeBytes(FAT!!, buf, 0, buf.size, 0)
                 updateFATreference(); DOM.commitFATchangeToDisk(FAT!!)
                 true
             }
@@ -251,9 +237,9 @@ open class Clustfile(private val DOM: ClusteredFormatDOM, absolutePath: String) 
      * Sets the length of the file to zero. Binary file only
      */
     open fun clear(): Boolean {
-        return if (type == FileType.BinaryFile && FAT != null) {
+        return if (type == FILETYPE_BINARY && FAT != null) {
             try {
-                DOM.setFileLength(FAT!!, 0, filetypeToNum())
+                DOM.setFileLength(FAT!!, 0)
                 true
             }
             catch (e: Throwable) {
@@ -278,8 +264,8 @@ open class Clustfile(private val DOM: ClusteredFormatDOM, absolutePath: String) 
     open fun canRead() = true
     open fun canWrite() = (FAT?.readOnly == false)
     open fun exists() = (FAT != null)
-    open fun isDirectory() = (exists() && type == FileType.Directory)
-    open fun isFile() = (exists() && type == FileType.BinaryFile)
+    open fun isDirectory() = (exists() && type == FILETYPE_DIRECTORY)
+    open fun isFile() = (exists() && type == FILETYPE_BINARY)
     open fun isHidden() = (exists() && FAT!!.hidden)
     open fun lastModified() = FAT?.modificationDate ?: 0L
     open fun length() = if (exists()) DOM.getFileLength(FAT!!).toLong() else 0L
@@ -310,8 +296,6 @@ open class Clustfile(private val DOM: ClusteredFormatDOM, absolutePath: String) 
             }
         }
 
-        type = FileType.Directory
-
         FAT!!.let { FAT ->
             DOM.commitFATchangeToDisk(FAT)
         }
@@ -319,20 +303,18 @@ open class Clustfile(private val DOM: ClusteredFormatDOM, absolutePath: String) 
     }
 
     open fun addChild(file: Clustfile): Boolean {
-        require(type == FileType.Directory)
-
-        if (FAT == null) return false // run initDir() to create the file
+        require(type == FILETYPE_DIRECTORY)
 
         return continueIfTrue {
             // write the child
-            if (FAT == null) false
+            if (FAT == null) false // run initDir() to create the file
             else {
                 val dirListing = getDirListing(FAT!!)!!
                 // if the entry is not already there, write one
                 if (!dirListing.contains(file.FAT!!.entryID)) {
                     val defaultDirs = ByteArray(3)
                     defaultDirs.writeInt24(file.FAT!!.entryID, 0)
-                    DOM.writeBytes(FAT!!, defaultDirs, 0, 3, dirListing.size * 3, FILETYPE_DIRECTORY)
+                    DOM.writeBytes(FAT!!, defaultDirs, 0, 3, dirListing.size * 3)
                     updateFATreference(); DOM.commitFATchangeToDisk(FAT!!)
                 }
 
@@ -342,7 +324,7 @@ open class Clustfile(private val DOM: ClusteredFormatDOM, absolutePath: String) 
     }
 
     open fun removeChild(file: Clustfile): Boolean {
-        require(type != FileType.BinaryFile)
+        require(type == FILETYPE_DIRECTORY)
 
 
         return continueIfTrue {
@@ -352,8 +334,8 @@ open class Clustfile(private val DOM: ClusteredFormatDOM, absolutePath: String) 
                 continueIfTrue {
                     val newBytes = ByteArray((dirListing.size - 1) * 3)
                     dirListing.filter { it != fileEntryID }.forEachIndexed { index, id -> newBytes.writeInt24(id, index * 3) }
-                    DOM.setFileLength(FAT!!, newBytes.size, FILETYPE_DIRECTORY)
-                    DOM.writeBytes(FAT!!, newBytes, 0, newBytes.size, 0, FILETYPE_DIRECTORY)
+                    DOM.setFileLength(FAT!!, newBytes.size)
+                    DOM.writeBytes(FAT!!, newBytes, 0, newBytes.size, 0)
                     updateFATreference(); DOM.commitFATchangeToDisk(FAT!!)
                     true
                 }
@@ -398,7 +380,7 @@ open class Clustfile(private val DOM: ClusteredFormatDOM, absolutePath: String) 
     open fun mkdir(): Boolean {
         val parent = getParentFile()
         if (parent.exists()) {
-            mkfat(FileType.Directory)
+            mkfat(FILETYPE_DIRECTORY)
 
             return continueIfTrue { parent.addChild(this) } // implies commitFATchangeToDisk
                   .continueIfTrue { this.initDir() } // implies commitFATchangeToDisk
@@ -436,27 +418,14 @@ open class Clustfile(private val DOM: ClusteredFormatDOM, absolutePath: String) 
 
 
 
-    private fun filetypeToNum() = when (type) {
-        FileType.Undefined -> 0
-        FileType.BinaryFile -> FILETYPE_BINARY
-        FileType.Directory -> FILETYPE_DIRECTORY
-    }
-    private fun numToFileType(type: Int) = when (type) {
-        0 -> FileType.Undefined
-        FILETYPE_BINARY -> FileType.BinaryFile
-        FILETYPE_DIRECTORY -> FileType.Directory
-        else -> throw IllegalArgumentException()
-    }
 
-    private fun mkfat(fileType: FileType) {
+    private fun mkfat(fileType: Int) {
         if (FAT != null) throw IllegalStateException()
         try {
-            type = fileType
-            FAT = DOM.allocateFile(0, filetypeToNum(), filename)
+            FAT = DOM.allocateFile(0, fileType, filename)
         }
         catch (e: Throwable) {
             e.printStackTrace()
-            type = FileType.Undefined
         }
     }
 
@@ -468,7 +437,7 @@ open class Clustfile(private val DOM: ClusteredFormatDOM, absolutePath: String) 
 
         // create new 0-byte file
         try {
-            mkfat(FileType.BinaryFile)
+            mkfat(FILETYPE_BINARY)
 
             dbgprintln("[Clustfile.createNewFile] getParentFile")
 
@@ -482,14 +451,13 @@ open class Clustfile(private val DOM: ClusteredFormatDOM, absolutePath: String) 
         }
         catch (e: VDIOException) {
             e.printStackTrace()
-            type = FileType.Undefined
             return false
         }
     }
 
     open fun delete(): Boolean {
         if (!this.exists()) return false
-        DOM.discardFile(FAT!!.entryID)
+        DOM.discardFile(FAT!!)
         return true
     }
 
