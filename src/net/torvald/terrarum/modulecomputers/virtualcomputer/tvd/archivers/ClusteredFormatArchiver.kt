@@ -1156,6 +1156,12 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
         return seekpos
     }
 
+    private fun getInliningThreshold(fat: FATEntry) = when (fat.fileType) {
+        FILETYPE_BINARY -> INLINING_THRESHOLD
+        FILETYPE_DIRECTORY -> 246
+        else -> 0
+    }
+
     private fun writeBytesInline(inlinedFile: FATEntry, buffer: ByteArray, bufferOffset: Int, writeLength: Int, writeStartOffset: Int) {
         if (inlinedFile.fileType == 0) throw UnsupportedOperationException("FAT has no file type set (${inlinedFile.fileType})")
 
@@ -1165,7 +1171,7 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
         System.arraycopy(fileCopy, 0, fileBytes, 0, fileCopy.size)
         System.arraycopy(buffer, bufferOffset, fileBytes, writeStartOffset, writeLength)
 
-        if (fileBytes.size <= INLINING_THRESHOLD) {
+        if (fileBytes.size <= getInliningThreshold(inlinedFile)) {
             inlinedFile.modificationDate = getTimeNow()
             fatmgrSetInlineBytes(inlinedFile, fileBytes)
         }
