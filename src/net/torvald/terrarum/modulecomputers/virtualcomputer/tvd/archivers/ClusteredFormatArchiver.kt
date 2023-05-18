@@ -33,7 +33,7 @@ class ClusteredFormatArchiver(val dom: ClusteredFormatDOM) : Archiver() {
         val buffer = ByteArray64(dom.ARCHIVE.length())
         dom.ARCHIVE.seek(0)
         for (k in 0 until dom.ARCHIVE.length() step ClusteredFormatDOM.CLUSTER_SIZE.toLong()) {
-            buffer.appendBytes(dom.ARCHIVE.read(4096))
+            buffer.appendBytes(dom.ARCHIVE.read(CLUSTER_SIZE))
         }
         return buffer
     }
@@ -453,7 +453,8 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
     /** User-defined flags. Archive offset 48 */
     private val userAttribs = ByteArray(ATTRIBS_LENGTH)
 
-    private var usedClusterCount = -1 // includes header, bootloader and FAT clusters
+    var usedClusterCount = -1 // includes header, bootloader and FAT clusters
+        private set
 
     var isReadOnly: Boolean
         get() = primaryAttribs.and(1) != 0
@@ -1825,10 +1826,13 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
     }
 
     val totalSpace: Long; get() = diskSize
-    val usedSpace: Long; get() = usedClusterCount * 4096L
-    val freeSpace: Long; get() = diskSize - (usedClusterCount * 4096L)
+    val usedSpace: Long; get() = usedClusterCount * CLUSTER_SIZE.toLong()
+    val freeSpace: Long; get() = diskSize - (usedClusterCount * CLUSTER_SIZE.toLong())
     val usableSpace: Long; get() = diskSize - ARCHIVE.length()
 
+    val totalClusterCount: Int; get() = (diskSize / CLUSTER_SIZE.toLong()).toInt()
+    val freeClusterCount: Int; get() = totalClusterCount - usedClusterCount
+    val clusterSize: Int = CLUSTER_SIZE
 
     /**
      * @return Cluster flags in big endian: high 8 bits for Meta1, low 8 bits for Meta2
