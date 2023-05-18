@@ -1884,6 +1884,10 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
         }
     }
 
+    fun getRawCluster(num: Int): ByteArray {
+        ARCHIVE.seekToCluster(num)
+        return ARCHIVE.read(CLUSTER_SIZE)
+    }
 
 
 
