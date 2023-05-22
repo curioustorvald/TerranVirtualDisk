@@ -1,9 +1,15 @@
 package net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.archivers
 
+import net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.ByteArray64
 import net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.VDIOException
+import net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.VDUtil.writeBytes64
 import net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.archivers.ClusteredFormatDOM.Companion.FILETYPE_BINARY
 import net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.archivers.ClusteredFormatDOM.Companion.FILETYPE_DIRECTORY
 import net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.toHex
+import java.io.BufferedOutputStream
+import java.io.ByteArrayOutputStream
+import java.io.File
+import java.io.FileOutputStream
 import java.nio.ByteBuffer
 
 
@@ -167,6 +173,8 @@ open class Clustfile(private val DOM: ClusteredFormatDOM, absolutePath: String) 
         }
     }
 
+    open fun readBytes(): ByteArray = ClustfileInputStream(this).readAllBytes()
+
 
 
 
@@ -269,11 +277,18 @@ open class Clustfile(private val DOM: ClusteredFormatDOM, absolutePath: String) 
     open fun isHidden() = (exists() && FAT!!.hidden)
     open fun lastModified() = FAT?.modificationDate ?: 0L
     open fun length() = if (exists()) DOM.getFileLength(FAT!!).toLong() else 0L
+
+    /**
+     * If the file is not directory, null will be returned to comply with the Behaviour of the Java 17
+     */
     open fun list(nameFilter: (String) -> Boolean = { true }): Array<String>? {
         if (!exists()) return arrayOf<String>()
         return getDirListing(this.FAT!!)?.map { id -> DOM.getFile(id)!! }?.filter { fat -> !fat.deleted }?.map { fat ->
             "${this.fullpath}/${fat.filename}" }?.filter(nameFilter)?.toTypedArray()
     }
+    /**
+     * If the file is not directory, null will be returned to comply with the Behaviour of the Java 17
+     */
     open fun listFiles(nameFilter: (String) -> Boolean = { true }): Array<Clustfile>? {
         if (!exists()) return arrayOf<Clustfile>()
         return getDirListing(this.FAT!!)?.map { id -> DOM.getFile(id)!! }?.filter { fat -> !fat.deleted }?.mapNotNull { fat ->
@@ -460,6 +475,56 @@ open class Clustfile(private val DOM: ClusteredFormatDOM, absolutePath: String) 
         DOM.discardFile(FAT!!)
         return true
     }
+
+
+    /**
+     * Exports this file or directory to the host filesystem. If this file is directory, all of its contents will be exported recursively.
+     */
+    open fun exportTo(otherFile: File): Boolean {
+        if (!this.exists()) return false
+        return if (this.isFile()) exportFileTo(otherFile)
+        else if (this.isDirectory()) exportDirTo(otherFile)
+        else return false
+    }
+
+    private fun exportFileTo(otherFile: File): Boolean {
+        return otherFile.createNewFile().continueIfTrue {
+            otherFile.writeBytes(readBytes())
+            true
+        }
+    }
+    private fun exportDirTo(otherFile: File): Boolean {
+        fun recurse1(file: Clustfile, dir: File) {
+            // return conditions
+            if (file.isFile()) {
+                // if not a directory, write as file
+                val newFile = File(dir, file.getName())
+                newFile.writeBytes(file.readBytes())
+                return
+            }
+            // recurse
+            else if (file.isDirectory()) {
+                // mkdir
+                val newDir = File(dir, file.getName())
+                newDir.mkdir()
+                // for entries in this fileDirectory...
+                file.listFiles()!!.forEach {
+                    recurse1(it, newDir)
+                }
+            }
+            else throw InternalError("File is neither a binary nor a directory (filetype=${this.type})")
+        }
+
+
+        // mkdir to superNode
+        val newDir = File(otherFile, this.getName())
+        return newDir.mkdir().continueIfTrue {
+            // for entries in this fileDirectory...
+            this.listFiles()!!.forEach { recurse1(it, newDir) }
+            true
+        }
+    }
+
 
 
     private fun continueIfTrue(action: () -> Boolean): Boolean {

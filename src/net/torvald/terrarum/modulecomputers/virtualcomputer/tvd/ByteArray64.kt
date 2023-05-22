@@ -287,20 +287,7 @@ class ByteArray64(initialSize: Long = BANK_SIZE.toLong()) {
     }
 
     fun writeToFile(file: File) {
-        var fos = FileOutputStream(file, false)
-        // following code writes in-chunk basis
-        /*fos.write(__data[0])
-        fos.flush()
-        fos.close()
-
-        if (__data.size > 1) {
-            fos = FileOutputStream(file, true)
-            for (i in 1..__data.lastIndex) {
-                fos.write(__data[i])
-                fos.flush()
-            }
-            fos.close()
-        }*/
+        val fos = BufferedOutputStream(FileOutputStream(file, false))
 
         forEach {
             fos.write(it.toInt())

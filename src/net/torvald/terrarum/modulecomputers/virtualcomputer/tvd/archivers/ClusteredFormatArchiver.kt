@@ -242,7 +242,7 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
             val charset: Charset,
 
             /** if ID is 1, the file is 0-byte file */
-            var entryID: EntryID,
+            val entryID: EntryID,
 
             var readOnly: Boolean,
             var hidden: Boolean,
@@ -347,13 +347,24 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
         /**
          * Called by ClusteredFormatDOM, this function assists the global renum operation.
          */
-        internal fun _fatRenum(increment: Int) {
+        internal fun _fatRenum(increment: Int): FATEntry {
             if (entryID.isValidCluster()) {
-                entryID += increment
-                extendedEntries.forEach {
-                    it.renumFAT(increment)
+
+                return FATEntry(
+                        charset,
+                        entryID + increment,
+                        readOnly, hidden, system, deleted,
+                        fileType,
+                        creationDate, modificationDate,
+                        filename,
+                        MutableList(extendedEntries.size) { extendedEntries[it] }
+                ).also {
+                    it.extendedEntries.forEach {
+                        it.renumFAT(increment)
+                    }
                 }
             }
+            else throw InternalError("Invalid cluster num/entry ID: ${entryID.toHex()}")
         }
 
         val isInline: Boolean
@@ -420,6 +431,8 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
 
     private val freeClusters = HashSet<EntryID>()
 
+    val reclaimableClusters; get() = freeClusters.toTypedArray()
+
     /*private*/ val fatEntryIndices = HashMap<EntryID, Int>() // EntryID, FATIndex
     private var fatEntryHighest = -1 to -1 // FATIndex, EntryID
 
@@ -439,7 +452,8 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
 
     val charset: Charset
 
-    private var fileTable = HashMap<Int, FATEntry>() // path is unknown until the path tree is traversed
+    internal var fileTable = HashMap<Int, FATEntry>() // path is unknown until the path tree is traversed
+        private set
     /** Formatted size of the disk. Archive offset 4 */
     private var diskSize = -1L
     /** How many clusters FAT is taking up. Archive offset 64 */
@@ -470,6 +484,22 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
             ARCHIVE.seek(47L); ARCHIVE.write(primaryAttribs)
         }*/
 
+    fun renameDisk(str: String) {
+        val ba = str.toByteArray(charset)
+        for (k in 0 until NAME_LENGTH) {
+            ba[k] = if (k < ba.size) diskName[k] else 0
+        }
+        diskNameString = ba.toCanonicalString(charset)
+    }
+
+    fun changeDiskCapacity(clusterCount: Int) {
+        diskSize = clusterCount * 4L
+        ARCHIVE.seek(4L)
+        ARCHIVE.writeInt48(diskSize)
+    }
+
+    var diskNameString: String = ""
+        private set
 
     private fun formatMatches(): Boolean {
         val magic = ByteArray(4)
@@ -523,7 +553,7 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
     private fun readMeta() {
         ARCHIVE.seek(4L)
         diskSize = ARCHIVE.readInt48()
-        ARCHIVE.readBytes(diskName)
+        ARCHIVE.readBytes(diskName); diskNameString = diskName.toCanonicalString(charset)
         ARCHIVE.seek(47L)
         primaryAttribs = ARCHIVE.read()
         ARCHIVE.readBytes(userAttribs)

@@ -21,7 +21,7 @@ import javax.swing.text.DefaultCaret
 /**
  * Created by SKYHi14 on 2017-04-01.
  */
-class VirtualDiskCracker(val sysCharset: Charset = Charsets.UTF_8) : JFrame() {
+class VirtualDiskCrackerFormatThree(val sysCharset: Charset = Charsets.UTF_8) : JFrame() {
 
 
     private val annoyHackers = false // Jar build settings. Intended for Terrarum proj.
@@ -1093,5 +1093,5 @@ ${String(file.contents.bytes.sliceArray64(0L..minOf(PREVIEW_MAX_BYTES, file.cont
 }
 
 fun main(args: Array<String>) {
-    VirtualDiskCracker(Charset.forName("CP437"))
+    VirtualDiskCrackerFormatThree(Charset.forName("CP437"))
 }

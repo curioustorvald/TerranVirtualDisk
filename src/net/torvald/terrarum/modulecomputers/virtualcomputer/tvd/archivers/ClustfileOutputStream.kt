@@ -1,5 +1,6 @@
 package net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.archivers
 
+import net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.ByteArray64
 import net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.archivers.ClusteredFormatDOM.Companion.FILETYPE_BINARY
 import net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.toUint
 import java.io.FileNotFoundException
@@ -51,7 +52,7 @@ class ClustfileOutputStream(private val file: Clustfile, val append: Boolean = f
 
 class ClustfileInputStream(private val file: Clustfile) : InputStream() {
     private var cursor = 0
-    private var fileLength = file.length().toInt()
+    private var fileLength = file.length()
     private var markLimit = 0
     private var markPos = 0
 
@@ -85,7 +86,9 @@ class ClustfileInputStream(private val file: Clustfile) : InputStream() {
     }
 
     override fun readAllBytes(): ByteArray {
-        val b = ByteArray(fileLength)
+        if (fileLength > 2147483639L) throw IllegalStateException("File too large")
+
+        val b = ByteArray(fileLength.toInt())
         file.pread(b, 0, b.size, cursor)
         cursor += b.size
         markLimit -= b.size
@@ -121,7 +124,7 @@ class ClustfileInputStream(private val file: Clustfile) : InputStream() {
         cursor = if (markLimit > 0) markPos else 0
     }
 
-    override fun available() = fileLength - cursor
+    override fun available() = (fileLength - cursor).coerceAtMost(2147483647).toInt()
 
     override fun mark(readlimit: Int) {
         markPos = cursor

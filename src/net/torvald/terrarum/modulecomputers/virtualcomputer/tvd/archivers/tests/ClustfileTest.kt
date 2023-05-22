@@ -54,4 +54,13 @@ fun main(args: Array<String>) {
     }
 
     println(ClustfileInputStream(root_bin_file).readAllBytes().toString(charset))
+
+    testPause("")
+
+    val root = Clustfile(DOM, "/").also {
+        println("Files in '/': ")
+        it.listFiles()?.forEach {
+            println(it.getPath() + (if (it.isDirectory()) "/" else ""))
+        }
+    }
 }
