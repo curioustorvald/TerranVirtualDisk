@@ -1,15 +1,9 @@
 package net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.archivers
 
-import net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.ByteArray64
-import net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.VDIOException
-import net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.VDUtil.writeBytes64
+import net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.*
 import net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.archivers.ClusteredFormatDOM.Companion.FILETYPE_BINARY
 import net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.archivers.ClusteredFormatDOM.Companion.FILETYPE_DIRECTORY
-import net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.toHex
-import java.io.BufferedOutputStream
-import java.io.ByteArrayOutputStream
 import java.io.File
-import java.io.FileOutputStream
 import java.nio.ByteBuffer
 
 
@@ -48,6 +42,8 @@ open class Clustfile(private val DOM: ClusteredFormatDOM, absolutePath: String) 
     private val type: Int?
         get() = FAT?.fileType
 
+    constructor(DOM: ClusteredFormatDOM, parentFile: Clustfile, childName: String) :
+            this(DOM, parentFile.getPath() + "/" + childName)
 
     init {
         rebuildSelfPath(absolutePath)
@@ -174,7 +170,7 @@ open class Clustfile(private val DOM: ClusteredFormatDOM, absolutePath: String) 
     }
 
     open fun readBytes(): ByteArray = ClustfileInputStream(this).readAllBytes()
-
+    open fun writeBytes(ba: ByteArray) = ClustfileOutputStream(this).write(ba)
 
 
 
@@ -487,13 +483,23 @@ open class Clustfile(private val DOM: ClusteredFormatDOM, absolutePath: String) 
         else return false
     }
 
-    private fun exportFileTo(otherFile: File): Boolean {
+    /**
+     * YOU ARE MOST LIKELY WANT TO USE [exportTo] instead of this.
+     *
+     * Exports a binary file. If the given file is directory, the behaviour is undefined.
+     */
+    open fun exportFileTo(otherFile: File): Boolean {
         return otherFile.createNewFile().continueIfTrue {
-            otherFile.writeBytes(readBytes())
+            otherFile.writeBytes(this.readBytes())
             true
         }
     }
-    private fun exportDirTo(otherFile: File): Boolean {
+    /**
+     * YOU ARE MOST LIKELY WANT TO USE [exportTo] instead of this.
+     *
+     * Extors a directory. If the given file is a binary, the behaviour is undefined.
+     */
+    open fun exportDirTo(otherFile: File): Boolean {
         fun recurse1(file: Clustfile, dir: File) {
             // return conditions
             if (file.isFile()) {
@@ -525,6 +531,60 @@ open class Clustfile(private val DOM: ClusteredFormatDOM, absolutePath: String) 
         }
     }
 
+    /**
+     * Imports the other file or directory in the host filesystem to this file. If the other file is directory, all of its contents will be imported recursively.
+     */
+    open fun importFrom(otherFile: File): Boolean {
+        if (this.exists()) return false
+        return if (otherFile.isFile()) importFileFrom(otherFile)
+        else if (otherFile.isDirectory()) importDirFrom(otherFile)
+        else return false
+    }
+
+    /**
+     * YOU ARE MOST LIKELY WANT TO USE [importFrom] instead of this.
+     *
+     * Imports a binary file. If the given file is directory, the behaviour is undefined.
+     */
+    open fun importFileFrom(otherFile: File): Boolean {
+        return this.createNewFile().continueIfTrue {
+            this.writeBytes(otherFile.readBytes())
+            true
+        }
+    }
+
+    /**
+     * YOU ARE MOST LIKELY WANT TO USE [importFrom] instead of this.
+     *
+     * Imports a directory. If the given file is binary, the behaviour is undefined.
+     */
+    open fun importDirFrom(otherFile: File): Boolean {
+        fun recurse1(externalFile: File, node: Clustfile) {
+            // return conditions
+            if (!externalFile.isDirectory) {
+                // if not a directory, add to node
+                val importedFile = Clustfile(DOM, node, externalFile.name).also { importFileFrom(externalFile) }
+                node.addChild(importedFile)
+                return
+            }
+            // recurse
+            else {
+                // mkdir
+                val newDir = Clustfile(DOM, node, externalFile.name).also { mkdir() }
+                // for entries in this fileDirectory...
+                externalFile.listFiles()!!.forEach { recurse1(it, newDir) }
+            }
+        }
+
+
+        // mkdir to superNode
+        val newDir = Clustfile(DOM, this, otherFile.name)
+        return newDir.mkdir().continueIfTrue {
+            // for entries in this fileDirectory...
+            otherFile.listFiles()!!.forEach { recurse1(it, newDir) }
+            true
+        }
+    }
 
 
     private fun continueIfTrue(action: () -> Boolean): Boolean {

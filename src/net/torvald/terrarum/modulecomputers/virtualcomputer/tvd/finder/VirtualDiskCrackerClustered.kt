@@ -1,13 +1,16 @@
 package net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.finder
 
+import net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.archivers.ClusteredFormatArchiver
 import net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.archivers.ClusteredFormatDOM
 import net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.archivers.Clustfile
+import net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.archivers.ClustfileOutputStream
 import net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.toHex
 import java.awt.BorderLayout
 import java.awt.Dimension
 import java.awt.event.KeyEvent
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
+import java.io.File
 import java.nio.charset.Charset
 import java.time.Instant
 import java.time.format.DateTimeFormatter
@@ -49,10 +52,15 @@ class VirtualDiskCrackerClustered() : JFrame() {
 
     private var vdisk: ClusteredFormatDOM? = null
     private var clipboard: Clustfile? = null
+    private var clipboardCutMode = false
 
     private val labelPath = JLabel("(root)")
     private var currentDirectoryEntries: Array<Clustfile>? = null
     private val directoryHierarchy = Stack<Clustfile>(); init { directoryHierarchy.push(0) }
+
+    private lateinit var originalFile: File
+    private lateinit var swapFile: File
+    private lateinit var backupFile: File
 
     private fun gotoSubDirectory(file: Clustfile) {
         directoryHierarchy.push(file)
@@ -247,30 +255,9 @@ class VirtualDiskCrackerClustered() : JFrame() {
             add("New Disk…").addMouseListener(object : MouseAdapter() {
                 override fun mousePressed(e: MouseEvent?) {
                     try {
-                        val makeNewDisk: Boolean
-                        if (vdisk != null) {
-                            makeNewDisk = confirmedDiscard()
-                        }
-                        else {
-                            makeNewDisk = true
-                        }
-                        if (makeNewDisk) {
-                            // inquire new size
-                            val dialogBox = OptionDiskNameAndCap()
-                            val confirmNew = JOptionPane.OK_OPTION == dialogBox.showDialog("Set Property of New Disk")
+                        TODO()
+                        // show fileChooser dialogue to specify where the new file goes, then create new archive from it
 
-                            if (confirmNew) {
-                                vdisk = VDUtil.createNewDisk(
-                                        (dialogBox.capacity.value as Long).toLong(),
-                                        dialogBox.name.text,
-                                        sysCharset
-                                )
-                                gotoRoot()
-                                updateDiskInfo()
-                                setWindowTitleWithName(dialogBox.name.text)
-                                setStat("Disk created")
-                            }
-                        }
                     }
                     catch (e: Exception) {
                         e.printStackTrace()
@@ -292,13 +279,19 @@ class VirtualDiskCrackerClustered() : JFrame() {
                         fileChooser.showOpenDialog(null)
                         if (fileChooser.selectedFile != null) {
                             try {
-                                vdisk = Format3Archiver(null).readDiskArchive(fileChooser.selectedFile, Level.WARNING, { popupWarning(it) }, sysCharset)
-                                if (vdisk != null) {
-                                    gotoRoot()
-                                    updateDiskInfo()
-                                    setWindowTitleWithName(fileChooser.selectedFile.canonicalPath)
-                                    setStat("Disk loaded")
-                                }
+                                // create swap file
+                                originalFile = fileChooser.selectedFile!!
+                                swapFile = File(originalFile.absolutePath + ".swap")
+                                backupFile = File(originalFile.absolutePath + ".bak")
+
+                                originalFile.copyTo(swapFile, true)
+                                // all the editing is done on the swap file
+                                vdisk = ClusteredFormatArchiver(null).deserialize(swapFile, null)
+
+                                gotoRoot()
+                                updateDiskInfo()
+                                setWindowTitleWithName(fileChooser.selectedFile.canonicalPath)
+                                setStat("Disk loaded")
                             }
                             catch (e: Exception) {
                                 e.printStackTrace()
@@ -327,7 +320,7 @@ class VirtualDiskCrackerClustered() : JFrame() {
                         fileChooser.showSaveDialog(null)
                         if (fileChooser.selectedFile != null) {
                             try {
-                                Format3Archiver(vdisk).serialize(fileChooser.selectedFile)
+                                TODO("mv original archive as original.bak / swap .swap file with the original archive")
                                 setStat("Disk saved")
                             }
                             catch (e: Exception) {
@@ -351,19 +344,20 @@ class VirtualDiskCrackerClustered() : JFrame() {
                         try {
                             val dialogBox = OptionFileNameAndCap()
                             val confirmNew = JOptionPane.OK_OPTION == dialogBox.showDialog("Set Property of New File")
-
+                            val newname = dialogBox.name.text
                             if (confirmNew) {
-                                if (VDUtil.nameExists(vdisk!!, dialogBox.name.text, currentDirectory, sysCharset)) {
+                                val target = Clustfile(vdisk!!, currentDirectory, newname)
+                                if (target.exists()) {
                                     popupError("The name already exists")
+                                    setStat("File creation cancelled")
                                 }
                                 else {
-                                    VDUtil.createNewBlankFile(
-                                            vdisk!!,
-                                            currentDirectory,
-                                            (dialogBox.capacity.value as Long).toLong(),
-                                            dialogBox.name.text,
-                                            sysCharset
-                                    )
+                                    target.createNewFile().let {
+                                        if (!it) throw Error("Directory creation failed")
+                                        ClustfileOutputStream(target, true).let {
+                                            it.write(ByteArray((dialogBox.capacity.value as Long).toInt()))
+                                        }
+                                    }
                                     updateDiskInfo()
                                     setStat("File created")
                                 }
@@ -385,11 +379,15 @@ class VirtualDiskCrackerClustered() : JFrame() {
                         val newname = JOptionPane.showInputDialog("Enter a new directory name:")
                         if (newname != null) {
                             try {
-                                if (VDUtil.nameExists(vdisk!!, newname, currentDirectory, sysCharset)) {
-                                    popupError("The name already exists")
+                                val target = Clustfile(vdisk!!, currentDirectory, newname)
+                                if (target.exists()) {
+                                    popupError("The directory already exists")
+                                    setStat("Directory creation cancelled")
                                 }
                                 else {
-                                    VDUtil.addDir(vdisk!!, currentDirectory, newname.toEntryName(DiskEntry.NAME_LENGTH, sysCharset))
+                                    target.mkdir().let {
+                                        if (!it) throw Error("Directory creation failed")
+                                    }
                                     updateDiskInfo()
                                     setStat("Directory created")
                                 }
@@ -397,6 +395,7 @@ class VirtualDiskCrackerClustered() : JFrame() {
                             catch (e: Exception) {
                                 e.printStackTrace()
                                 popupError(e.toString())
+                                setStat("Directory creation failed")
                             }
                         }
                     }
@@ -405,27 +404,16 @@ class VirtualDiskCrackerClustered() : JFrame() {
             addSeparator()
             add("Cut").addMouseListener(object : MouseAdapter() {
                 override fun mousePressed(e: MouseEvent?) {
-                    // copy
-                    clipboard = vdisk!!.entries[selectedFile]
-
-                    // delete
-                    if (vdisk != null && selectedFile != null) {
-                        try {
-                            VDUtil.deleteFile(vdisk!!, selectedFile!!)
-                            updateDiskInfo()
-                            setStat("File deleted")
-                        }
-                        catch (e: Exception) {
-                            e.printStackTrace()
-                            popupError(e.toString())
-                        }
-                    }
+                    clipboard = selectedFile
+                    clipboardCutMode = true
+                    setStat("File cut to clipboard. Note that the source file will not be deleted until the Paste operation")
                 }
             })
             add("Copy").addMouseListener(object : MouseAdapter() {
                 override fun mousePressed(e: MouseEvent?) {
                     clipboard = selectedFile
-                    setStat("File copied")
+                    clipboardCutMode = false
+                    setStat("File copied to clipboard")
                 }
             })
             add("Paste").addMouseListener(object : MouseAdapter() {
@@ -487,7 +475,7 @@ class VirtualDiskCrackerClustered() : JFrame() {
                             popupError("File cannot be added in FAT Browsing mode")
                         }
                         else {
-                            var newfile = Clustfile(vdisk!!, currentDirectory.getPath() + "/${clipboard!!.getName()}")
+                            var newfile = Clustfile(vdisk!!, currentDirectory, clipboard!!.getName())
 
                             // check the name collision. If there is a collision, ask for a new one
                             while (newfile.exists()) {
@@ -496,11 +484,24 @@ class VirtualDiskCrackerClustered() : JFrame() {
                                     setStat("File pasting cancelled")
                                     return
                                 }
-                                newfile = Clustfile(vdisk!!, currentDirectory.getPath() + "/$newname")
+                                newfile = Clustfile(vdisk!!, currentDirectory, newname)
                             }
 
 
                             paste1(newfile)
+                            setStat("File pasted")
+
+                            // delete original file if cutmode
+                            if (clipboardCutMode) {
+                                clipboard!!.delete().let {
+                                    if (it) setStat("File was successfully pasted but the source file was not deleted")
+                                    else setStat("File cut and pasted")
+                                }
+                                clipboard = null
+                            }
+
+
+                            clipboardCutMode = false
                         }
                     }
                 }
@@ -605,7 +606,7 @@ class VirtualDiskCrackerClustered() : JFrame() {
                         try {
                             val newname = JOptionPane.showInputDialog("Enter a new name:")
                             if (newname != null) {
-                                val target = Clustfile(vdisk!!, selectedFile!!.getParent() + "/$newname")
+                                val target = Clustfile(vdisk!!, selectedFile!!.getParentFile(), newname)
                                 if (target.exists())
                                     popupError("The name already exists")
                                 else {
@@ -690,39 +691,24 @@ class VirtualDiskCrackerClustered() : JFrame() {
                             if (fileChooser.selectedFiles.isNotEmpty()) {
                                 try {
                                     fileChooser.selectedFiles.forEach {
-                                        if (!it.isDirectory) {
-                                            var entry = Clustfile(vdisk!!, currentDirectory.getPath() + "/${it.name}")
+                                        var entry = Clustfile(vdisk!!, currentDirectory, it.name)
 
-                                            // check the name collision. If there is a collision, ask for a new one
-                                            while (entry.exists()) {
-                                                val newname = JOptionPane.showInputDialog("The name already exists. Enter a new name:")
-                                                if (newname == null) {
-                                                    setStat("File import cancelled")
-                                                    return
-                                                }
-                                                entry = Clustfile(vdisk!!, currentDirectory.getPath() + "/$newname")
+                                        // check the name collision. If there is a collision, ask for a new one
+                                        while (entry.exists()) {
+                                            val newname = JOptionPane.showInputDialog("The file '${it.name}' already exists. Enter a new name:")
+                                            if (newname == null) {
+                                                setStat("File import cancelled")
+                                                return
                                             }
-
-
-                                            val bb = it.readBytes()
-                                            entry.pwrite(bb, 0, bb.size, 0)
+                                            entry = Clustfile(vdisk!!, currentDirectory, newname)
                                         }
-                                        else {
-                                            val newname: String?
-                                            if (VDUtil.nameExists(vdisk!!, it.name.toEntryName(DiskEntry.NAME_LENGTH, sysCharset), currentDirectory)) {
-                                                newname = JOptionPane.showInputDialog("The name already exists. Enter a new name:")
-                                            }
-                                            else {
-                                                newname = it.name
-                                            }
 
-                                            if (newname != null) {
-                                                VDUtil.importDirRecurse(vdisk!!, it, currentDirectory, sysCharset, newname)
-                                            }
-                                        }
+
+                                        entry.importFrom(it)
+
                                     }
                                     updateDiskInfo()
-                                    setStat("File added")
+                                    setStat("File(s) imported")
                                 }
                                 catch (e: Exception) {
                                     e.printStackTrace()

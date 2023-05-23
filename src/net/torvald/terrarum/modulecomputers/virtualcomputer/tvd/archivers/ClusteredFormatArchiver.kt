@@ -21,7 +21,7 @@ import kotlin.math.ceil
 /**
  * Created by minjaesong on 2023-03-31.
  */
-class ClusteredFormatArchiver(val dom: ClusteredFormatDOM) : Archiver() {
+class ClusteredFormatArchiver(val dom: ClusteredFormatDOM?) : Archiver() {
 
     override val specversion = ClusteredFormatArchiver.specversion
 
@@ -42,7 +42,7 @@ class ClusteredFormatArchiver(val dom: ClusteredFormatDOM) : Archiver() {
      * @param file the archive
      * @param charset does nothing; charset info is stored in the archive itself
      */
-    override fun deserialize(file: File, charset: Charset): ClusteredFormatDOM {
+    override fun deserialize(file: File, charset: Charset?): ClusteredFormatDOM {
         return ClusteredFormatDOM(RandomAccessFile(file, "rw"))
     }
 

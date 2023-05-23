@@ -17,7 +17,7 @@ abstract class Archiver {
 
     abstract fun serialize(outFile: File)
     abstract fun serializeToBA64(): ByteArray64
-    abstract fun deserialize(file: File, charset: Charset): Any
+    abstract fun deserialize(file: File, charset: Charset?): Any
     abstract val specversion: Byte
 
 }
