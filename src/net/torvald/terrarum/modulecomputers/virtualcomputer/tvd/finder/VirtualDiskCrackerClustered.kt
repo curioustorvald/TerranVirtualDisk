@@ -489,16 +489,16 @@ class VirtualDiskCrackerClustered() : JFrame() {
                         else {
                             var newfile = Clustfile(vdisk!!, currentDirectory.getPath() + "/${clipboard!!.getName()}")
 
-                            // check name collision. If it is, ask for new one
+                            // check the name collision. If there is a collision, ask for a new one
                             while (newfile.exists()) {
                                 val newname = JOptionPane.showInputDialog("The name already exists. Enter a new name:")
-                                if (newname != null)
-                                    newfile = Clustfile(vdisk!!, currentDirectory.getPath() + "/${newname}")
-                                else {
+                                if (newname == null) {
                                     setStat("File pasting cancelled")
                                     return
                                 }
+                                newfile = Clustfile(vdisk!!, currentDirectory.getPath() + "/$newname")
                             }
+
 
                             paste1(newfile)
                         }
@@ -691,20 +691,21 @@ class VirtualDiskCrackerClustered() : JFrame() {
                                 try {
                                     fileChooser.selectedFiles.forEach {
                                         if (!it.isDirectory) {
-                                            val entry = VDUtil.importFile(it, vdisk!!.generateUniqueID(), sysCharset)
+                                            var entry = Clustfile(vdisk!!, currentDirectory.getPath() + "/${it.name}")
 
-                                            val newname: String?
-                                            if (VDUtil.nameExists(vdisk!!, entry.filename, currentDirectory)) {
-                                                newname = JOptionPane.showInputDialog("The name already exists. Enter a new name:")
-                                            }
-                                            else {
-                                                newname = entry.getFilenameString(sysCharset)
+                                            // check the name collision. If there is a collision, ask for a new one
+                                            while (entry.exists()) {
+                                                val newname = JOptionPane.showInputDialog("The name already exists. Enter a new name:")
+                                                if (newname == null) {
+                                                    setStat("File import cancelled")
+                                                    return
+                                                }
+                                                entry = Clustfile(vdisk!!, currentDirectory.getPath() + "/$newname")
                                             }
 
-                                            if (newname != null) {
-                                                entry.filename = newname.toEntryName(DiskEntry.NAME_LENGTH, sysCharset)
-                                                VDUtil.addFile(vdisk!!, currentDirectory, entry)
-                                            }
+
+                                            val bb = it.readBytes()
+                                            entry.pwrite(bb, 0, bb.size, 0)
                                         }
                                         else {
                                             val newname: String?
