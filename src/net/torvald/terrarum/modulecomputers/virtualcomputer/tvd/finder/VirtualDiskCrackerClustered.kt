@@ -2,6 +2,8 @@ package net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.finder
 
 import net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.archivers.ClusteredFormatArchiver
 import net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.archivers.ClusteredFormatDOM
+import net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.archivers.ClusteredFormatDOM.Companion.FILETYPE_BINARY
+import net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.archivers.ClusteredFormatDOM.Companion.FILETYPE_DIRECTORY
 import net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.archivers.Clustfile
 import net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.archivers.ClustfileOutputStream
 import net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.toHex
@@ -105,8 +107,8 @@ class VirtualDiskCrackerClustered() : JFrame() {
     val tableColumns = arrayOf("Name", "Date Modified", "Size")
     val tableParentRecord = arrayOf(arrayOf("..", "", ""))
 
-    val tableColumnsEntriesMode = arrayOf("Name", "FAT ID", "Type", "Date Modified", "Size")
-    val tableEntriesRecord = arrayOf(arrayOf("", "", "", "", "", ))
+    val tableColumnsEntriesMode = arrayOf("Name", "FAT ID", "Type", "Created", "Modified", "Size", "# Ext")
+    val tableEntriesRecord = arrayOf(arrayOf("", "", "", "", "", "", "",))
     private var currentDirectoryEntriesAltMode: Array<ClusteredFormatDOM.FATEntry>? = null
 
 
@@ -192,7 +194,7 @@ class VirtualDiskCrackerClustered() : JFrame() {
                             return when (columnIndex) {
                                 0 -> entry.getName()
                                 1 -> Instant.ofEpochSecond(entry.lastModified()).atZone(TimeZone.getDefault().toZoneId()).format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"))
-                                2 -> entry.getEffectiveSize()
+                                2 -> "${entry.getEffectiveSize()} ${if (entry.isDirectory()) "entries" else "bytes"}"
                                 else -> ""
                             }
                         }
@@ -241,8 +243,10 @@ class VirtualDiskCrackerClustered() : JFrame() {
                             0 -> entry.filename
                             1 -> entry.entryID.toHex()
                             2 -> entry.fileType.toString()
-                            3 -> Instant.ofEpochSecond(entry.modificationDate).atZone(TimeZone.getDefault().toZoneId()).format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"))
-                            4 -> vdisk!!.getFileLength(entry).toString()
+                            3 -> Instant.ofEpochSecond(entry.creationDate).atZone(TimeZone.getDefault().toZoneId()).format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"))
+                            4 -> Instant.ofEpochSecond(entry.modificationDate).atZone(TimeZone.getDefault().toZoneId()).format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"))
+                            5 -> vdisk!!.getFileLength(entry).toString()
+                            6 -> entry.extendedEntries.size.toString()
                             else -> ""
                         }
                     }
@@ -862,6 +866,7 @@ class VirtualDiskCrackerClustered() : JFrame() {
                     }
                 }
             })
+            addSeparator()
             add("Trim").addMouseListener(object : MouseAdapter() {
                 override fun mousePressed(e: MouseEvent?) {
                     if (vdisk != null) {
@@ -870,7 +875,7 @@ class VirtualDiskCrackerClustered() : JFrame() {
                             vdisk!!.trimArchive()
                             val newSize = vdisk!!.ARCHIVE.length()
 
-                            val diff = newSize / oldSize
+                            val diff = newSize - oldSize
 
                             val message = "Reclaimed ${diff.bytes()} (${diff.div(ClusteredFormatDOM.CLUSTER_SIZE).clusters()})"
                             popupMessage(message, "Clusters Trimmed")
@@ -884,7 +889,6 @@ class VirtualDiskCrackerClustered() : JFrame() {
                     }
                 }
             })
-            addSeparator()
             add("Defrag").addMouseListener(object : MouseAdapter() {
                 override fun mousePressed(e: MouseEvent?) {
                     if (vdisk != null) {
@@ -893,7 +897,7 @@ class VirtualDiskCrackerClustered() : JFrame() {
                             vdisk!!.defrag()
                             val newSize = vdisk!!.ARCHIVE.length()
 
-                            val diff = newSize / oldSize
+                            val diff = newSize - oldSize
 
                             val message = "Reclaimed ${diff.bytes()} (${diff.div(ClusteredFormatDOM.CLUSTER_SIZE).clusters()})"
                             popupMessage(message, "Clusters Defragmented")
@@ -924,7 +928,7 @@ class VirtualDiskCrackerClustered() : JFrame() {
 
         diskInfo.highlighter = null
         diskInfo.text = "(Disk not loaded)"
-        diskInfo.preferredSize = Dimension(-1, 60)
+        diskInfo.preferredSize = Dimension(-1, 96)
 
         fileDesc.highlighter = null
         fileDesc.text = ""
@@ -1056,17 +1060,26 @@ Write protected: ${disk.isReadOnly.toEnglish()}"""
         if (file == null) return ""
 
         return """Name: ${file.getName()}
-Size: ${file.getEffectiveSize()}
-Type: ${file.FAT?.fileType}
-CRC: ${file.hashCode().toHex()}
-FAT ID: ${file.FAT?.entryID}
-Contents: """ + if (file.exists())
-    ByteArray(minOf(PREVIEW_MAX_BYTES, file.length()).toInt()).also {
-        file.pread(it, 0, it.size, 0)
-    }.toString(vdisk?.charset ?: Charsets.ISO_8859_1) else "" }
+Size: ${file.getEffectiveSize()} ${if (file.isDirectory()) "entries" else "bytes"}
+Type: ${file.FAT?.fileType?.fileTypeToString()}
+FAT ID: ${file.FAT?.entryID?.toHex()}
+""" + if (file.exists() && file.isFile())
+        ("""Contents: """ +
+                ByteArray(minOf(PREVIEW_MAX_BYTES, file.length()).toInt()).also {
+                    file.pread(it, 0, it.size, 0)
+                }.toString(vdisk?.charset ?: Charsets.ISO_8859_1))
+        else ""
+    }
 
     private fun setWindowTitleWithName(name: String) {
         this.title = "$appName - $name"
+    }
+
+    private fun Int?.fileTypeToString() = when (this) {
+        null -> "null"
+        FILETYPE_BINARY -> "Binary File"
+        FILETYPE_DIRECTORY -> "Directory"
+        else -> "Unknown ($this)"
     }
 
     private fun Long.bytes() = if (this == 1L) "one byte" else "$this bytes"
@@ -1082,6 +1095,11 @@ Contents: """ + if (file.exists())
     private fun setStat(message: String) {
         statBar.text = message
     }
+
+    private fun Long.toHex() = this.and(0xFFFFFFFF).toString(16).padStart(8, '0').toUpperCase().let {
+        it.substring(0..4).toInt(16).toString(16).toUpperCase().padStart(3, '0') + ":" + it.substring(5..7) + "h"
+    }
+    private fun Int.toHex() = this.toLong().toHex()
 }
 
 fun main(args: Array<String>) {
