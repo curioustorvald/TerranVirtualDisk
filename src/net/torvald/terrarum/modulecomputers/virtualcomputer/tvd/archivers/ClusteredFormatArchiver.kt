@@ -545,7 +545,11 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
     private fun tallyClusterCount() {
         if (fatClusterCount < 0) throw InternalError("Uninitialised -- call readMeta() and readFAT() first")
 
-        trimArchive() // sets usedClusterCount
+        // get usedClusterCount
+        usedClusterCount = (ARCHIVE.length() / CLUSTER_SIZE).toInt()
+
+        // trim if possible
+        trimArchive()
 
         dbgprintln("[Clustered] usedClusterCount: $usedClusterCount")
     }
@@ -1561,9 +1565,9 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
             }
         }
         else {
-            it.seek(entry.entryID.toLong() * CLUSTER_SIZE)
+            it.seekToCluster(entry.entryID)
             val b = it.read()
-            if (b == -1) throw IOException("The Archive cannot be read; offset: ${entry.entryID.toLong() * CLUSTER_SIZE}")
+            if (b == -1) throw IOException("The Archive cannot be read; entryID: ${entry.entryID}, offset: ${(entry.entryID * CLUSTER_SIZE).toHex()}")
             b and 15
         }
     }
@@ -1964,18 +1968,6 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
         this.seek(2L * CLUSTER_SIZE + index * FAT_ENTRY_SIZE + offset)
     }
     private fun RandomAccessFile.writeInt16(value: Int) {
-
-        if (value == 4098) {
-            dbgprintln("[WriteInt16] writing 4098")
-            val indentation = " ".repeat("[WriteInt16]".length + 4)
-            Thread.currentThread().stackTrace.forEachIndexed { index, it ->
-                if (index == 1)
-                    dbgprintln("[[WriteInt16]]> $it")
-                else if (index > 1)
-                    dbgprintln("$indentation$it")
-            }
-        }
-
         this.write(value.ushr(8))
         this.write(value.ushr(0))
     }

@@ -10,8 +10,14 @@ import java.awt.Dimension
 import java.awt.event.KeyEvent
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
+import java.io.BufferedInputStream
+import java.io.BufferedOutputStream
 import java.io.File
+import java.io.FileInputStream
+import java.io.FileOutputStream
 import java.nio.charset.Charset
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
 import java.time.Instant
 import java.time.format.DateTimeFormatter
 import java.util.*
@@ -940,7 +946,7 @@ class VirtualDiskCrackerClustered() : JFrame() {
 
         panelFinderTab = JTabbedPane().apply {
             addTab("Navigator", panelFinder)
-            addTab("Entries", tableEntriesScroll)
+            addTab("FAT", tableEntriesScroll)
         }
 
         val panelFileDesc = JPanel(BorderLayout()).apply {
@@ -1038,6 +1044,7 @@ class VirtualDiskCrackerClustered() : JFrame() {
     private fun getDiskInfoText(disk: ClusteredFormatDOM): String {
         return """Name: ${disk.diskNameString}
 Capacity: ${disk.totalSpace} bytes (${disk.usedSpace} bytes used, ${disk.freeSpace} bytes free)
+Clusters: ${disk.totalClusterCount} clusters (${disk.usedClusterCount} clusters used, ${disk.freeClusterCount} clusters free)
 Write protected: ${disk.isReadOnly.toEnglish()}"""
     }
 
