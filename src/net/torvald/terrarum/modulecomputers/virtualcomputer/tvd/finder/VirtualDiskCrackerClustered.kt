@@ -192,7 +192,7 @@ class VirtualDiskCrackerClustered() : JFrame() {
                         if (vdisk != null) {
                             val entry = currentDirectoryEntries!![rowIndex - 1]
                             return when (columnIndex) {
-                                0 -> entry.getName()
+                                0 -> entry.getName() + (if (entry.isDirectory()) "/" else "")
                                 1 -> Instant.ofEpochSecond(entry.lastModified()).atZone(TimeZone.getDefault().toZoneId()).format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"))
                                 2 -> "${entry.getEffectiveSize()} ${if (entry.isDirectory()) "entries" else "bytes"}"
                                 else -> ""
