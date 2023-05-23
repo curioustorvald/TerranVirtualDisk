@@ -272,24 +272,28 @@ class VirtualDiskCrackerClustered() : JFrame() {
                             try {
                                 // new disk size (in clusters)?
                                 val dialogBox = OptionDiskNameAndCapSectors()
-                                val diskName = dialogBox.name.text
-                                val diskSize = (dialogBox.capacity.value as Long).toInt()
+                                val confirmNew = JOptionPane.OK_OPTION == dialogBox.showDialog("Set Property of New Disk")
 
-                                originalFile = fileChooser.selectedFile!!
-                                swapFile = File(originalFile.absolutePath + ".swap")
-                                backupFile = File(originalFile.absolutePath + ".bak")
+                                if (confirmNew) {
+                                    val diskName = dialogBox.name.text
+                                    val diskSize = (dialogBox.capacity.value as Long).toInt()
 
-                                // create new file
-                                ClusteredFormatDOM.createNewArchive(originalFile, Charsets.ISO_8859_1, diskName, diskSize)
+                                    originalFile = fileChooser.selectedFile!!
+                                    swapFile = File(originalFile.absolutePath + ".swap")
+                                    backupFile = File(originalFile.absolutePath + ".bak")
 
-                                originalFile.copyTo(swapFile, true)
-                                // all the editing is done on the swap file
-                                vdisk = ClusteredFormatArchiver(null).deserialize(swapFile, null)
+                                    // create new file
+                                    ClusteredFormatDOM.createNewArchive(originalFile, Charsets.ISO_8859_1, diskName, diskSize)
 
-                                gotoRoot()
-                                updateDiskInfo()
-                                setWindowTitleWithName(fileChooser.selectedFile.canonicalPath)
-                                setStat("Disk created")
+                                    originalFile.copyTo(swapFile, true)
+                                    // all the editing is done on the swap file
+                                    vdisk = ClusteredFormatArchiver(null).deserialize(swapFile, null)
+
+                                    gotoRoot()
+                                    updateDiskInfo()
+                                    setWindowTitleWithName(fileChooser.selectedFile.canonicalPath)
+                                    setStat("Disk created")
+                                }
                             }
                             catch (e: Exception) {
                                 e.printStackTrace()

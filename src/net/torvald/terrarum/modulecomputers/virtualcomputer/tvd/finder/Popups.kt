@@ -66,7 +66,7 @@ class OptionDiskNameAndCapSectors {
 
         settingPanel.add(JLabel("Name (max 32 bytes)"))
         settingPanel.add(name)
-        settingPanel.add(JLabel("Capacity (sectors; one sector is equal to 4096 bytes)"))
+        settingPanel.add(JLabel("Capacity in Sectors (1 sect = 4096 bytes)"))
         settingPanel.add(capacity)
 
         mainPanel.add(settingPanel, BorderLayout.CENTER)
