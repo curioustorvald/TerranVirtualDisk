@@ -30,7 +30,7 @@ class ClusteredFormatArchiver(val dom: ClusteredFormatDOM?) : Archiver() {
     }
 
     override fun serializeToBA64(): ByteArray64 {
-        val buffer = ByteArray64(dom.ARCHIVE.length())
+        val buffer = ByteArray64(dom!!.ARCHIVE.length())
         dom.ARCHIVE.seek(0)
         for (k in 0 until dom.ARCHIVE.length() step ClusteredFormatDOM.CLUSTER_SIZE.toLong()) {
             buffer.appendBytes(dom.ARCHIVE.read(CLUSTER_SIZE))

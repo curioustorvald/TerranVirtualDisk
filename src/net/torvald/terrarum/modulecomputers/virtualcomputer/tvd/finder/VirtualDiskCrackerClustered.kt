@@ -53,14 +53,17 @@ class VirtualDiskCrackerClustered() : JFrame() {
     private var vdisk: ClusteredFormatDOM? = null
     private var clipboard: Clustfile? = null
     private var clipboardCutMode = false
+    private val rootFile; get() = Clustfile(vdisk!!, "/")
 
     private val labelPath = JLabel("(root)")
     private var currentDirectoryEntries: Array<Clustfile>? = null
-    private val directoryHierarchy = Stack<Clustfile>(); init { directoryHierarchy.push(0) }
+    private val directoryHierarchy = Stack<Clustfile>()
 
     private lateinit var originalFile: File
     private lateinit var swapFile: File
     private lateinit var backupFile: File
+
+
 
     private fun gotoSubDirectory(file: Clustfile) {
         directoryHierarchy.push(file)
@@ -72,11 +75,11 @@ class VirtualDiskCrackerClustered() : JFrame() {
     val currentDirectory: Clustfile
         get() = directoryHierarchy.peek()
     val upperDirectory: Clustfile
-        get() = if (directoryHierarchy.lastIndex == 0) 0
+        get() = if (directoryHierarchy.lastIndex == 0) rootFile
         else directoryHierarchy[directoryHierarchy.lastIndex - 1]
     private fun gotoRoot() {
         directoryHierarchy.removeAllElements()
-        directoryHierarchy.push(0)
+        directoryHierarchy.push(rootFile)
         selectedFile = null
         fileDesc.text = ""
         updateDiskInfo()
@@ -204,12 +207,8 @@ class VirtualDiskCrackerClustered() : JFrame() {
                     val row = table.rowAtPoint(e.point)
 
 
-                    selectedFile = currentDirectoryEntriesAltMode!![row]
-
-
-                    fileDesc.text = getFileInfoText(selectedFile)
-
-
+                    selectedFile = null // disable selection //currentDirectoryEntriesAltMode!![row]
+                    fileDesc.text = "" //getFileInfoText(selectedFile)
                     fileDesc.caretPosition = 0
                 }
             })
@@ -233,11 +232,11 @@ class VirtualDiskCrackerClustered() : JFrame() {
                     if (vdisk != null) {
                         val entry = currentDirectoryEntriesAltMode!![rowIndex]
                         return when (columnIndex) {
-                            0 -> entry.getName()
-                            1 -> entry.FAT?.entryID?.toHex()
-                            2 -> entry.FAT?.fileType.toString()
-                            3 -> Instant.ofEpochSecond(entry.lastModified()).atZone(TimeZone.getDefault().toZoneId()).format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"))
-                            4 -> entry.getEffectiveSize()
+                            0 -> entry.filename
+                            1 -> entry.entryID.toHex()
+                            2 -> entry.fileType.toString()
+                            3 -> Instant.ofEpochSecond(entry.modificationDate).atZone(TimeZone.getDefault().toZoneId()).format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"))
+                            4 -> vdisk!!.getFileLength(entry).toString()
                             else -> ""
                         }
                     }
@@ -254,26 +253,45 @@ class VirtualDiskCrackerClustered() : JFrame() {
             mnemonic = KeyEvent.VK_F
             add("New Disk…").addMouseListener(object : MouseAdapter() {
                 override fun mousePressed(e: MouseEvent?) {
-                    try {
-                        TODO()
+                    val makeNewDisk = if (vdisk != null) confirmedDiscard() else true
+                    if (makeNewDisk) {
                         // show fileChooser dialogue to specify where the new file goes, then create new archive from it
+                        val fileChooser = JFileChooser("./")
+                        fileChooser.showSaveDialog(null)
+                        if (fileChooser.selectedFile != null) {
+                            try {
+                                // new disk size (in clusters)?
+                                val dialogBox = OptionDiskNameAndCapSectors()
+                                val diskName = dialogBox.name.text
+                                val diskSize = (dialogBox.capacity.value as Long).toInt()
 
-                    }
-                    catch (e: Exception) {
-                        e.printStackTrace()
-                        popupError(e.toString())
+                                originalFile = fileChooser.selectedFile!!
+                                swapFile = File(originalFile.absolutePath + ".swap")
+                                backupFile = File(originalFile.absolutePath + ".bak")
+
+                                // create new file
+                                ClusteredFormatDOM.createNewArchive(originalFile, Charsets.ISO_8859_1, diskName, diskSize)
+
+                                originalFile.copyTo(swapFile, true)
+                                // all the editing is done on the swap file
+                                vdisk = ClusteredFormatArchiver(null).deserialize(swapFile, null)
+
+                                gotoRoot()
+                                updateDiskInfo()
+                                setWindowTitleWithName(fileChooser.selectedFile.canonicalPath)
+                                setStat("Disk created")
+                            }
+                            catch (e: Exception) {
+                                e.printStackTrace()
+                                popupError(e.toString())
+                            }
+                        }
                     }
                 }
             })
             add("Open Disk…").addMouseListener(object : MouseAdapter() {
                 override fun mousePressed(e: MouseEvent?) {
-                    val makeNewDisk: Boolean
-                    if (vdisk != null) {
-                        makeNewDisk = confirmedDiscard()
-                    }
-                    else {
-                        makeNewDisk = true
-                    }
+                    val makeNewDisk = if (vdisk != null) confirmedDiscard() else true
                     if (makeNewDisk) {
                         val fileChooser = JFileChooser("./")
                         fileChooser.showOpenDialog(null)
@@ -1060,5 +1078,5 @@ Contents: """ + if (file.exists())
 }
 
 fun main(args: Array<String>) {
-    VirtualDiskCrackerFormatThree(Charset.forName("CP437"))
+    VirtualDiskCrackerClustered()
 }

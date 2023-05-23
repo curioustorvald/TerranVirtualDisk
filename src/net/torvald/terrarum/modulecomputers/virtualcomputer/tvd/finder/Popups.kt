@@ -47,6 +47,41 @@ class OptionDiskNameAndCap {
     }
 }
 
+class OptionDiskNameAndCapSectors {
+    val name = JTextField(11)
+    val capacity = JSpinner(SpinnerNumberModel(
+            480L.toJavaLong(),
+            0L.toJavaLong(),
+            0xF00000L.toJavaLong(),
+            1L.toJavaLong()
+    )) // default 360 KiB, MAX 256 GiB
+    val mainPanel = JPanel()
+    val settingPanel = JPanel()
+
+    init {
+        mainPanel.layout = BorderLayout()
+        settingPanel.layout = GridLayout(2, 2, 2, 0)
+
+        //name.text = "Unnamed"
+
+        settingPanel.add(JLabel("Name (max 32 bytes)"))
+        settingPanel.add(name)
+        settingPanel.add(JLabel("Capacity (sectors; one sector is equal to 4096 bytes)"))
+        settingPanel.add(capacity)
+
+        mainPanel.add(settingPanel, BorderLayout.CENTER)
+        mainPanel.add(JLabel(""), BorderLayout.SOUTH)
+    }
+
+    /**
+     * returns either JOptionPane.OK_OPTION or JOptionPane.CANCEL_OPTION
+     */
+    fun showDialog(title: String): Int {
+        return JOptionPane.showConfirmDialog(null, mainPanel,
+                title, JOptionPane.OK_CANCEL_OPTION)
+    }
+}
+
 fun kotlin.Long.toJavaLong() = java.lang.Long(this)
 
 class OptionFileNameAndCap {

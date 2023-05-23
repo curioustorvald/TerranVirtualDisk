@@ -46,8 +46,8 @@ class Format3Archiver(val dom: VirtualDisk?) : Archiver() {
         }
     }
 
-    override fun deserialize(file: File, charset: Charset): VirtualDisk {
-        return readDiskArchive(file, charset = charset)
+    override fun deserialize(file: File, charset: Charset?): VirtualDisk {
+        return readDiskArchive(file, charset = charset!!)
     }
 
     /**
