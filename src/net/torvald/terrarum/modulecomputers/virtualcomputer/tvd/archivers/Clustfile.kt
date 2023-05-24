@@ -327,6 +327,7 @@ open class Clustfile(private val DOM: ClusteredFormatDOM, absolutePath: String) 
                     defaultDirs.writeInt24(file.FAT!!.entryID, 0)
                     DOM.writeBytes(FAT!!, defaultDirs, 0, 3, dirListing.size * 3)
                     updateFATreference(); DOM.commitFATchangeToDisk(FAT!!)
+                    DOM.sortDirectory(FAT!!)
                 }
 
                 true
@@ -337,14 +338,13 @@ open class Clustfile(private val DOM: ClusteredFormatDOM, absolutePath: String) 
     open fun removeChild(file: Clustfile): Boolean {
         require(type == FILETYPE_DIRECTORY)
 
-
         return continueIfTrue {
             val dirListing = getDirListing(FAT!!)!!
             val fileEntryID = file.FAT!!.entryID
             if (dirListing.contains(fileEntryID)) {
                 continueIfTrue {
                     val newBytes = ByteArray((dirListing.size - 1) * 3)
-                    dirListing.filter { it != fileEntryID }.forEachIndexed { index, id -> newBytes.writeInt24(id, index * 3) }
+                    dirListing.filter { it != fileEntryID }.sorted().forEachIndexed { index, id -> newBytes.writeInt24(id, index * 3) }
                     DOM.setFileLength(FAT!!, newBytes.size)
                     DOM.writeBytes(FAT!!, newBytes, 0, newBytes.size, 0)
                     updateFATreference(); DOM.commitFATchangeToDisk(FAT!!)

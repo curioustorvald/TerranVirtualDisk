@@ -1198,8 +1198,9 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
         System.arraycopy(buffer, bufferOffset, fileBytes, writeStartOffset, writeLength)
 
         if (fileBytes.size <= getInliningThreshold(inlinedFile)) {
-            inlinedFile.modificationDate = getTimeNow()
             fatmgrSetInlineBytes(inlinedFile, fileBytes)
+            fatmgrUpdateModificationDate(inlinedFile, getTimeNow())
+
         }
         // un-inline the file
         else {
@@ -1223,7 +1224,7 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
      * Writes bytes to the file. If the write operation reaches outside the file's allocated size, length of the file
      * will be increased (i.e. new clusters will be allocated) to fit
      *
-     * Writing opration may change the FAT reference, if the file was previously inlined then uninlined, or was uninlined then inlined.
+     * Writing operation may change the FAT reference, if the file was previously inlined then uninlined, or was uninlined then inlined.
      * The Clustfile must update its FAT reference after this function call.
      */
     fun writeBytes(entry: FATEntry, buffer: ByteArray, bufferOffset: Int, writeLength: Int, writeStartOffset: Int, forceUninline: Boolean = false) {
@@ -1335,7 +1336,6 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
 
             // set modification date on the FAT
             val timeNow = getTimeNow()
-            entry.modificationDate = timeNow
             fatmgrUpdateModificationDate(entry, timeNow)
         }
     }
@@ -1491,9 +1491,13 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
             parent = cluster
             cluster = nextCluster
         } while (cluster != LEAF_CLUSTER)
+
+        fatmgrUpdateModificationDate(entry, getTimeNow())
     }
 
     /**
+     * Performs given action over each cluster in the cluster-chain of the given file.
+     *
      * @param start cluster number to start traverse
      * @param action what to do. Argument: Int Current cluster number
      */
@@ -1914,6 +1918,40 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
     fun getRawCluster(num: Int): ByteArray {
         ARCHIVE.seekToCluster(num)
         return ARCHIVE.read(CLUSTER_SIZE)
+    }
+
+    fun sortDirectory(entry: FATEntry) {
+        if (entry.fileType != FILETYPE_DIRECTORY) throw VDIOException("Tried to sort non-directory (filetype = ${entry.fileType})")
+
+        if (entry.isInline) {
+            val newContents = entry.getInlineBytes().chunked(3).sortedBy { it.toInt24() }.let {
+                val ba = ByteArray(it.size * 3)
+                it.forEachIndexed { index, bytes ->
+                    ba[index * 3 + 0] = bytes[0]
+                    ba[index * 3 + 1] = bytes[1]
+                    ba[index * 3 + 2] = bytes[2]
+                }
+                ba
+            }
+            fatmgrSetInlineBytes(entry, newContents)
+        }
+        else {
+            traverseClusters(entry.entryID) { clusternum ->
+                ARCHIVE.seekToCluster(clusternum, 8)
+                val contentsSize = ARCHIVE.readUshortBig()
+                val newContents = ARCHIVE.read(contentsSize).chunked(3).sortedBy { it.toInt24() }.let {
+                    val ba = ByteArray(it.size * 3)
+                    it.forEachIndexed { index, bytes ->
+                        ba[index * 3 + 0] = bytes[0]
+                        ba[index * 3 + 1] = bytes[1]
+                        ba[index * 3 + 2] = bytes[2]
+                    }
+                    ba
+                }
+                ARCHIVE.seekToCluster(clusternum, 8)
+                ARCHIVE.write(newContents)
+            }
+        }
     }
 
 
