@@ -33,13 +33,21 @@ fun main(args: Array<String>) {
 
     val file1 = Clustfile(DOM, "test.txt")
     println("Writing...")
-    println("Successful? " + file1.overwrite("Testing! This text should be written on the FAT area!".toByteArray(charset)))
 
-    println("Successful? " + file1.pwrite(superlongtext, 0, superlongtext.size, 256))
+    file1.overwrite("Testing! This text should be written on the FAT area!".toByteArray(charset)).let {
+        println("Successful1? $it")
+    }
+
+    testPause("")
+
+    file1.pwrite(superlongtext, 0, superlongtext.size, 256).let {
+        println("Successful2? $it")
+    }
+
+    testPause("")
 
     println(ClustfileInputStream(file1).readAllBytes().toString(charset))
 
-    testPause("")
 
     val root_bin = Clustfile(DOM, "/bin").also {
         it.mkdir()

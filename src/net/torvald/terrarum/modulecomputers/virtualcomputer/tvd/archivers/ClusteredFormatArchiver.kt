@@ -447,7 +447,7 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
             if (!fileTable.containsKey(i)) return i
             i += 1
         }
-        return usedClusterCount
+        return archiveSizeInClusters
     }
 
     val charset: Charset
@@ -466,9 +466,6 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
     private var primaryAttribs = 0
     /** User-defined flags. Archive offset 48 */
     private val userAttribs = ByteArray(ATTRIBS_LENGTH)
-
-    var usedClusterCount = -1 // includes header, bootloader and FAT clusters
-        private set
 
     var isReadOnly: Boolean
         get() = primaryAttribs.and(1) != 0
@@ -542,16 +539,15 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
             throwable.printStackTrace()
     }
 
+    val archiveSizeInClusters; get() = (ARCHIVE.length() / CLUSTER_SIZE).toInt()
+
     private fun tallyClusterCount() {
         if (fatClusterCount < 0) throw InternalError("Uninitialised -- call readMeta() and readFAT() first")
-
-        // get usedClusterCount
-        usedClusterCount = (ARCHIVE.length() / CLUSTER_SIZE).toInt()
 
         // trim if possible
         trimArchive()
 
-        dbgprintln("[Clustered] usedClusterCount: $usedClusterCount")
+        dbgprintln("[Clustered] archiveSizeInClusters: $archiveSizeInClusters")
     }
 
     private fun readMeta() {
@@ -613,7 +609,7 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
 
     private fun checkDiskCapacity(bytesToAdd: Int) {
         if (bytesToAdd <= 0) return
-        val usedBytes = CLUSTER_SIZE * usedClusterCount + bytesToAdd
+        val usedBytes = ARCHIVE.length() + bytesToAdd
         if (usedBytes > diskSize) throw VDIOException("Not enough space on the disk")
     }
 
@@ -624,9 +620,9 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
     fun renum(increment: Int) {
         freeClusters.clear()
 
-        val oldUsedClusterCount = usedClusterCount
+        val oldUsedClusterCount = archiveSizeInClusters
 
-        expandArchive(increment) // implied: usedClusterCount += increment
+        expandArchive(increment)
 
         // renumber my FAT
         HashMap<Int, FATEntry>().let { newFileTable ->
@@ -643,7 +639,6 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
         }
 
         // copy over clusters, renumber any applicable cluster numbers before copying
-        // using file.length().div(CLUSTER_SIZE) instead of usedClusterCount to really access every clusters
         for (clusternum in oldUsedClusterCount - 1L downTo 2 + fatClusterCount) {
 //            dbgprintln("[Clustered] renum($increment) -- moving cluster ${clusternum.toHex()} to ${(clusternum + increment).toHex()}")
 
@@ -950,7 +945,7 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
         checkDiskCapacity(size)
         val timeNow = getTimeNow()
 
-        val ptr = if (size <= INLINING_THRESHOLD) getNextFreeInlineCluster() else usedClusterCount
+        val ptr = if (size <= INLINING_THRESHOLD) getNextFreeInlineCluster() else archiveSizeInClusters
 
         dbgprintln("[Clustered] allocateFile ptr: ${ptr.toHex()}")
 
@@ -964,7 +959,7 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
             fatmgrCreateNewEntry(charset, ptr, filename, false, false, false, false, timeNow, timeNow, fileType).let {
                 // actually create zero-filled clusters
                 if (size > 0) {
-                    expandFile(size, HEAD_CLUSTER, ptr, fileType) // will increment usedClusterCount
+                    expandFile(size, HEAD_CLUSTER, ptr, fileType)
                 }
 
                 return it
@@ -1031,7 +1026,7 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
             ARCHIVE.seekToCluster(ptrs[k+1])
             ARCHIVE.write(byteArrayOf(fileType.toByte(), 0) + ptrs[k].toInt24Arr() + ptrs[k+2].toInt24Arr())
 
-            dbgprintln("[Clustered] initClusters -- writing prevPtr ${ptrs[k].toHex()}, nextPtr ${ptrs[k+2].toHex()}")
+            dbgprintln("[Clustered] initClusters -- cluster ${ptrs[k+1].toHex()}: writing prevPtr ${ptrs[k].toHex()}, nextPtr ${ptrs[k+2].toHex()}")
 
             // write content size for the clusters
             val currentContentSize = ARCHIVE.readUshortBig()
@@ -1064,19 +1059,15 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
 
     private fun expandArchive(clusterCount: Int): Int {
 
-        dbgprintln("[Clustered.expandArchive] expandArchive($clusterCount); usedClusterCount = $usedClusterCount")
-        if (ARCHIVE.length() != usedClusterCount * CLUSTER_SIZE.toLong()) {
-            testPause("Size mismatch detected -- usedClusterCount=$usedClusterCount but actual numbers are ${ARCHIVE.length() / CLUSTER_SIZE}; please check the archive")
-        }
+        dbgprintln("[Clustered.expandArchive] expandArchive($clusterCount); archiveSizeInClusters = $archiveSizeInClusters")
 
-        val newPtr = usedClusterCount
+        val newPtr = archiveSizeInClusters
         ARCHIVE.seekToCluster(newPtr.toLong())
         repeat(clusterCount) {
             ARCHIVE.write(EMPTY_CLUSTER)
-            usedClusterCount += 1
         }
 
-        dbgprintln("[Clustered.expandArchive] usedClusterCount now = $usedClusterCount")
+        dbgprintln("[Clustered.expandArchive] archiveSizeInClusters now = $archiveSizeInClusters")
 
         return newPtr
     }
@@ -1214,6 +1205,9 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
         else {
             val uninlinedFile = allocateFile(fileBytes.size, inlinedFile.fileType, inlinedFile.filename)
             uninlinedFile.takeAttribsFrom(inlinedFile)
+
+            dbgprintln("[Clustered.writeBytesInline] un-inlining; entryID = ${uninlinedFile.entryID.toHex()}")
+
             fileTable.remove(inlinedFile.entryID)
             fatEntryCount -= inlinedFile.extendedEntries.size + 1
 
@@ -1576,11 +1570,11 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
     fun isFile(entry: FATEntry) = getFileType(entry) == 1
 
     /**
-     * Build map of freeClusters, actually trim the archive, sets usedClusterCount, then removes any numbers in freeClusters
+     * Build map of freeClusters, actually trim the archive, then removes any numbers in freeClusters
      * that points outside of the archive.
      */
     fun trimArchive() {
-        dbgprintln("[Clustered.trimArchive] usedClusterCount before = $usedClusterCount")
+        dbgprintln("[Clustered.trimArchive] archiveSizeInClusters before = $archiveSizeInClusters")
         dbgprintln("[Clustered.trimArchive] freeClusters before: ${freeClusters.sortedDescending()}")
 
 
@@ -1617,17 +1611,14 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
         dbgprintln("[Clustered.trimArchive] trim point: ${ptr}")
 
         if (ptr == -1) {
-            usedClusterCount = maxOf(2 + fatClusterCount, ARCHIVE.length().toInt() / CLUSTER_SIZE)
-        }
-        else {
-            usedClusterCount = ptr
+            ptr = maxOf(2 + fatClusterCount, archiveSizeInClusters)
         }
 
-        dbgprintln("[Clustered.trimArchive] usedClusterCount now = $usedClusterCount")
+        ARCHIVE.setLength(CLUSTER_SIZE * ptr.toLong())
 
-        ARCHIVE.setLength(CLUSTER_SIZE * usedClusterCount.toLong())
+        dbgprintln("[Clustered.trimArchive] archiveSizeInClusters now = $archiveSizeInClusters")
 
-        freeClusters.removeIf { it > usedClusterCount }
+        freeClusters.removeIf { it > ptr }
     }
 
     var defragInterruptRequested = false
@@ -1646,7 +1637,7 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
 
         for (target in freeClusters.sorted()) {
             if (defragInterruptRequested) break
-            val src = usedClusterCount - 1
+            val src = archiveSizeInClusters - 1
             if (src <= target) break
             changeClusterNum(src, target)
             workReport.add(src to target)
@@ -1677,7 +1668,7 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
 
     private fun isThisClusterFree(clusterNum: Int): Boolean {
         if (clusterNum < fatClusterCount + 2) return false
-        if (clusterNum >= usedClusterCount) return true
+        if (clusterNum >= archiveSizeInClusters) return true
 
         ARCHIVE.seekToCluster(clusterNum)
 
@@ -1769,22 +1760,20 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
         // trim file size
         if (isThisLastCluster) {
             ARCHIVE.setLength(from * CLUSTER_SIZE.toLong())
-            usedClusterCount = from
-            dbgprintln("[Clustered.defrag]     usedClusterCount <- $usedClusterCount")
+            dbgprintln("[Clustered.defrag]     archiveSizeInClusters = $archiveSizeInClusters (should be equal to `from`=$from)")
         }
         // zero-fill
         else {
             ARCHIVE.seekToCluster(from)
             ARCHIVE.write(EMPTY_CLUSTER)
         }
-
     }
 
 
 
 
     fun getFileIterator(clusterNum: Int): ByteIterator {
-        if (clusterNum !in 2 + fatClusterCount..usedClusterCount)
+        if (clusterNum !in 2 + fatClusterCount..archiveSizeInClusters)
             throw IllegalArgumentException("Not a valid cluster number: $clusterNum")
 
         ARCHIVE.seekToCluster(clusterNum)
@@ -1860,12 +1849,12 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
     }
 
     val totalSpace: Long; get() = diskSize
-    val usedSpace: Long; get() = usedClusterCount * CLUSTER_SIZE.toLong()
-    val freeSpace: Long; get() = diskSize - (usedClusterCount * CLUSTER_SIZE.toLong())
+    val usedSpace: Long; get() = ARCHIVE.length()
+    val freeSpace: Long; get() = diskSize - ARCHIVE.length()
     val usableSpace: Long; get() = diskSize - ARCHIVE.length()
 
     val totalClusterCount: Int; get() = (diskSize / CLUSTER_SIZE.toLong()).toInt()
-    val freeClusterCount: Int; get() = totalClusterCount - usedClusterCount
+    val freeClusterCount: Int; get() = totalClusterCount - archiveSizeInClusters
     val clusterSize: Int = CLUSTER_SIZE
 
     /**

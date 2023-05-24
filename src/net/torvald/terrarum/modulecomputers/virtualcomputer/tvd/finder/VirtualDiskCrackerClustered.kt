@@ -1052,7 +1052,7 @@ class VirtualDiskCrackerClustered() : JFrame() {
     private fun getDiskInfoText(disk: ClusteredFormatDOM): String {
         return """Name: ${disk.diskNameString}
 Capacity: ${disk.totalSpace} bytes (${disk.usedSpace} bytes used, ${disk.freeSpace} bytes free)
-Clusters: ${disk.totalClusterCount} clusters (${disk.usedClusterCount} clusters used, ${disk.freeClusterCount} clusters free)
+Clusters: ${disk.totalClusterCount} clusters (${disk.archiveSizeInClusters} clusters used, ${disk.freeClusterCount} clusters free)
 Write protected: ${disk.isReadOnly.toEnglish()}"""
     }
 
