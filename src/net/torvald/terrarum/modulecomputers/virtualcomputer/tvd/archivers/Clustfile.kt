@@ -18,7 +18,7 @@ open class Clustfile(private val DOM: ClusteredFormatDOM, absolutePath: String) 
     }
 
     private inline fun dbgprintln(msg: Any? = "") {
-        println(msg)
+//        println(msg)
     }
 
     private fun <T> Array<T>.tail() = this.sliceArray(1 until this.size)
@@ -323,11 +323,16 @@ open class Clustfile(private val DOM: ClusteredFormatDOM, absolutePath: String) 
                 val dirListing = getDirListing(FAT!!)!!
                 // if the entry is not already there, write one
                 if (!dirListing.contains(file.FAT!!.entryID)) {
-                    val defaultDirs = ByteArray(3)
-                    defaultDirs.writeInt24(file.FAT!!.entryID, 0)
-                    DOM.writeBytes(FAT!!, defaultDirs, 0, 3, dirListing.size * 3)
+                    (dirListing + listOf(file.FAT!!.entryID)).sorted().let {
+                        ByteArray(it.size * 3).also { newBytes ->
+                            it.forEachIndexed { index, id -> newBytes.writeInt24(id, index * 3) }
+                        }
+                    }.let {
+//                        println("ADDCHILD " + it.joinToString { it.toUint().toString(16).padStart(2, '0') })
+                        DOM.setFileLength(FAT!!, it.size)
+                        DOM.writeBytes(FAT!!, it, 0, it.size, 0)
+                    }
                     updateFATreference(); DOM.commitFATchangeToDisk(FAT!!)
-                    DOM.sortDirectory(FAT!!)
                 }
 
                 true
@@ -343,10 +348,14 @@ open class Clustfile(private val DOM: ClusteredFormatDOM, absolutePath: String) 
             val fileEntryID = file.FAT!!.entryID
             if (dirListing.contains(fileEntryID)) {
                 continueIfTrue {
-                    val newBytes = ByteArray((dirListing.size - 1) * 3)
-                    dirListing.filter { it != fileEntryID }.sorted().forEachIndexed { index, id -> newBytes.writeInt24(id, index * 3) }
-                    DOM.setFileLength(FAT!!, newBytes.size)
-                    DOM.writeBytes(FAT!!, newBytes, 0, newBytes.size, 0)
+                    dirListing.filter { it != fileEntryID }.sorted().let {
+                        ByteArray((it.size - 1) * 3).also { newBytes ->
+                            it.forEachIndexed { index, id -> newBytes.writeInt24(id, index * 3) }
+                        }
+                    }.let {
+                        DOM.setFileLength(FAT!!, it.size)
+                        DOM.writeBytes(FAT!!, it, 0, it.size, 0)
+                    }
                     updateFATreference(); DOM.commitFATchangeToDisk(FAT!!)
                     true
                 }

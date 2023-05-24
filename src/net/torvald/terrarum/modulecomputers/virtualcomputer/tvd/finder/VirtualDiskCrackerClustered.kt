@@ -386,9 +386,7 @@ class VirtualDiskCrackerClustered() : JFrame() {
                                 else {
                                     target.createNewFile().let {
                                         if (!it) throw Error("Directory creation failed")
-                                        ClustfileOutputStream(target, true).let {
-                                            it.write(ByteArray((dialogBox.capacity.value as Long).toInt()))
-                                        }
+                                        target.writeBytes(ByteArray((dialogBox.capacity.value as Long).toInt()))
                                     }
                                     updateDiskInfo()
                                     setStat("File created")

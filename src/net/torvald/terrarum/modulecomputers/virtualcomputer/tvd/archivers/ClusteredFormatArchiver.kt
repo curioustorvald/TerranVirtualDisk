@@ -15,6 +15,7 @@ import java.io.RandomAccessFile
 import java.nio.charset.Charset
 import java.util.*
 import kotlin.collections.HashMap
+import kotlin.collections.HashSet
 import kotlin.experimental.and
 import kotlin.math.ceil
 
@@ -1230,6 +1231,8 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
     fun writeBytes(entry: FATEntry, buffer: ByteArray, bufferOffset: Int, writeLength: Int, writeStartOffset: Int, forceUninline: Boolean = false) {
         if (entry.fileType == 0) throw UnsupportedOperationException("FAT has no file type set (${entry.fileType})")
 
+        dbgprintln("[Clustered] Writebytes FAT=$entry, writeLength=$writeLength, writeStartOffset=$writeStartOffset")
+
         val addedBytes = writeStartOffset + writeLength - getFileLength(entry)
 
         checkDiskCapacity(addedBytes)
@@ -1435,6 +1438,11 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
      */
     fun readBytes(entry: FATEntry, length: Int, offset: Int): ByteArray {
         dbgprintln("[Clustered.readBytes] readBytes ptr=${entry.entryID.toHex()}, len=$length")
+        dbgprintln("[Clustered.readBytes] called by:")
+        Thread.currentThread().stackTrace.forEach {
+            dbgprintln(" ".repeat(22) + it)
+        }
+
         val ba = ByteArray(length)
         val actualSize = readBytes(entry, ba, 0, length, offset)
         dbgprintln("[Clustered.readBytes] readBytes actualSize=$actualSize")
@@ -1481,7 +1489,7 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
             // mark end-of-cluster if applicable
             if (remaining == 0) {
                 ARCHIVE.seekToCluster(cluster, 5)
-                ARCHIVE.writeInt16(NULL_CLUSTER)
+                ARCHIVE.writeInt24(LEAF_CLUSTER)
             }
             // create new cluster if end-of-cluster is prematurely reached
             else if (nextCluster == NULL_CLUSTER) {
@@ -1498,20 +1506,29 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
     /**
      * Performs given action over each cluster in the cluster-chain of the given file.
      *
+     * For each action, the archive will be seeked to the header (offset zero) of the cluster.
+     *
      * @param start cluster number to start traverse
      * @param action what to do. Argument: Int Current cluster number
      */
     private fun traverseClusters(start: Int, action: (Int) -> Unit) {
         var cluster = start
 
+        val visited = HashSet<EntryID>()
+
         do {
             // seek to cluster
             ARCHIVE.seekToCluster(cluster, 5)
+            visited.add(cluster)
+
+            dbgprintln("[Clustered.traverseClusters] cluster: ${cluster.toHex()}")
+
             // get next cluster
             val nextCluster = ARCHIVE.readInt24()
 
-            if (cluster == nextCluster) throw VDIOException("Loop to self detected -- prev cluster: $cluster, next cluster: $nextCluster")
+            if (visited.contains(nextCluster)) throw VDIOException("Loop detected -- cluster ${nextCluster} was visited already; prev: $cluster, next: $nextCluster")
 
+            ARCHIVE.seekToCluster(cluster)
             action(cluster)
 
             cluster = nextCluster
@@ -1531,6 +1548,7 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
         else {
             traverseClusters(entry.entryID) {
                 // get length for this cluster
+                ARCHIVE.seekToCluster(it, 8)
                 val len = ARCHIVE.readUshortBig()
                 // add to accumulator
                 accumulator += len
@@ -1884,16 +1902,22 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
     internal fun renameEntryID(old: EntryID, new: EntryID) {
         dbgprintln("[Clustered.renameEntryID] trying to rename $old to $new")
 
+        val toBeSorted = HashSet<EntryID>()
+        val toBeSorted2 = HashSet<Int>()
+
         // rename FAT area
         for (fatIndex in 0 until fatEntryCount) {
             ARCHIVE.seekToFAT(fatIndex)
+            // rename on inline directory
             if (ARCHIVE.readInt24() == 0xFFFF12) {
+                val parentID = ARCHIVE.readInt24()
                 for (offset in 8 until FAT_ENTRY_SIZE step 3) {
                     ARCHIVE.seekToFAT(fatIndex, offset)
                     if (ARCHIVE.readInt24() == old) {
                         ARCHIVE.seekToFAT(fatIndex, offset)
                         ARCHIVE.writeInt24(new)
                         dbgprintln("[Clustered.renameEntryID] ... at FAT ${fatIndex.toHex()}, offset $offset")
+                        toBeSorted.add(parentID)
                     }
                 }
             }
@@ -1909,10 +1933,14 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
                         ARCHIVE.seekToCluster(kluster, offset)
                         ARCHIVE.writeInt24(new)
                         dbgprintln("[Clustered.renameEntryID] ... at Cluster ${kluster.toHex()}, offset $offset")
+                        toBeSorted2.add(kluster)
                     }
                 }
             }
         }
+
+        toBeSorted.forEach { sortDirectoryInline(fileTable[it]!!) }
+        toBeSorted2.forEach { sortDirectoryCluster(it) }
     }
 
     fun getRawCluster(num: Int): ByteArray {
@@ -1924,34 +1952,48 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
         if (entry.fileType != FILETYPE_DIRECTORY) throw VDIOException("Tried to sort non-directory (filetype = ${entry.fileType})")
 
         if (entry.isInline) {
-            val newContents = entry.getInlineBytes().chunked(3).sortedBy { it.toInt24() }.let {
-                val ba = ByteArray(it.size * 3)
-                it.forEachIndexed { index, bytes ->
-                    ba[index * 3 + 0] = bytes[0]
-                    ba[index * 3 + 1] = bytes[1]
-                    ba[index * 3 + 2] = bytes[2]
-                }
-                ba
-            }
-            fatmgrSetInlineBytes(entry, newContents)
+            sortDirectoryInline(entry)
         }
         else {
             traverseClusters(entry.entryID) { clusternum ->
-                ARCHIVE.seekToCluster(clusternum, 8)
-                val contentsSize = ARCHIVE.readUshortBig()
-                val newContents = ARCHIVE.read(contentsSize).chunked(3).sortedBy { it.toInt24() }.let {
-                    val ba = ByteArray(it.size * 3)
-                    it.forEachIndexed { index, bytes ->
-                        ba[index * 3 + 0] = bytes[0]
-                        ba[index * 3 + 1] = bytes[1]
-                        ba[index * 3 + 2] = bytes[2]
-                    }
-                    ba
-                }
-                ARCHIVE.seekToCluster(clusternum, 8)
-                ARCHIVE.write(newContents)
+                sortDirectoryCluster(clusternum)
             }
         }
+    }
+
+    private fun sortDirectoryInline(entry: FATEntry) {
+        val newContents = entry.getInlineBytes().chunked(3).sortedBy { it.toInt24() }.let {
+            val ba = ByteArray(it.size * 3)
+            it.forEachIndexed { index, bytes ->
+                ba[index * 3 + 0] = bytes[0]
+                ba[index * 3 + 1] = bytes[1]
+                ba[index * 3 + 2] = bytes[2]
+            }
+            ba
+        }
+        fatmgrSetInlineBytes(entry, newContents)
+    }
+
+    private fun sortDirectoryCluster(clusternum: Int) {
+        ARCHIVE.seekToCluster(clusternum, FILE_BLOCK_OFFSET_CONTENT_LEN)
+        val contentsSize = ARCHIVE.readUshortBig()
+
+        dbgprintln("[Clusternum.sortDirectory] cluster ${clusternum.toHex()} contents size: $contentsSize")
+
+        val newContents = ARCHIVE.read(contentsSize).chunked(3).sortedBy { it.toInt24() }.let {
+            val ba = ByteArray(it.size * 3)
+            it.forEachIndexed { index, bytes ->
+                ba[index * 3 + 0] = bytes[0]
+                ba[index * 3 + 1] = bytes[1]
+                ba[index * 3 + 2] = bytes[2]
+            }
+            ba
+        }
+
+//                println("SORTED = ${newContents.joinToString { it.toUint().toString(16).toUpperCase().padStart(2, '0') }}")
+
+        ARCHIVE.seekToCluster(clusternum, FILE_BLOCK_HEADER_SIZE)
+        ARCHIVE.write(newContents)
     }
 
 
@@ -2058,7 +2100,7 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
 }
 
 private fun ByteArray.chunked(size: Int): List<ByteArray> {
-    return List(this.size / size + 1) {
+    return List((this.size + size - 1) / size) {
         this.sliceArray(size * it until minOf(size * (it + 1), this.size))
     }
 }
