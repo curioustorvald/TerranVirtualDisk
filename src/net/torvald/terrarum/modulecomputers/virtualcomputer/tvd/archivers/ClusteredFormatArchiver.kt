@@ -13,6 +13,7 @@ import java.io.FileOutputStream
 import java.io.IOException
 import java.io.RandomAccessFile
 import java.nio.charset.Charset
+import java.security.MessageDigest
 import java.util.*
 import kotlin.collections.HashMap
 import kotlin.collections.HashSet
@@ -1962,14 +1963,10 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
     }
 
     private fun sortDirectoryInline(entry: FATEntry) {
-        val newContents = entry.getInlineBytes().chunked(3).sortedBy { it.toInt24() }.let {
-            val ba = ByteArray(it.size * 3)
-            it.forEachIndexed { index, bytes ->
-                ba[index * 3 + 0] = bytes[0]
-                ba[index * 3 + 1] = bytes[1]
-                ba[index * 3 + 2] = bytes[2]
+        val newContents = entry.getInlineBytes().chunked(3).map { it.toInt24() }.sortedWith(FATcomparator(this)).let { ids ->
+            ByteArray(ids.size * 3).also { ba ->
+                ids.forEachIndexed { i, id -> ba.writeInt24(id, i * 3) }
             }
-            ba
         }
         fatmgrSetInlineBytes(entry, newContents)
     }
@@ -2097,6 +2094,37 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
         it.substring(0..4).toInt(16).toString(16).toUpperCase().padStart(3, '0') + ":" + it.substring(5..7)
     }
     private fun Int.toHex() = this.toLong().toHex()
+
+    @OptIn(ExperimentalUnsignedTypes::class)
+    fun hashFilename(s: String): Pair<ULong, ULong> {
+        val bb = ULongArray(2)
+        MessageDigest.getInstance("SHA-1").digest(s.toByteArray(charset)).slice(0..15).chunked(8).forEachIndexed { c, bs ->
+            bb[c] = bs.fold(0UL) { acc, b -> (acc shl 8) or b.toULong() }
+        }
+        return bb[0] to bb[1]
+    }
+    @OptIn(ExperimentalUnsignedTypes::class)
+    fun compareFilenameHash(h1: Pair<ULong, ULong>, h2: Pair<ULong, ULong>): Int {
+        return if (h1.first == h2.first && h1.second == h2.second) 0
+        else if (h1.first == h2.first)
+            if (h1.second > h2.second) 1
+            else if (h1.second < h2.second) -1
+            else 0
+        else
+            if (h1.first > h2.first) 1
+            else if (h1.first < h2.first) -1
+            else 0
+    }
+
+    class FATcomparator(val dom: ClusteredFormatDOM): Comparator<Int> {
+        override fun compare(o1: Int, o2: Int): Int {
+            val f1 = dom.getFile(o1)!!
+            val f2 = dom.getFile(o2)!!
+            val h1 = dom.hashFilename(f1.filename)
+            val h2 = dom.hashFilename(f2.filename)
+            return dom.compareFilenameHash(h1, h2)
+        }
+    }
 }
 
 private fun ByteArray.chunked(size: Int): List<ByteArray> {
