@@ -1972,14 +1972,10 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
 
         dbgprintln("[Clusternum.sortDirectory] cluster ${clusternum.toHex()} contents size: $contentsSize")
 
-        val newContents = ARCHIVE.read(contentsSize).chunked(3).sortedBy { it.toInt24() }.let {
-            val ba = ByteArray(it.size * 3)
-            it.forEachIndexed { index, bytes ->
-                ba[index * 3 + 0] = bytes[0]
-                ba[index * 3 + 1] = bytes[1]
-                ba[index * 3 + 2] = bytes[2]
+        val newContents = ARCHIVE.read(contentsSize).chunked(3).map { it.toInt24() }.sortedWith(filenameComparator).let { ids ->
+            ByteArray(ids.size * 3).also { ba ->
+                ids.forEachIndexed { i, id -> ba.writeInt24(id, i * 3) }
             }
-            ba
         }
 
 //                println("SORTED = ${newContents.joinToString { it.toUint().toString(16).toUpperCase().padStart(2, '0') }}")
