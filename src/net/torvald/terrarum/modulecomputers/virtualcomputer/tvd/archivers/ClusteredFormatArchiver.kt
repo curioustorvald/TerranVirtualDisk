@@ -1505,9 +1505,9 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
      * For each action, the archive will be seeked to the header (offset zero) of the cluster.
      *
      * @param start cluster number to start traverse
-     * @param action what to do. Argument: Int Current cluster number
+     * @param action what to do. Argument: Int-Current cluster number
      */
-    private fun traverseClusters(start: Int, action: (Int) -> Unit) {
+    fun traverseClusters(start: Int, action: (Int) -> Unit) {
         var cluster = start
 
         val visited = HashSet<EntryID>()
@@ -1526,6 +1526,38 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
 
             ARCHIVE.seekToCluster(cluster)
             action(cluster)
+
+            cluster = nextCluster
+        } while (cluster in 1 until LEAF_CLUSTER)
+    }
+
+    /**
+     * Performs given action over each cluster in the cluster-chain of the given file.
+     *
+     * For each action, the archive will be seeked to the header (offset zero) of the cluster.
+     *
+     * @param start cluster number to start traverse
+     * @param action what to do. Argument: Int-Current cluster number, Return: false to break the loop
+     */
+    fun traverseClustersBreakable(start: Int, action: (Int) -> Boolean) {
+        var cluster = start
+
+        val visited = HashSet<EntryID>()
+
+        do {
+            // seek to cluster
+            ARCHIVE.seekToCluster(cluster, 5)
+            visited.add(cluster)
+
+            dbgprintln("[Clustered.traverseClusters] cluster: ${cluster.toHex()}")
+
+            // get next cluster
+            val nextCluster = ARCHIVE.readInt24()
+
+            if (visited.contains(nextCluster)) throw VDIOException("Loop detected -- cluster ${nextCluster} was visited already; prev: $cluster, next: $nextCluster")
+
+            ARCHIVE.seekToCluster(cluster)
+            if (!action(cluster)) break
 
             cluster = nextCluster
         } while (cluster in 1 until LEAF_CLUSTER)
@@ -1987,76 +2019,6 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
 
 
 
-    private fun RandomAccessFile.readBytes(buffer: ByteArray): Int {
-        val readStatus = ARCHIVE.read(buffer)
-        return readStatus
-    }
-    private fun RandomAccessFile.readUshortBig(): Int {
-        val buffer = ByteArray(2)
-        val readStatus = readBytes(buffer)
-        if (readStatus != 2) throw InternalError("Unexpected error -- EOF reached? (expected 2, got $readStatus)")
-        return buffer.toInt16()
-    }
-    private fun RandomAccessFile.readIntBig(): Int {
-        val buffer = ByteArray(4)
-        val readStatus = readBytes(buffer)
-        if (readStatus != 4) throw InternalError("Unexpected error -- EOF reached? (expected 4, got $readStatus)")
-        return buffer.toInt32()
-    }
-    private fun RandomAccessFile.readInt48(): Long {
-        val buffer = ByteArray(6)
-        val readStatus = readBytes(buffer)
-        if (readStatus != 6) throw InternalError("Unexpected error -- EOF reached? (expected 6, got $readStatus)")
-        return buffer.toInt48()
-    }
-    private fun RandomAccessFile.readInt24(): Int {
-        val buffer = ByteArray(3)
-        val readStatus = readBytes(buffer)
-        if (readStatus != 3) throw InternalError("Unexpected error -- EOF reached? (expected 3, got $readStatus)")
-        return buffer.toInt24()
-    }
-    private fun RandomAccessFile.seekToCluster(clusterNum: Int, offset: Int = 0) {
-        this.seek(CLUSTER_SIZE * clusterNum.toLong() + offset)
-    }
-    private fun RandomAccessFile.seekToCluster(clusterNum: Long, offset: Int = 0) {
-        this.seek(CLUSTER_SIZE * clusterNum + offset)
-    }
-    private fun RandomAccessFile.seekToFAT(index: Int, offset: Int = 0) {
-        this.seek(2L * CLUSTER_SIZE + index * FAT_ENTRY_SIZE + offset)
-    }
-    private fun RandomAccessFile.writeInt16(value: Int) {
-        this.write(value.ushr(8))
-        this.write(value.ushr(0))
-    }
-    private fun RandomAccessFile.writeInt24(value: Int) {
-        this.write(value.ushr(16))
-        this.write(value.ushr(8))
-        this.write(value.ushr(0))
-    }
-    private fun RandomAccessFile.writeInt32(value: Int) {
-        this.write(value.ushr(24))
-        this.write(value.ushr(16))
-        this.write(value.ushr(8))
-        this.write(value.ushr(0))
-    }
-    private fun RandomAccessFile.writeInt48(value: Long) {
-        this.write(value.ushr(40).toInt())
-        this.write(value.ushr(32).toInt())
-        this.write(value.ushr(24).toInt())
-        this.write(value.ushr(16).toInt())
-        this.write(value.ushr( 8).toInt())
-        this.write(value.ushr( 0).toInt())
-    }
-    private fun RandomAccessFile.writeInt64(value: Long) {
-        this.write(value.ushr(56).toInt())
-        this.write(value.ushr(48).toInt())
-        this.write(value.ushr(40).toInt())
-        this.write(value.ushr(32).toInt())
-        this.write(value.ushr(24).toInt())
-        this.write(value.ushr(16).toInt())
-        this.write(value.ushr( 8).toInt())
-        this.write(value.ushr( 0).toInt())
-    }
     private fun RandomAccessFile.setClusterMeta1Flag(clusterNum: Long, mask: Int, flag: Int) {
         this.seekToCluster(clusterNum, 0)
         val existing = this.read()
@@ -2128,12 +2090,82 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
     }
 }
 
-private fun ByteArray.chunked(size: Int): List<ByteArray> {
+fun ByteArray.chunked(size: Int): List<ByteArray> {
     return List((this.size + size - 1) / size) {
         this.sliceArray(size * it until minOf(size * (it + 1), this.size))
     }
 }
 
+fun RandomAccessFile.readBytes(buffer: ByteArray): Int {
+    val readStatus = this.read(buffer)
+    return readStatus
+}
+fun RandomAccessFile.readUshortBig(): Int {
+    val buffer = ByteArray(2)
+    val readStatus = readBytes(buffer)
+    if (readStatus != 2) throw InternalError("Unexpected error -- EOF reached? (expected 2, got $readStatus)")
+    return buffer.toInt16()
+}
+fun RandomAccessFile.readIntBig(): Int {
+    val buffer = ByteArray(4)
+    val readStatus = readBytes(buffer)
+    if (readStatus != 4) throw InternalError("Unexpected error -- EOF reached? (expected 4, got $readStatus)")
+    return buffer.toInt32()
+}
+fun RandomAccessFile.readInt48(): Long {
+    val buffer = ByteArray(6)
+    val readStatus = readBytes(buffer)
+    if (readStatus != 6) throw InternalError("Unexpected error -- EOF reached? (expected 6, got $readStatus)")
+    return buffer.toInt48()
+}
+fun RandomAccessFile.readInt24(): Int {
+    val buffer = ByteArray(3)
+    val readStatus = readBytes(buffer)
+    if (readStatus != 3) throw InternalError("Unexpected error -- EOF reached? (expected 3, got $readStatus)")
+    return buffer.toInt24()
+}
+fun RandomAccessFile.seekToCluster(clusterNum: Int, offset: Int = 0) {
+    this.seek(CLUSTER_SIZE * clusterNum.toLong() + offset)
+}
+fun RandomAccessFile.seekToCluster(clusterNum: Long, offset: Int = 0) {
+    this.seek(CLUSTER_SIZE * clusterNum + offset)
+}
+fun RandomAccessFile.seekToFAT(index: Int, offset: Int = 0) {
+    this.seek(2L * CLUSTER_SIZE + index * FAT_ENTRY_SIZE + offset)
+}
+fun RandomAccessFile.writeInt16(value: Int) {
+    this.write(value.ushr(8))
+    this.write(value.ushr(0))
+}
+fun RandomAccessFile.writeInt24(value: Int) {
+    this.write(value.ushr(16))
+    this.write(value.ushr(8))
+    this.write(value.ushr(0))
+}
+fun RandomAccessFile.writeInt32(value: Int) {
+    this.write(value.ushr(24))
+    this.write(value.ushr(16))
+    this.write(value.ushr(8))
+    this.write(value.ushr(0))
+}
+fun RandomAccessFile.writeInt48(value: Long) {
+    this.write(value.ushr(40).toInt())
+    this.write(value.ushr(32).toInt())
+    this.write(value.ushr(24).toInt())
+    this.write(value.ushr(16).toInt())
+    this.write(value.ushr( 8).toInt())
+    this.write(value.ushr( 0).toInt())
+}
+fun RandomAccessFile.writeInt64(value: Long) {
+    this.write(value.ushr(56).toInt())
+    this.write(value.ushr(48).toInt())
+    this.write(value.ushr(40).toInt())
+    this.write(value.ushr(32).toInt())
+    this.write(value.ushr(24).toInt())
+    this.write(value.ushr(16).toInt())
+    this.write(value.ushr( 8).toInt())
+    this.write(value.ushr( 0).toInt())
+}
 internal fun ByteArray.toInt16(offset: Int = 0): Int {
     return  this[0 + offset].toUint().shl(8) or
             this[1 + offset].toUint()

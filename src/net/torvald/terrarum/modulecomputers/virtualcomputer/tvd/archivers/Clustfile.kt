@@ -1,6 +1,8 @@
 package net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.archivers
 
 import net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.*
+import net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.DiskSkimmer.Companion.read
+import net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.archivers.ClusteredFormatDOM.Companion.CLUSTER_SIZE
 import net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.archivers.ClusteredFormatDOM.Companion.FILETYPE_BINARY
 import net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.archivers.ClusteredFormatDOM.Companion.FILETYPE_DIRECTORY
 import java.io.File
@@ -18,7 +20,7 @@ open class Clustfile(private val DOM: ClusteredFormatDOM, absolutePath: String) 
     }
 
     private inline fun dbgprintln(msg: Any? = "") {
-//        println(msg)
+        println(msg)
     }
 
     private fun <T> Array<T>.tail() = this.sliceArray(1 until this.size)
@@ -109,7 +111,35 @@ open class Clustfile(private val DOM: ClusteredFormatDOM, absolutePath: String) 
 
             dbgprintln("[Clustfile.searchForFAT]     getDirListing of ID ${currentDir.entryID.toHex()}...")
 
+            /*var found = false
             // TODO: binarySearch by hash over each cluster in the dir file chain
+            DOM.traverseClustersBreakable(currentDir.entryID) { clusternum ->
+                DOM.ARCHIVE.seekToCluster(clusternum, ClusteredFormatDOM.FILE_BLOCK_OFFSET_CONTENT_LEN)
+                val contentsSize = DOM.ARCHIVE.readUshortBig()
+                val dirListing = DOM.ARCHIVE.read(contentsSize).chunked(3).map { DOM.getFile(it.toInt24())!! }
+
+                dirListing.map { it.filename }.binarySearch(dirName, DOM.filenameComparator).let { index ->
+                    if (index >= 0) {
+                        val dirFile = dirListing[index]
+
+                        dbgprintln("[Clustfile.searchForFAT]     found intermediate; entryID = ${dirFile.entryID.toHex()}; dirname = ${dirFile.filename}")
+
+                        currentDir = dirFile
+                        found = true
+                        false
+                    }
+                    else {
+                        dbgprintln("[Clustfile.searchForFAT]     not found, trying next cluster")
+                        true // continue search on the next cluster
+                    }
+                }
+            }
+            if (!found) {
+                currentDir = null
+            }*/
+
+
+
 
             val dirListing = getDirListing(currentDir)
 
