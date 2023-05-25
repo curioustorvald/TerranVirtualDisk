@@ -7,16 +7,10 @@ import net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.VirtualDisk.Comp
 import net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.archivers.ClusteredFormatDOM.Companion.CLUSTER_SIZE
 import net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.archivers.ClusteredFormatDOM.Companion.FAT_ENTRY_SIZE
 import net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.archivers.ClusteredFormatDOM.Companion.INLINE_FILE_CLUSTER_BASE
-import java.io.File
-import java.io.FileNotFoundException
-import java.io.FileOutputStream
-import java.io.IOException
-import java.io.RandomAccessFile
+import java.io.*
 import java.nio.charset.Charset
 import java.security.MessageDigest
 import java.util.*
-import kotlin.collections.HashMap
-import kotlin.collections.HashSet
 import kotlin.experimental.and
 import kotlin.math.ceil
 
@@ -268,7 +262,8 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
             fun fromBytes(charset: Charset, fat256: ByteArray) = if (fat256.size != ClusteredFormatDOM.FAT_ENTRY_SIZE)
                 throw IllegalArgumentException("FAT not ${ClusteredFormatDOM.FAT_ENTRY_SIZE} bytes long (${fat256.size})")
             else
-                fat256.toInt24() to FATEntry(charset,
+                fat256.toInt24() to FATEntry(
+                        charset,
                         fat256.toInt24(),
                         fat256[3].and(1.toByte()) != 0.toByte(),
                         fat256[3].and(2.toByte()) != 0.toByte(),
@@ -281,7 +276,7 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
                         fat256.sliceArray(10..15).toInt48(),
                         fat256.sliceArray(16..255).toCanonicalString(charset),
 
-                )
+                        )
         }
 
 
@@ -1963,7 +1958,7 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
     }
 
     private fun sortDirectoryInline(entry: FATEntry) {
-        val newContents = entry.getInlineBytes().chunked(3).map { it.toInt24() }.sortedWith(FATcomparator(this)).let { ids ->
+        val newContents = entry.getInlineBytes().chunked(3).map { it.toInt24() }.sortedWith(filenameComparator).let { ids ->
             ByteArray(ids.size * 3).also { ba ->
                 ids.forEachIndexed { i, id -> ba.writeInt24(id, i * 3) }
             }
@@ -2095,35 +2090,42 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
     }
     private fun Int.toHex() = this.toLong().toHex()
 
-    @OptIn(ExperimentalUnsignedTypes::class)
-    fun hashFilename(s: String): Pair<ULong, ULong> {
-        val bb = ULongArray(2)
-        MessageDigest.getInstance("SHA-1").digest(s.toByteArray(charset)).slice(0..15).chunked(8).forEachIndexed { c, bs ->
-            bb[c] = bs.fold(0UL) { acc, b -> (acc shl 8) or b.toULong() }
+    private fun compareArray(a: ByteArray, b: ByteArray): Int {
+        if (a == b) { // if the two items are the same reference, they're identical
+            return 0
         }
-        return bb[0] to bb[1]
-    }
-    @OptIn(ExperimentalUnsignedTypes::class)
-    fun compareFilenameHash(h1: Pair<ULong, ULong>, h2: Pair<ULong, ULong>): Int {
-        return if (h1.first == h2.first && h1.second == h2.second) 0
-        else if (h1.first == h2.first)
-            if (h1.second > h2.second) 1
-            else if (h1.second < h2.second) -1
-            else 0
-        else
-            if (h1.first > h2.first) 1
-            else if (h1.first < h2.first) -1
-            else 0
+
+        // now the item-by-item comparison - the loop runs as long as items in both arrays are equal
+        val last = Math.min(a.size, b.size)
+        for (i in 0 until last) {
+            val ai = a[i]
+            val bi = b[i]
+            val comp = ai.compareTo(bi)
+            if (comp != 0) {
+                return comp
+            }
+        }
+
+        // shorter array whose items are all equal to the first items of a longer array is considered 'less than'
+        if (a.size < b.size) {
+            return -1 // "a < b"
+        }
+        else if (a.size > b.size) {
+            return 1 // "a > b"
+        }
+
+        // i.e. (a.length == b.length)
+        return 0 // "a = b", same length, all items equal
     }
 
-    class FATcomparator(val dom: ClusteredFormatDOM): Comparator<Int> {
-        override fun compare(o1: Int, o2: Int): Int {
-            val f1 = dom.getFile(o1)!!
-            val f2 = dom.getFile(o2)!!
-            val h1 = dom.hashFilename(f1.filename)
-            val h2 = dom.hashFilename(f2.filename)
-            return dom.compareFilenameHash(h1, h2)
-        }
+    fun compareFilenameHash(s1: String, s2: String): Int {
+        return compareArray(s1.toByteArray(charset), s2.toByteArray(charset))
+    }
+
+    val filenameComparator = Comparator<Int> { o1, o2 ->
+        val f1 = getFile(o1)!!.filename
+        val f2 = getFile(o2)!!.filename
+        compareFilenameHash(f1, f2)
     }
 }
 
