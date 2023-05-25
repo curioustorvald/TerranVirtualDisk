@@ -9,8 +9,8 @@ import net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.archivers.Cluste
 import net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.archivers.ClusteredFormatDOM.Companion.INLINE_FILE_CLUSTER_BASE
 import java.io.*
 import java.nio.charset.Charset
-import java.security.MessageDigest
 import java.util.*
+import kotlin.Comparator
 import kotlin.experimental.and
 import kotlin.math.ceil
 
@@ -1958,7 +1958,7 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
     }
 
     private fun sortDirectoryInline(entry: FATEntry) {
-        val newContents = entry.getInlineBytes().chunked(3).map { it.toInt24() }.sortedWith(filenameComparator).let { ids ->
+        val newContents = entry.getInlineBytes().chunked(3).map { it.toInt24() }.sortedWith(fatComparator).let { ids ->
             ByteArray(ids.size * 3).also { ba ->
                 ids.forEachIndexed { i, id -> ba.writeInt24(id, i * 3) }
             }
@@ -1972,7 +1972,7 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
 
         dbgprintln("[Clusternum.sortDirectory] cluster ${clusternum.toHex()} contents size: $contentsSize")
 
-        val newContents = ARCHIVE.read(contentsSize).chunked(3).map { it.toInt24() }.sortedWith(filenameComparator).let { ids ->
+        val newContents = ARCHIVE.read(contentsSize).chunked(3).map { it.toInt24() }.sortedWith(fatComparator).let { ids ->
             ByteArray(ids.size * 3).also { ba ->
                 ids.forEachIndexed { i, id -> ba.writeInt24(id, i * 3) }
             }
@@ -2118,9 +2118,12 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
         return compareArray(s1.toByteArray(charset), s2.toByteArray(charset))
     }
 
-    val filenameComparator = Comparator<Int> { o1, o2 ->
+    val fatComparator = Comparator<Int> { o1, o2 ->
         val f1 = getFile(o1)!!.filename
         val f2 = getFile(o2)!!.filename
+        compareFilenameHash(f1, f2)
+    }
+    val filenameComparator = Comparator<String> { f1, f2 ->
         compareFilenameHash(f1, f2)
     }
 }

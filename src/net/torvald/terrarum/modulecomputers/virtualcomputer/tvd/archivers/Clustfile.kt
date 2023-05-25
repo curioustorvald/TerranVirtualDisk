@@ -109,6 +109,8 @@ open class Clustfile(private val DOM: ClusteredFormatDOM, absolutePath: String) 
 
             dbgprintln("[Clustfile.searchForFAT]     getDirListing of ID ${currentDir.entryID.toHex()}...")
 
+            // TODO: binarySearch by hash over each cluster in the dir file chain
+
             val dirListing = getDirListing(currentDir)
 
             dbgprintln("[Clustfile.searchForFAT]     ls: [${dirListing?.joinToString { it.toHex() }}]")
@@ -323,7 +325,7 @@ open class Clustfile(private val DOM: ClusteredFormatDOM, absolutePath: String) 
                 val dirListing = getDirListing(FAT!!)!!
                 // if the entry is not already there, write one
                 if (!dirListing.contains(file.FAT!!.entryID)) {
-                    (dirListing + listOf(file.FAT!!.entryID)).sortedWith(DOM.filenameComparator).let {
+                    (dirListing + listOf(file.FAT!!.entryID)).sortedWith(DOM.fatComparator).let {
                         ByteArray(it.size * 3).also { newBytes ->
                             it.forEachIndexed { index, id -> newBytes.writeInt24(id, index * 3) }
                         }
@@ -348,7 +350,7 @@ open class Clustfile(private val DOM: ClusteredFormatDOM, absolutePath: String) 
             val fileEntryID = file.FAT!!.entryID
             if (dirListing.contains(fileEntryID)) {
                 continueIfTrue {
-                    dirListing.filter { it != fileEntryID }.sortedWith(DOM.filenameComparator).let {
+                    dirListing.filter { it != fileEntryID }.sortedWith(DOM.fatComparator).let {
                         ByteArray((it.size - 1) * 3).also { newBytes ->
                             it.forEachIndexed { index, id -> newBytes.writeInt24(id, index * 3) }
                         }
