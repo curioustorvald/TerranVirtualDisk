@@ -350,6 +350,7 @@ open class Clustfile(private val DOM: ClusteredFormatDOM, absolutePath: String) 
 
         return continueIfTrue {
             // write the child
+            updateFATreference()
             if (FAT == null) false // run initDir() to create the file
             else {
                 val dirListing = getDirListing(FAT!!) ?: throw NullPointerException("Unable to list directory for $FAT")
@@ -381,6 +382,7 @@ open class Clustfile(private val DOM: ClusteredFormatDOM, absolutePath: String) 
         require(type == FILETYPE_DIRECTORY)
 
         return continueIfTrue {
+            updateFATreference()
             val dirListing = getDirListing(FAT!!)!!
             val fileEntryID = file.FAT!!.entryID
             if (dirListing.contains(fileEntryID)) {
