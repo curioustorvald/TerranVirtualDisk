@@ -203,9 +203,8 @@ class VirtualDiskCrackerClustered() : JFrame() {
                     val table = e.source as JTable
                     val row = table.rowAtPoint(e.point)
 
-
-                    selectedFile = null // disable selection //currentDirectoryEntriesAltMode!![row]
-                    fileDesc.text = "" //getFileInfoText(selectedFile)
+                    selectedFile = null
+                    fileDesc.text = getFileInfoText(vdisk?.getFile((tableEntriesRecord[row][7]).toInt()))
                     fileDesc.caretPosition = 0
                 }
             })
@@ -1043,6 +1042,7 @@ Write protected: ${disk.isReadOnly.toEnglish()}"""
                     Instant.ofEpochSecond(entry.creationDate).atZone(TimeZone.getDefault().toZoneId()).format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")),
                     Instant.ofEpochSecond(entry.modificationDate).atZone(TimeZone.getDefault().toZoneId()).format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")),
                     entry.extendedEntries.size.toString(),
+                    entry.entryID.toString()
                 )
             }.toTypedArray()
         }
@@ -1067,9 +1067,26 @@ Type: ${file.FAT?.fileType?.fileTypeToString()}
 FAT ID: ${file.FAT?.entryID?.toHex()}
 """ + if (file.exists() && file.isFile())
         ("""Contents: """ +
-                ByteArray(minOf(PREVIEW_MAX_BYTES, file.length()).toInt()).also {
-                    file.pread(it, 0, it.size, 0)
+                ByteArray(minOf(PREVIEW_MAX_BYTES, file.length()).toInt()).apply {
+                    file.pread(this, 0, this.size, 0)
                 }.toString(vdisk?.charset ?: Charsets.ISO_8859_1))
+        else ""
+    }
+
+    private fun getFileInfoText(fat: ClusteredFormatDOM.FATEntry?): String {
+        if (fat == null) return ""
+
+        val flen = vdisk!!.getFileLength(fat)
+
+        return """Name: ${fat.filename}
+Size: ${if (fat.fileType == FILETYPE_DIRECTORY) ("${flen / 3} entries") else "$flen bytes"}
+Type: ${fat.fileType.fileTypeToString()}
+FAT ID: ${fat.entryID.toHex()}
+""" + if (fat.fileType == FILETYPE_BINARY)
+            ("""Contents: """ +
+                    ByteArray(minOf(PREVIEW_MAX_BYTES.toInt(), flen)).apply {
+                        vdisk!!.readBytes(fat, this, 0, this.size, 0)
+                    }.toString(vdisk?.charset ?: Charsets.ISO_8859_1))
         else ""
     }
 

@@ -106,7 +106,7 @@ fun main(args: Array<String>) {
     repeat(45) { rpt ->
         val testmarker = "########ContentNum $rpt".toByteArray(charset)
         DOM.allocateFile(testmarker.size, FILETYPE_BINARY, "FAT Filler $rpt").let { entry ->
-            println("Entry ${entry.entryID.toHex()}, name: ${entry.filename}, fatEntryIndices: ${DOM.fatEntryIndices[entry.entryID]}")
+//            println("Entry ${entry.entryID.toHex()}, name: ${entry.filename}, fatEntryIndices: ${DOM.fatEntryIndices[entry.entryID]}")
             DOM.writeBytes(entry, testmarker, 0, testmarker.size, 0)
     } }
 
