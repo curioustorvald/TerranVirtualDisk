@@ -5,25 +5,15 @@ import net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.archivers.Cluste
 import net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.archivers.ClusteredFormatDOM.Companion.FILETYPE_BINARY
 import net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.archivers.ClusteredFormatDOM.Companion.FILETYPE_DIRECTORY
 import net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.archivers.Clustfile
-import net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.archivers.ClustfileOutputStream
-import net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.toHex
 import java.awt.BorderLayout
 import java.awt.Dimension
 import java.awt.event.KeyEvent
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
-import java.io.BufferedInputStream
-import java.io.BufferedOutputStream
 import java.io.File
-import java.io.FileInputStream
-import java.io.FileOutputStream
-import java.nio.charset.Charset
-import java.nio.file.Files
-import java.nio.file.StandardCopyOption
 import java.time.Instant
 import java.time.format.DateTimeFormatter
 import java.util.*
-import java.util.logging.Level
 import javax.swing.*
 import javax.swing.table.AbstractTableModel
 import javax.swing.ListSelectionModel
@@ -107,9 +97,8 @@ class VirtualDiskCrackerClustered() : JFrame() {
     val tableColumns = arrayOf("Name", "Date Modified", "Size")
     val tableParentRecord = arrayOf(arrayOf("..", "", ""))
 
-    val tableColumnsEntriesMode = arrayOf("Name", "FAT ID", "Type", "Created", "Modified", "Size", "# Ext")
-    val tableEntriesRecord = arrayOf(arrayOf("", "", "", "", "", "", "",))
-    private var currentDirectoryEntriesAltMode: Array<ClusteredFormatDOM.FATEntry>? = null
+    val tableColumnsEntriesMode = arrayOf("Name", "FAT ID", "Type", "Size", "Created", "Modified", "# Ext")
+    var tableEntriesRecord = arrayOf(arrayOf("", "", "", "", "", "", "",))
 
 
 
@@ -230,28 +219,18 @@ class VirtualDiskCrackerClustered() : JFrame() {
                 override fun fireValueChanged(isAdjusting: Boolean) {} // required!
             }
             model = object : AbstractTableModel() {
-                override fun getRowCount() = currentDirectoryEntriesAltMode?.size ?: 0
+                override fun getRowCount() = tableEntriesRecord.size
 
                 override fun getColumnCount() = tableColumnsEntriesMode.size
 
                 override fun getColumnName(column: Int) = tableColumnsEntriesMode[column]
 
                 override fun getValueAt(rowIndex: Int, columnIndex: Int): String? {
-                    if (vdisk != null) {
-                        val entry = currentDirectoryEntriesAltMode!![rowIndex]
-                        return when (columnIndex) {
-                            0 -> entry.filename
-                            1 -> entry.entryID.toHex()
-                            2 -> entry.fileType.toString()
-                            3 -> Instant.ofEpochSecond(entry.creationDate).atZone(TimeZone.getDefault().toZoneId()).format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"))
-                            4 -> Instant.ofEpochSecond(entry.modificationDate).atZone(TimeZone.getDefault().toZoneId()).format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"))
-                            5 -> vdisk!!.getFileLength(entry).toString()
-                            6 -> entry.extendedEntries.size.toString()
-                            else -> ""
-                        }
+                    return if (vdisk != null) {
+                        tableEntriesRecord[rowIndex][columnIndex]
                     }
                     else {
-                        return ""
+                        ""
                     }
                 }
             }
@@ -1024,9 +1003,6 @@ class VirtualDiskCrackerClustered() : JFrame() {
     }
     private fun updateCurrentDirectory() {
         currentDirectoryEntries = currentDirectory.listFiles()
-//        println("entries: ${vdisk!!.entries.keys.toList()}")
-        currentDirectoryEntriesAltMode = vdisk!!.fileTable.sortedBy { it.filename }.toTypedArray()
-//        println("entries2: size=${currentDirectoryEntriesAltMode!!.size}")
 
     }
     private fun updateDiskInfo() {
@@ -1045,6 +1021,7 @@ class VirtualDiskCrackerClustered() : JFrame() {
         tableFiles.revalidate()
         tableFiles.repaint()
 
+        rebuildTableEntries()
         tableEntries.revalidate()
         tableEntries.repaint()
     }
@@ -1055,9 +1032,31 @@ Clusters: ${disk.totalClusterCount} clusters (${disk.archiveSizeInClusters} clus
 Write protected: ${disk.isReadOnly.toEnglish()}"""
     }
 
+    private fun rebuildTableEntries() {
+        tableEntriesRecord = if (vdisk != null) {
+            vdisk!!.fileTable.toTypedArray().map { entry ->
+                arrayOf(
+                    entry.filename,
+                    entry.entryID.toHex(),
+                    entry.fileType.toFileTypeString(),
+                    vdisk!!.getFileLength(entry).toString(),
+                    Instant.ofEpochSecond(entry.creationDate).atZone(TimeZone.getDefault().toZoneId()).format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")),
+                    Instant.ofEpochSecond(entry.modificationDate).atZone(TimeZone.getDefault().toZoneId()).format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")),
+                    entry.extendedEntries.size.toString(),
+                )
+            }.toTypedArray()
+        }
+        else {
+            arrayOf(arrayOf("", "", "", "", "", "", "",))
+        }
+    }
 
     private fun Boolean.toEnglish() = if (this) "Yes" else "No"
-
+    private fun Int.toFileTypeString() = when (this) {
+        FILETYPE_BINARY -> "File"
+        FILETYPE_DIRECTORY -> "Dir"
+        else -> "Unk:$this"
+    }
 
     private fun getFileInfoText(file: Clustfile?): String {
         if (file == null) return ""

@@ -440,7 +440,7 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
 
     val reclaimableClusters; get() = freeClusters.toTypedArray()
 
-    /*private*/ val fatEntryIndices = HashMap<EntryID, Int>() // EntryID, FATIndex
+    private val fatEntryIndices = HashMap<EntryID, Int>() // EntryID, FATIndex
     private var fatEntryHighest = -1 to -1 // FATIndex, EntryID
 
     private fun getTimeNow() = System.currentTimeMillis() / 1000

@@ -70,6 +70,10 @@ class FileTableMap : Collection<FATEntry> {
     override fun <T : Any?> toArray(generator: IntFunction<Array<T>>?): Array<T> {
         throw UnsupportedOperationException()
     }
+
+    fun toTypedArray() = internalMap.toTypedArray()
+
+    fun getByInternalIndex(iidx: Int) = internalMap[iidx]
 }
 
 private class SortedArrayList<T: Comparable<T>>(initialSize: Int = 10) : MutableCollection<T> {

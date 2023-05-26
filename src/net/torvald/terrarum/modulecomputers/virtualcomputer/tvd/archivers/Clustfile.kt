@@ -57,7 +57,7 @@ open class Clustfile(private val DOM: ClusteredFormatDOM, absolutePath: String) 
     }
 
     private fun getDirListing(dir: ClusteredFormatDOM.FATEntry): List<Int>? {
-        if (DOM.getFileType(dir) != FILETYPE_DIRECTORY) return null
+        if (dir.fileType != FILETYPE_DIRECTORY) return null
 //        dbgprintln("[Clustfile.getDirListing] filelen?")
         val filelen = DOM.getFileLength(dir)
 //        dbgprintln("[Clustfile.getDirListing] filelen = $filelen; readBytes?")
