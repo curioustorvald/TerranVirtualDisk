@@ -309,7 +309,7 @@ class VirtualDiskCrackerClustered() : JFrame() {
                     if (makeNewDisk) {
                         val fileChooser = JFileChooser("./")
                         fileChooser.showOpenDialog(null)
-                        if (fileChooser.selectedFile != null) {
+                        if (fileChooser.selectedFile != null && fileChooser.selectedFile.isFile) {
                             try {
                                 // create swap file
                                 originalFile = fileChooser.selectedFile!!
@@ -735,6 +735,7 @@ class VirtualDiskCrackerClustered() : JFrame() {
 
 
                                         entry.importFrom(it)
+                                        currentDirectory.addChild(entry)
 
                                     }
                                     updateDiskInfo()

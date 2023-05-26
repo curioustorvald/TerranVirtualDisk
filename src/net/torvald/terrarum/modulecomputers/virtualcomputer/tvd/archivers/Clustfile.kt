@@ -58,11 +58,11 @@ open class Clustfile(private val DOM: ClusteredFormatDOM, absolutePath: String) 
 
     private fun getDirListing(dir: ClusteredFormatDOM.FATEntry): List<Int>? {
         if (DOM.getFileType(dir) != FILETYPE_DIRECTORY) return null
-        dbgprintln("[Clustfile.getDirListing] filelen?")
+//        dbgprintln("[Clustfile.getDirListing] filelen?")
         val filelen = DOM.getFileLength(dir)
-        dbgprintln("[Clustfile.getDirListing] filelen = $filelen; readBytes?")
+//        dbgprintln("[Clustfile.getDirListing] filelen = $filelen; readBytes?")
         val ba = DOM.readBytes(dir, filelen, 0)
-        dbgprintln("[Clustfile.getDirListing] ${ba.size} bytes read")
+//        dbgprintln("[Clustfile.getDirListing] ${ba.size} bytes read")
         if (ba.size % 3 != 0) throw IllegalStateException("Length of dir not multiple of 3")
         return List(ba.size / 3) { ba.toInt24(it * 3) }
     }
@@ -99,17 +99,17 @@ open class Clustfile(private val DOM: ClusteredFormatDOM, absolutePath: String) 
     }
 
     private fun searchForFAT(pathHierarchy: Array<String>): ClusteredFormatDOM.FATEntry? {
-        dbgprintln("[Clustfile.searchForFAT] file path: [${pathHierarchy.joinToString(" > ", transform = { "\"$it\"" })}]")
+//        dbgprintln("[Clustfile.searchForFAT] file path: [${pathHierarchy.joinToString(" > ", transform = { "\"$it\"" })}]")
         var currentDir: ClusteredFormatDOM.FATEntry? = DOM.getRootDir()
         for (dirName in pathHierarchy) {
-            dbgprintln("[Clustfile.searchForFAT] dirName = $dirName")
+//            dbgprintln("[Clustfile.searchForFAT] dirName = $dirName")
 
             if (currentDir == null) {
-                dbgprintln("[Clustfile.searchForFAT]     currentDir == null, breaking")
+//                dbgprintln("[Clustfile.searchForFAT]     currentDir == null, breaking")
                 break
             }
 
-            dbgprintln("[Clustfile.searchForFAT]     getDirListing of ID ${currentDir.entryID.toHex()}...")
+//            dbgprintln("[Clustfile.searchForFAT]     getDirListing of ID ${currentDir.entryID.toHex()}...")
 
             /*var found = false
             // TODO: binarySearch by hash over each cluster in the dir file chain
@@ -143,14 +143,14 @@ open class Clustfile(private val DOM: ClusteredFormatDOM, absolutePath: String) 
 
             val dirListing = getDirListing(currentDir)
 
-            dbgprintln("[Clustfile.searchForFAT]     ls: [${dirListing?.joinToString { it.toHex() }}]")
+//            dbgprintln("[Clustfile.searchForFAT]     ls: [${dirListing?.joinToString { it.toHex() }}]")
 
             if (dirListing != null) {
                 var found = false
                 for (entryID in dirListing) {
                     val dirFile = DOM.getFile(entryID)
 
-                    dbgprintln("[Clustfile.searchForFAT]     entryID = ${entryID.toHex()}; dirName $dirName ?= ${DOM.getFile(entryID)?.filename}")
+//                    dbgprintln("[Clustfile.searchForFAT]     entryID = ${entryID.toHex()}; dirName $dirName ?= ${DOM.getFile(entryID)?.filename}")
 
                     if (dirFile != null && dirName == DOM.getFile(entryID)?.filename) {
                         currentDir = dirFile
@@ -168,7 +168,7 @@ open class Clustfile(private val DOM: ClusteredFormatDOM, absolutePath: String) 
 
         }
 
-        dbgprintln("[Clustfile.searchForFAT] end of search; currentDir = $currentDir")
+//        dbgprintln("[Clustfile.searchForFAT] end of search; currentDir = $currentDir")
 
         return currentDir
     }
@@ -352,10 +352,15 @@ open class Clustfile(private val DOM: ClusteredFormatDOM, absolutePath: String) 
             // write the child
             if (FAT == null) false // run initDir() to create the file
             else {
-                val dirListing = getDirListing(FAT!!)!!
+                val dirListing = getDirListing(FAT!!) ?: throw NullPointerException("Unable to list directory for $FAT")
                 // if the entry is not already there, write one
                 if (!dirListing.contains(file.FAT!!.entryID)) {
-                    (dirListing + listOf(file.FAT!!.entryID)).sortedWith(DOM.fatComparator).let {
+                    (dirListing + listOf(file.FAT!!.entryID)).also {
+                        dbgprintln("[Clustfile.addChild] trying to sort Dir of ID ${this.FAT!!.entryID.toHex()} [${it.joinToString { it.toHex() }}]")
+                        dbgprintln("[Clustfile.addChild] FAT1: [${DOM.fileTable.keys.joinToString { it.toHex() }}]\n" +
+                                         "[Clustfile.addChild] FAT2: [${DOM.fileTable.values.joinToString { it.entryID.toHex() }}]")
+
+                    }.sortedWith(DOM.fatComparator).let {
                         ByteArray(it.size * 3).also { newBytes ->
                             it.forEachIndexed { index, id -> newBytes.writeInt24(id, index * 3) }
                         }
@@ -380,7 +385,12 @@ open class Clustfile(private val DOM: ClusteredFormatDOM, absolutePath: String) 
             val fileEntryID = file.FAT!!.entryID
             if (dirListing.contains(fileEntryID)) {
                 continueIfTrue {
-                    dirListing.filter { it != fileEntryID }.sortedWith(DOM.fatComparator).let {
+                    dirListing.filter { it != fileEntryID }.also {
+                        dbgprintln("[Clustfile.removeChild] trying to sort DirWithId ${file.FAT!!.entryID.toHex()} [${it.joinToString { it.toHex() }}]")
+                        dbgprintln("[Clustfile.removeChild] FAT1: [${DOM.fileTable.keys.joinToString { it.toHex() }}]\n" +
+                                         "[Clustfile.removeChild] FAT2: [${DOM.fileTable.values.joinToString { it.entryID.toHex() }}]")
+
+                    }.sortedWith(DOM.fatComparator).let {
                         ByteArray((it.size - 1) * 3).also { newBytes ->
                             it.forEachIndexed { index, id -> newBytes.writeInt24(id, index * 3) }
                         }
@@ -432,7 +442,7 @@ open class Clustfile(private val DOM: ClusteredFormatDOM, absolutePath: String) 
     open fun mkdir(): Boolean {
         val parent = getParentFile()
         if (parent.exists()) {
-            mkfat(FILETYPE_DIRECTORY)
+            mkfat(FILETYPE_DIRECTORY, 0)
 
             return continueIfTrue { parent.addChild(this) } // implies commitFATchangeToDisk
                   .continueIfTrue { this.initDir() } // implies commitFATchangeToDisk
@@ -471,10 +481,10 @@ open class Clustfile(private val DOM: ClusteredFormatDOM, absolutePath: String) 
 
 
 
-    private fun mkfat(fileType: Int) {
+    private fun mkfat(fileType: Int, preallcationSize: Int) {
         if (FAT != null) throw IllegalStateException()
         try {
-            FAT = DOM.allocateFile(0, fileType, filename)
+            FAT = DOM.allocateFile(preallcationSize, fileType, filename)
         }
         catch (e: Throwable) {
             e.printStackTrace()
@@ -484,19 +494,20 @@ open class Clustfile(private val DOM: ClusteredFormatDOM, absolutePath: String) 
     /**
      * Creates new binary file. To create a new directory, call [mkdir]
      */
-    open fun createNewFile(): Boolean {
+    open fun createNewFile(preallcationSize: Int = 0): Boolean {
         if (this.exists()) return false
 
         // create new 0-byte file
         try {
-            mkfat(FILETYPE_BINARY)
+            mkfat(FILETYPE_BINARY, preallcationSize)
 
             dbgprintln("[Clustfile.createNewFile] getParentFile")
 
             val parentFile = getParentFile()
+            parentFAT = parentFile.FAT!!
 
             dbgprintln("[Clustfile.createNewFile] parent path: $parentPath")
-            dbgprintln("[Clustfile.createNewFile] parent FAT: ${parentFile.FAT}")
+            dbgprintln("[Clustfile.createNewFile] parent FAT: $parentFAT")
 
             return continueIfTrue { dbgprintln("[Clustfile.createNewFile] trying mkdirs..."); parentFile.mkdirs(); true } // create parent directories
                   .continueIfTrue { dbgprintln("[Clustfile.createNewFile] trying addChild..."); parentFile.addChild(this) }
@@ -588,7 +599,7 @@ open class Clustfile(private val DOM: ClusteredFormatDOM, absolutePath: String) 
      * Imports a binary file. If the given file is directory, the behaviour is undefined.
      */
     open fun importFileFrom(otherFile: File): Boolean {
-        return this.createNewFile().continueIfTrue {
+        return this.createNewFile(otherFile.length().toInt()).continueIfTrue {
             this.writeBytes(otherFile.readBytes())
             true
         }
@@ -604,14 +615,20 @@ open class Clustfile(private val DOM: ClusteredFormatDOM, absolutePath: String) 
             // return conditions
             if (!externalFile.isDirectory) {
                 // if not a directory, add to node
-                val importedFile = Clustfile(DOM, node, externalFile.name).also { importFileFrom(externalFile) }
+                val importedFile = Clustfile(DOM, node, externalFile.name).also {
+                    dbgprintln("[Clustfile.importDirFrom]     mkfile ${it.fullpath}")
+                    it.importFileFrom(externalFile)
+                }
                 node.addChild(importedFile)
                 return
             }
             // recurse
             else {
                 // mkdir
-                val newDir = Clustfile(DOM, node, externalFile.name).also { mkdir() }
+                val newDir = Clustfile(DOM, node, externalFile.name).also {
+                    dbgprintln("[Clustfile.importDirFrom]     mkdir ${it.fullpath}")
+                    it.mkdirs()
+                }
                 // for entries in this fileDirectory...
                 externalFile.listFiles()!!.forEach { recurse1(it, newDir) }
             }
@@ -619,10 +636,15 @@ open class Clustfile(private val DOM: ClusteredFormatDOM, absolutePath: String) 
 
 
         // mkdir to superNode
-        val newDir = Clustfile(DOM, this, otherFile.name)
-        return newDir.mkdir().continueIfTrue {
+        return this.mkdirs().let {
+            if (it)
+                dbgprintln("[Clustfile.importDirFrom] importing '${otherFile.path}' into Clustfile ${this.filename} (ID ${FAT!!.entryID.toHex()})")
+            else
+                dbgprintln("[Clustfile.importDirFrom] importing failed -- cannot mkdir on Clustfile ${this.filename}")
+            it
+        }.continueIfTrue {
             // for entries in this fileDirectory...
-            otherFile.listFiles()!!.forEach { recurse1(it, newDir) }
+            otherFile.listFiles()!!.forEach { recurse1(it, this) }
             true
         }
     }
@@ -635,4 +657,9 @@ open class Clustfile(private val DOM: ClusteredFormatDOM, absolutePath: String) 
         if (this) return action()
         else return false
     }
+    private fun Long.toHex() = this.and(0xFFFFFFFF).toString(16).padStart(8, '0').toUpperCase().let {
+        it.substring(0..4).toInt(16).toString(16).toUpperCase().padStart(3, '0') + ":" + it.substring(5..7)
+    }
+    private fun Int.toHex() = this.toLong().toHex()
+
 }
