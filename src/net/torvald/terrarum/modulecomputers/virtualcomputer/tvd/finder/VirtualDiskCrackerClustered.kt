@@ -6,6 +6,8 @@ import net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.archivers.Cluste
 import net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.archivers.ClusteredFormatDOM.Companion.FILETYPE_DIRECTORY
 import net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.archivers.Clustfile
 import java.awt.BorderLayout
+import java.awt.Color
+import java.awt.Component
 import java.awt.Dimension
 import java.awt.event.KeyEvent
 import java.awt.event.MouseAdapter
@@ -16,7 +18,7 @@ import java.time.format.DateTimeFormatter
 import java.util.*
 import javax.swing.*
 import javax.swing.table.AbstractTableModel
-import javax.swing.ListSelectionModel
+import javax.swing.table.TableCellRenderer
 import javax.swing.text.DefaultCaret
 
 
@@ -98,7 +100,10 @@ class VirtualDiskCrackerClustered() : JFrame() {
     val tableParentRecord = arrayOf(arrayOf("..", "", ""))
 
     val tableColumnsEntriesMode = arrayOf("Name", "FAT ID", "Type", "Size", "Created", "Modified", "# Ext")
-    var tableEntriesRecord = arrayOf(arrayOf("", "", "", "", "", "", "",))
+    var tableEntriesRecord = arrayOf(arrayOf("", "", "", "", "", "", ""))
+
+    private val tableFilesPreferredSize = arrayOf(240, 120, 80)
+    private val tableEntriesPreferredSize = arrayOf(120, 48, 24, 48, 36, 36, 18)
 
 
 
@@ -192,7 +197,12 @@ class VirtualDiskCrackerClustered() : JFrame() {
                         }
                     }
                 }
+
+
             }
+
+            (0..2).forEach { this.columnModel.getColumn(it).preferredWidth = tableFilesPreferredSize[it] }
+            this.autoResizeMode = JTable.AUTO_RESIZE_ALL_COLUMNS
         }
 
 
@@ -233,6 +243,9 @@ class VirtualDiskCrackerClustered() : JFrame() {
                     }
                 }
             }
+
+            (0..6).forEach { this.columnModel.getColumn(it).preferredWidth = tableEntriesPreferredSize[it] }
+            this.autoResizeMode = JTable.AUTO_RESIZE_ALL_COLUMNS
         }
 
 
@@ -1047,14 +1060,14 @@ Write protected: ${disk.isReadOnly.toEnglish()}"""
             }.toTypedArray()
         }
         else {
-            arrayOf(arrayOf("", "", "", "", "", "", "",))
+            arrayOf(arrayOf("", "", "", "", "", "", ""))
         }
     }
 
     private fun Boolean.toEnglish() = if (this) "Yes" else "No"
     private fun Int.toFileTypeString() = when (this) {
         FILETYPE_BINARY -> "File"
-        FILETYPE_DIRECTORY -> "Dir"
+        FILETYPE_DIRECTORY -> "Directory"
         else -> "Unk:$this"
     }
 
