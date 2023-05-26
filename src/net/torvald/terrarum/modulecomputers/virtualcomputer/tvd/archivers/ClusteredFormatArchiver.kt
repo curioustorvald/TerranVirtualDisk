@@ -11,6 +11,7 @@ import java.io.*
 import java.nio.charset.Charset
 import java.util.*
 import kotlin.Comparator
+import kotlin.collections.HashMap
 import kotlin.experimental.and
 import kotlin.math.ceil
 
@@ -238,11 +239,12 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
      * if given filename and filename stored in the extendedEntries contradicts, 'long filename' entries in
      * extendedEntries will be replaced
      */
-    data class FATEntry(
+    class FATEntry(
             val charset: Charset,
+            private val renumberHook: () -> Unit,
 
             /** if ID is 1, the file is 0-byte file */
-            val entryID: EntryID,
+            entryID: EntryID,
 
             var readOnly: Boolean,
             var hidden: Boolean,
@@ -256,18 +258,19 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
             var filename: String = "",
 
             val extendedEntries: MutableList<ByteArray> = MutableList<ByteArray>(0) { ByteArray(0) }
-    ) {
+    ) : Comparable<FATEntry> {
         companion object {
             /**
              * @param charset Charset
              * @param fat256 The entire 256 byte of the FAT entry
              * @return Pair of Clusternum to [FATEntry]
              */
-            fun fromBytes(charset: Charset, fat256: ByteArray) = if (fat256.size != ClusteredFormatDOM.FAT_ENTRY_SIZE)
-                throw IllegalArgumentException("FAT not ${ClusteredFormatDOM.FAT_ENTRY_SIZE} bytes long (${fat256.size})")
+            fun fromBytes(charset: Charset, renumberHook: () -> Unit, fat256: ByteArray) = if (fat256.size != FAT_ENTRY_SIZE)
+                throw IllegalArgumentException("FAT not $FAT_ENTRY_SIZE bytes long (${fat256.size})")
             else
                 fat256.toInt24() to FATEntry(
                         charset,
+                        renumberHook,
                         fat256.toInt24(),
                         fat256[3].and(1.toByte()) != 0.toByte(),
                         fat256[3].and(2.toByte()) != 0.toByte(),
@@ -283,6 +286,17 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
                         )
         }
 
+        private var theRealEntryID: EntryID = entryID
+        var entryID: EntryID
+            get() = theRealEntryID
+            set(value) {
+                theRealEntryID = value
+                renumberHook()
+            }
+
+        override fun compareTo(other: FATEntry): Int {
+            return compareValues(this.entryID, other.entryID)
+        }
 
         init {
             if (fileType == 0) throw Error()
@@ -353,20 +367,10 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
         /**
          * Called by ClusteredFormatDOM, this function assists the global renum operation.
          */
-        internal fun _fatRenum(increment: Int): FATEntry {
-
-            return FATEntry(
-                    charset,
-                    entryID.incClusterNum(increment),
-                    readOnly, hidden, system, deleted,
-                    fileType,
-                    creationDate, modificationDate,
-                    filename,
-                    MutableList(extendedEntries.size) { extendedEntries[it] }
-            ).also {
-                it.extendedEntries.forEach {
-                    it.renumFAT(increment)
-                }
+        internal fun _fatRenum(increment: Int) {
+            theRealEntryID = this.entryID.incClusterNum(increment)
+            this.extendedEntries.forEach {
+                it.renumFAT(increment)
             }
         }
 
@@ -447,7 +451,7 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
     fun getNextFreeInlineCluster(): Int {
         var i = INLINE_FILE_CLUSTER_BASE
         while (i <= INLINE_FILE_CLUSTER_LAST) {
-            if (!fileTable.containsKey(i)) return i
+            if (!fileTable.contains(i)) return i
             i += 1
         }
         return archiveSizeInClusters
@@ -455,8 +459,7 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
 
     val charset: Charset
 
-    internal var fileTable = HashMap<Int, FATEntry>() // path is unknown until the path tree is traversed
-        private set
+    internal val fileTable = FileTableMap() // path is unknown until the path tree is traversed
     /** Formatted size of the disk. Archive offset 4 */
     private var diskSize = -1L
     /** How many clusters FAT is taking up. Archive offset 64 */
@@ -584,7 +587,7 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
                 }
                 // normal entries
                 else if (mainPtr >= 2 + fatClusterCount) {
-                    fileTable[mainPtr] = FATEntry.fromBytes(charset, fat).second
+                    fileTable.put(FATEntry.fromBytes(charset, fileTable.renumberHook, fat).second)
                 }
 
                 if (mainPtr != 0) {
@@ -605,7 +608,7 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
         }
 
 
-        fileTable.forEach { _, fatEntry -> fatEntry.validate() }
+        fileTable.forEach { it.validate() }
 
 //        dbgprintln("fatEntryHighest = $fatEntryHighest")
     }
@@ -628,17 +631,13 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
         expandArchive(increment)
 
         // renumber my FAT
-        HashMap<Int, FATEntry>().let { newFileTable ->
-            fileTable.entries.forEach { (clusternum, entry) ->
+        fileTable.forEach {
+            val oldID = it.entryID
+            it._fatRenum(increment)
 
-
-                val newEntry = entry._fatRenum(increment)
-                newFileTable[newEntry.entryID] = newEntry
-
-                dbgprintln("[Clustered] renum($increment) -- ${clusternum.toHex()} -> ${newEntry.entryID.toHex()}")
-            }
-            fileTable = newFileTable
+            dbgprintln("[Clustered] renum($increment) -- ${oldID.toHex()} -> ${it.entryID.toHex()}")
         }
+        fileTable.renumberHook()
 
         // copy over clusters, renumber any applicable cluster numbers before copying
         for (clusternum in oldUsedClusterCount - 1L downTo 2 + fatClusterCount) {
@@ -703,12 +702,12 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
      * Creates a new FAT entry, adds it to the `fileTable` and the Archive via [fatmgrAddEntry], then returns the newly-created entry.
      */
     private fun fatmgrCreateNewEntry(
-            charset: Charset, entryID: EntryID, filename: String,
+            entryID: EntryID, filename: String,
             readOnly: Boolean, hidden: Boolean, system: Boolean, deleted: Boolean,
             creationTime: Long, modificationTime: Long,
             fileType: Int
     ): FATEntry {
-        FATEntry(charset, entryID, readOnly, hidden, system, deleted, fileType, creationTime, modificationTime).let {
+        FATEntry(charset, fileTable.renumberHook, entryID, readOnly, hidden, system, deleted, fileType, creationTime, modificationTime).let {
             it.filename = filename
             // sync the FAT region on the Archive
             fatmgrAddEntry(it)
@@ -731,7 +730,7 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
         // therefore it should be safe to do this
         spliceFAT(nextIndex, 0, entry.toBytes())
 
-        fileTable[entry.entryID] = entry
+        fileTable.put(entry)
         // `entry` is contained in the fileTable and thus should have been re-numbered by the spliceFAT
         fatEntryHighest = nextIndex to entry.entryID
         fatEntryIndices[entry.entryID] = nextIndex
@@ -827,7 +826,7 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
     }
 
     private fun tallyFATentryCount(): Int {
-        return fileTable.map { it.value }.sumBy { it.extendedEntries.size + 1 }
+        return fileTable.sumBy { it.extendedEntries.size + 1 }
     }
 
     /**
@@ -855,37 +854,35 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
         }
 
 
-        fileTable.entries.sortedBy { it.key }.let { FATs ->
 
-            // try to rewrite every entry on the FAT
-            var fatWritePos = 0
-            ARCHIVE.seekToFAT(0)
-            FATs.forEach { (ptr, fat) ->
-                // update fatEntryIndices
-                fatEntryIndices[ptr] = fatWritePos
+        // try to rewrite every entry on the FAT
+        var fatWritePos = 0
+        ARCHIVE.seekToFAT(0)
+        fileTable.forEach { fat ->
+            // update fatEntryIndices
+            fatEntryIndices[fat.entryID] = fatWritePos
 
-                // update fatEntryHighest
-                if (fatWritePos > fatEntryHighest.first) {
-                    fatEntryHighest = fatWritePos to ptr
-                }
-
-                // write bytes to the disk
-                // single FileAttrib may have multiple FATs associated
-                fat.toBytes().let { newFATbytes ->
-                    newFATbytes.forEach {
-                        ARCHIVE.write(it)
-                        fatWritePos += 1
-                        fatEntryCount += 1
-                    }
-                }
+            // update fatEntryHighest
+            if (fatWritePos > fatEntryHighest.first) {
+                fatEntryHighest = fatWritePos to fat.entryID
             }
 
-            for (qfat in fatEntryCount until fatClusterCount * FATS_PER_CLUSTER) {
-                ARCHIVE.seekToFAT(qfat)
-                ARCHIVE.write(EMPTY_FAT_ENTRY)
+            // write bytes to the disk
+            // single FileAttrib may have multiple FATs associated
+            fat.toBytes().let { newFATbytes ->
+                newFATbytes.forEach {
+                    ARCHIVE.write(it)
+                    fatWritePos += 1
+                    fatEntryCount += 1
+                }
             }
-
         }
+
+        for (qfat in fatEntryCount until fatClusterCount * FATS_PER_CLUSTER) {
+            ARCHIVE.seekToFAT(qfat)
+            ARCHIVE.write(EMPTY_FAT_ENTRY)
+        }
+
     }
 
     private fun fatmgrSyncInlinedBytes(entryID: EntryID) {
@@ -939,7 +936,7 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
     }
 
     fun getRootDir(): FATEntry {
-        return fileTable[fatClusterCount + 2]!!
+        return fileTable[fatClusterCount + 2] ?: throw NullPointerException("ID ${(fatClusterCount + 2).toHex()} is not a root directory")
     }
 
     /**
@@ -979,13 +976,13 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
         dbgprintln("[Clustered] allocateFile ptr: ${ptr.toHex()}")
 
         if (ptr in INLINE_FILE_CLUSTER_BASE..INLINE_FILE_CLUSTER_LAST) {
-            fatmgrCreateNewEntry(charset, ptr, filename, false, false, false, false, timeNow, timeNow, fileType).let {
+            fatmgrCreateNewEntry(ptr, filename, false, false, false, false, timeNow, timeNow, fileType).let {
                 fatmgrAllocateInlineFile(it, size)
                 return it
             }
         }
         else {
-            fatmgrCreateNewEntry(charset, ptr, filename, false, false, false, false, timeNow, timeNow, fileType).let {
+            fatmgrCreateNewEntry(ptr, filename, false, false, false, false, timeNow, timeNow, fileType).let {
                 // actually create zero-filled clusters
                 if (size > 0) {
                     expandFile(size, HEAD_CLUSTER, ptr, fileType)
@@ -1995,14 +1992,14 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
             }
         }*/
         // rename FAT area
-        fileTable.forEach { (parentID, entry) ->
+        fileTable.forEach { entry ->
             entry.extendedEntries.forEachIndexed { bindex, it ->
                 if (it.toInt24(0) == 0xFFFF12) {
                     for (offset in 8 until FAT_ENTRY_SIZE - 3 step 3) {
                         if (it.toInt24(offset) == old) {
                             it.writeInt24(new, offset)
-                            dbgprintln("[Clustered.renameEntryID] ... at inlineDir of entry ${parentID.toHex()} ExtEnt order $bindex, offset $offset")
-                            toBeSortedInline.add(parentID)
+                            dbgprintln("[Clustered.renameEntryID] ... at inlineDir of entry ${entry.entryID.toHex()} ExtEnt order $bindex, offset $offset")
+                            toBeSortedInline.add(entry.entryID)
                         }
                     }
                 }
@@ -2052,8 +2049,7 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
     private fun sortDirectoryInline(entry: FATEntry) {
         val newContents = entry.getInlineBytes().chunked(3).map { it.toInt24() }.also {
             dbgprintln("[Clustered.sortDirectoryInline] trying to sort DirWithId ${entry.entryID.toHex()} [${it.joinToString { it.toHex() }}]")
-            dbgprintln("[Clustered.sortDirectoryInline] FAT1: [${fileTable.keys.joinToString { it.toHex() }}]\n" +
-                             "[Clustered.sortDirectoryInline] FAT2: [${fileTable.values.joinToString { it.entryID.toHex() }}]")
+            dbgprintln("[Clustered.sortDirectoryInline] FAT: [${fileTable.joinToString { it.entryID.toHex() }}]")
         }.sortedWith(fatComparator).let { ids ->
             ByteArray(ids.size * 3).also { ba ->
                 ids.forEachIndexed { i, id -> ba.writeInt24(id, i * 3) }

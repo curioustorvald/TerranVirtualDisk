@@ -350,7 +350,6 @@ open class Clustfile(private val DOM: ClusteredFormatDOM, absolutePath: String) 
 
         return continueIfTrue {
             // write the child
-            updateFATreference()
             if (FAT == null) false // run initDir() to create the file
             else {
                 val dirListing = getDirListing(FAT!!) ?: throw NullPointerException("Unable to list directory for $FAT")
@@ -358,9 +357,7 @@ open class Clustfile(private val DOM: ClusteredFormatDOM, absolutePath: String) 
                 if (!dirListing.contains(file.FAT!!.entryID)) {
                     (dirListing + listOf(file.FAT!!.entryID)).also {
                         dbgprintln("[Clustfile.addChild] trying to sort Dir of ID ${this.FAT!!.entryID.toHex()} [${it.joinToString { it.toHex() }}]")
-                        dbgprintln("[Clustfile.addChild] FAT1: [${DOM.fileTable.keys.joinToString { it.toHex() }}]\n" +
-                                         "[Clustfile.addChild] FAT2: [${DOM.fileTable.values.joinToString { it.entryID.toHex() }}]")
-
+                        dbgprintln("[Clustfile.addChild] FAT1: [${DOM.fileTable.joinToString { it.entryID.toHex() }}]")
                     }.sortedWith(DOM.fatComparator).let {
                         ByteArray(it.size * 3).also { newBytes ->
                             it.forEachIndexed { index, id -> newBytes.writeInt24(id, index * 3) }
@@ -382,15 +379,13 @@ open class Clustfile(private val DOM: ClusteredFormatDOM, absolutePath: String) 
         require(type == FILETYPE_DIRECTORY)
 
         return continueIfTrue {
-            updateFATreference()
             val dirListing = getDirListing(FAT!!)!!
             val fileEntryID = file.FAT!!.entryID
             if (dirListing.contains(fileEntryID)) {
                 continueIfTrue {
                     dirListing.filter { it != fileEntryID }.also {
                         dbgprintln("[Clustfile.removeChild] trying to sort DirWithId ${file.FAT!!.entryID.toHex()} [${it.joinToString { it.toHex() }}]")
-                        dbgprintln("[Clustfile.removeChild] FAT1: [${DOM.fileTable.keys.joinToString { it.toHex() }}]\n" +
-                                         "[Clustfile.removeChild] FAT2: [${DOM.fileTable.values.joinToString { it.entryID.toHex() }}]")
+                        dbgprintln("[Clustfile.removeChild] FAT: [${DOM.fileTable.joinToString { it.entryID.toHex() }}]")
 
                     }.sortedWith(DOM.fatComparator).let {
                         ByteArray((it.size - 1) * 3).also { newBytes ->

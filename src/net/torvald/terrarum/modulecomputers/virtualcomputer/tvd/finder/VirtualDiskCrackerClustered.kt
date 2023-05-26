@@ -1025,7 +1025,7 @@ class VirtualDiskCrackerClustered() : JFrame() {
     private fun updateCurrentDirectory() {
         currentDirectoryEntries = currentDirectory.listFiles()
 //        println("entries: ${vdisk!!.entries.keys.toList()}")
-        currentDirectoryEntriesAltMode = vdisk!!.fileTable.values.sortedBy { it.entryID }.toTypedArray()
+        currentDirectoryEntriesAltMode = vdisk!!.fileTable.sortedBy { it.filename }.toTypedArray()
 //        println("entries2: size=${currentDirectoryEntriesAltMode!!.size}")
 
     }
