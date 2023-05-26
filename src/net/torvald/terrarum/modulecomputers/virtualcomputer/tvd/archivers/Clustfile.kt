@@ -439,7 +439,7 @@ open class Clustfile(private val DOM: ClusteredFormatDOM, absolutePath: String) 
     open fun mkdir(): Boolean {
         val parent = getParentFile()
         if (parent.exists()) {
-            mkfat(FILETYPE_DIRECTORY, 0)
+            mkfat(FILETYPE_DIRECTORY)
 
             return continueIfTrue { parent.addChild(this) } // implies commitFATchangeToDisk
                   .continueIfTrue { this.initDir() } // implies commitFATchangeToDisk
@@ -478,10 +478,10 @@ open class Clustfile(private val DOM: ClusteredFormatDOM, absolutePath: String) 
 
 
 
-    private fun mkfat(fileType: Int, preallcationSize: Int) {
+    private fun mkfat(fileType: Int) {
         if (FAT != null) throw IllegalStateException()
         try {
-            FAT = DOM.allocateFile(preallcationSize, fileType, filename)
+            FAT = DOM.allocateFile(0, fileType, filename)
         }
         catch (e: Throwable) {
             e.printStackTrace()
@@ -491,12 +491,12 @@ open class Clustfile(private val DOM: ClusteredFormatDOM, absolutePath: String) 
     /**
      * Creates new binary file. To create a new directory, call [mkdir]
      */
-    open fun createNewFile(preallcationSize: Int = 0): Boolean {
+    open fun createNewFile(): Boolean {
         if (this.exists()) return false
 
         // create new 0-byte file
         try {
-            mkfat(FILETYPE_BINARY, preallcationSize)
+            mkfat(FILETYPE_BINARY)
 
             dbgprintln("[Clustfile.createNewFile] getParentFile")
 
@@ -596,7 +596,7 @@ open class Clustfile(private val DOM: ClusteredFormatDOM, absolutePath: String) 
      * Imports a binary file. If the given file is directory, the behaviour is undefined.
      */
     open fun importFileFrom(otherFile: File): Boolean {
-        return this.createNewFile(otherFile.length().toInt()).continueIfTrue {
+        return this.createNewFile().continueIfTrue {
             this.writeBytes(otherFile.readBytes())
             true
         }
