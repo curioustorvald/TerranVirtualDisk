@@ -9,9 +9,7 @@ import java.awt.BorderLayout
 import java.awt.Color
 import java.awt.Component
 import java.awt.Dimension
-import java.awt.event.KeyEvent
-import java.awt.event.MouseAdapter
-import java.awt.event.MouseEvent
+import java.awt.event.*
 import java.io.File
 import java.time.Instant
 import java.time.format.DateTimeFormatter
@@ -124,7 +122,16 @@ class VirtualDiskCrackerClustered() : JFrame() {
 
 
         panelMain.layout = BorderLayout()
-        this.defaultCloseOperation = JFrame.EXIT_ON_CLOSE
+        this.defaultCloseOperation = EXIT_ON_CLOSE
+
+        // delete swap files (if any) on exit
+        this.addWindowListener(object : WindowAdapter() {
+            override fun windowClosing(e: WindowEvent?) {
+                if (::swapFile.isInitialized) {
+                    swapFile.delete()
+                }
+            }
+        })
 
 
         tableFiles = JTable(tableParentRecord, tableColumns).apply {
@@ -252,7 +259,7 @@ class VirtualDiskCrackerClustered() : JFrame() {
 
         JMenu("File").apply {
             mnemonic = KeyEvent.VK_F
-            add("New Disk…").addMouseListener(object : MouseAdapter() {
+            add("New Disk…").apply { this.mnemonic = KeyEvent.VK_N }.addMouseListener(object : MouseAdapter() {
                 override fun mousePressed(e: MouseEvent?) {
                     val makeNewDisk = if (vdisk != null) confirmedDiscard() else true
                     if (makeNewDisk) {
@@ -294,7 +301,7 @@ class VirtualDiskCrackerClustered() : JFrame() {
                     }
                 }
             })
-            add("Open Disk…").addMouseListener(object : MouseAdapter() {
+            add("Open Disk…").apply { this.mnemonic = KeyEvent.VK_O }.addMouseListener(object : MouseAdapter() {
                 override fun mousePressed(e: MouseEvent?) {
                     val makeNewDisk = if (vdisk != null) confirmedDiscard() else true
                     if (makeNewDisk) {
@@ -325,7 +332,7 @@ class VirtualDiskCrackerClustered() : JFrame() {
                 }
             })
             addSeparator()
-            add("Save Disk as…").addMouseListener(object : MouseAdapter() {
+            add("Save Disk").apply { this.mnemonic = KeyEvent.VK_S }.addMouseListener(object : MouseAdapter() {
                 override fun mousePressed(e: MouseEvent?) {
                     if (vdisk != null) {
 
@@ -338,18 +345,14 @@ class VirtualDiskCrackerClustered() : JFrame() {
                             }
                         }
 
-
-                        val fileChooser = JFileChooser("./")
-                        fileChooser.showSaveDialog(null)
-                        if (fileChooser.selectedFile != null) {
-                            try {
-                                TODO("mv original archive as original.bak / swap .swap file with the original archive")
-                                setStat("Disk saved")
-                            }
-                            catch (e: Exception) {
-                                e.printStackTrace()
-                                popupError(e.toString())
-                            }
+                        try {
+                            originalFile.copyTo(backupFile, true)
+                            swapFile.copyTo(originalFile, true)
+                            setStat("Disk saved")
+                        }
+                        catch (e: Exception) {
+                            e.printStackTrace()
+                            popupError(e.toString())
                         }
                     }
                 }
@@ -361,7 +364,7 @@ class VirtualDiskCrackerClustered() : JFrame() {
 
         JMenu("Edit").apply {
             mnemonic = KeyEvent.VK_E
-            add("New File…").addMouseListener(object : MouseAdapter() {
+            add("New File…").apply { this.mnemonic = KeyEvent.VK_F }.addMouseListener(object : MouseAdapter() {
                 override fun mousePressed(e: MouseEvent?) {
                     if (vdisk != null) {
                         try {
@@ -391,7 +394,7 @@ class VirtualDiskCrackerClustered() : JFrame() {
                     }
                 }
             })
-            add("New Directory…").addMouseListener(object : MouseAdapter() {
+            add("New Directory…").apply { this.mnemonic = KeyEvent.VK_D }.addMouseListener(object : MouseAdapter() {
                 override fun mousePressed(e: MouseEvent?) {
                     if (inEntriesMode) {
                         popupError("File cannot be added in FAT Browsing mode")
@@ -423,21 +426,21 @@ class VirtualDiskCrackerClustered() : JFrame() {
                 }
             })
             addSeparator()
-            add("Cut").addMouseListener(object : MouseAdapter() {
+            add("Cut").apply { this.mnemonic = KeyEvent.VK_X }.addMouseListener(object : MouseAdapter() {
                 override fun mousePressed(e: MouseEvent?) {
                     clipboard = selectedFile
                     clipboardCutMode = true
                     setStat("File cut to clipboard. Note that the source file will not be deleted until the Paste operation")
                 }
             })
-            add("Copy").addMouseListener(object : MouseAdapter() {
+            add("Copy").apply { this.mnemonic = KeyEvent.VK_C }.addMouseListener(object : MouseAdapter() {
                 override fun mousePressed(e: MouseEvent?) {
                     clipboard = selectedFile
                     clipboardCutMode = false
                     setStat("File copied to clipboard")
                 }
             })
-            add("Paste").addMouseListener(object : MouseAdapter() {
+            add("Paste").apply { this.mnemonic = KeyEvent.VK_V }.addMouseListener(object : MouseAdapter() {
                 override fun mousePressed(e: MouseEvent?) {
                     fun paste1(newfile: Clustfile) {
                         try {
@@ -606,7 +609,7 @@ class VirtualDiskCrackerClustered() : JFrame() {
                     }
                 }
             })*/
-            add("Delete").addMouseListener(object : MouseAdapter() {
+            add("Delete").apply { this.mnemonic = KeyEvent.VK_Q }.addMouseListener(object : MouseAdapter() {
                 override fun mousePressed(e: MouseEvent?) {
                     if (vdisk != null && selectedFile != null) {
                         selectedFile!!.delete().let {
@@ -621,7 +624,7 @@ class VirtualDiskCrackerClustered() : JFrame() {
                     }
                 }
             })
-            add("Rename…").addMouseListener(object : MouseAdapter() {
+            add("Rename…").apply { this.mnemonic = KeyEvent.VK_R }.addMouseListener(object : MouseAdapter() {
                 override fun mousePressed(e: MouseEvent?) {
                     if (selectedFile != null) {
                         try {
@@ -701,7 +704,7 @@ class VirtualDiskCrackerClustered() : JFrame() {
 
             })
             addSeparator()
-            add("Import Files/Folders…").addMouseListener(object : MouseAdapter() {
+            add("Import Files/Folders…").apply { this.mnemonic = KeyEvent.VK_I }.addMouseListener(object : MouseAdapter() {
                 override fun mousePressed(e: MouseEvent?) {
                     if (vdisk != null) {
                         if (!inEntriesMode) {
@@ -761,7 +764,7 @@ class VirtualDiskCrackerClustered() : JFrame() {
                     }
                 }
             })
-            add("Export…").addMouseListener(object : MouseAdapter() {
+            add("Export…").apply { this.mnemonic = KeyEvent.VK_E }.addMouseListener(object : MouseAdapter() {
                 override fun mousePressed(e: MouseEvent?) {
                     if (vdisk != null) {
                         val file: Clustfile = selectedFile ?: currentDirectory
@@ -843,7 +846,8 @@ class VirtualDiskCrackerClustered() : JFrame() {
 
 
         JMenu("Manage").apply {
-            add("Count Reclaimable").addMouseListener(object : MouseAdapter() {
+            mnemonic = KeyEvent.VK_M
+            add("Count Reclaimable").apply { this.mnemonic = KeyEvent.VK_C }.addMouseListener(object : MouseAdapter() {
                 override fun mousePressed(e: MouseEvent?) {
                     if (vdisk != null) {
                         try {
@@ -883,7 +887,7 @@ class VirtualDiskCrackerClustered() : JFrame() {
                     }
                 }
             })
-            add("Defrag").addMouseListener(object : MouseAdapter() {
+            add("Defrag").apply { this.mnemonic = KeyEvent.VK_D }.addMouseListener(object : MouseAdapter() {
                 override fun mousePressed(e: MouseEvent?) {
                     if (vdisk != null) {
                         try {

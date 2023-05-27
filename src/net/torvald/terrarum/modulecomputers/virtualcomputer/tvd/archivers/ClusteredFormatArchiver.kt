@@ -1618,39 +1618,6 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
     }
 
     /**
-     * Returns the type of the file.
-     * @return file type, 0 being "undefined"
-     */
-    fun getFileType(entry: FATEntry): Int = ARCHIVE.let {
-        return if (entry.isInline) {
-            it.seekToFAT(fatEntryIndices[entry.entryID]!!)
-
-            // sanity check
-            it.readInt24().let {
-                if (it != entry.entryID) throw IllegalStateException("fatEntryIndices mismatch -- entry(args) id: ${entry.entryID.toHex()}, entry(FAT) id: ${it.toHex()}")
-            }
-
-            it.seekToFAT(fatEntryIndices[entry.entryID]!! + 1)
-
-            // check for Extended Entry
-            it.readInt24().let {
-                if (it < EXTENDED_ENTRIES_BASE) throw IllegalStateException("inline entry ${entry.entryID.toHex()} is not followed by an Extended Entry (found ${it.toHex()})")
-
-                return it and 15
-            }
-        }
-        else {
-            it.seekToCluster(entry.entryID)
-            val b = it.read()
-            if (b == -1) throw IOException("The Archive cannot be read; entryID: ${entry.entryID}, offset: ${(entry.entryID * CLUSTER_SIZE).toHex()}")
-            b and 15
-        }
-    }
-
-    fun isDirectory(entry: FATEntry) = getFileType(entry) == 2
-    fun isFile(entry: FATEntry) = getFileType(entry) == 1
-
-    /**
      * Build map of freeClusters, actually trim the archive, then removes any numbers in freeClusters
      * that points outside of the archive.
      */
