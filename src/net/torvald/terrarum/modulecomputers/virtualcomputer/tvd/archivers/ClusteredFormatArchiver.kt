@@ -190,8 +190,13 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
             // Charset (2)
             file.write(charsetIndex ushr 8)
             file.write(charsetIndex and 255)
+            // random UUID
+            UUID.randomUUID().let {
+                file.write(it.mostSignificantBits.toInt64Arr())
+                file.write(it.leastSignificantBits.toInt64Arr())
+            }
             // cluster filler
-            file.write(ByteArray(4026))
+            file.write(ByteArray(4010))
 
             //// CLUSTER 1 ////
             // dummy bootsector
@@ -457,6 +462,7 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
     }
 
     val charset: Charset
+    val uuid: UUID
 
     internal val fileTable = FileTableMap() // path is unknown until the path tree is traversed
     /** Formatted size of the disk. Archive offset 4 */
@@ -531,6 +537,9 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
         // set charset first
         ARCHIVE.seek(68L)
         charset = toCharset(ARCHIVE.readUshortBig())
+
+        ARCHIVE.seek(70L)
+        uuid = UUID(ARCHIVE.readInt64(), ARCHIVE.readInt64())
 
         readMeta()
         readFAT()
@@ -2179,6 +2188,12 @@ fun RandomAccessFile.readInt24(): Int {
     val readStatus = readBytes(buffer)
     if (readStatus != 3) throw InternalError("Unexpected error -- EOF reached? (expected 3, got $readStatus)")
     return buffer.toInt24()
+}
+fun RandomAccessFile.readInt64(): Long {
+    val buffer = ByteArray(8)
+    val readStatus = readBytes(buffer)
+    if (readStatus != 8) throw InternalError("Unexpected error -- EOF reached? (expected 8, got $readStatus)")
+    return buffer.toInt48()
 }
 fun RandomAccessFile.seekToCluster(clusterNum: Int) {
     this.seek(CLUSTER_SIZE * clusterNum.toLong())

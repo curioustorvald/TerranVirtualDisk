@@ -323,6 +323,9 @@ fun Int.toInt32Arr(): ByteArray {
 fun Long.toInt48Arr(): ByteArray {
     return ByteArray(6) { this.ushr(40 - (8 * it)).toByte() }
 }
+fun Long.toInt64Arr(): ByteArray {
+    return ByteArray(8) { this.ushr(64 - (8 * it)).toByte() }
+}
 fun Short.toBigEndian(): ByteArray {
     return byteArrayOf(
             this.div(256).toByte(),
