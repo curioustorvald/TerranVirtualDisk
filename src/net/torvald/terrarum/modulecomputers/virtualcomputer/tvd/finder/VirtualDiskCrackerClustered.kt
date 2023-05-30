@@ -357,6 +357,15 @@ class VirtualDiskCrackerClustered() : JFrame() {
                     }
                 }
             })
+            addSeparator()
+            add("Refresh").apply { this.mnemonic = KeyEvent.VK_R }.addMouseListener(object : MouseAdapter() {
+                override fun mousePressed(e: MouseEvent?) {
+                    if (vdisk != null) {
+                        updateDiskInfo()
+                        updateCurrentDirectory()
+                    }
+                }
+            })
             menuBar.add(this)
         }
 

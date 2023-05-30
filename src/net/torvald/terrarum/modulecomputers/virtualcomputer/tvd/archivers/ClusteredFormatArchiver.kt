@@ -965,28 +965,25 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
      * Deleted FAT will remain on the fileTable; use `fatmgrRewriteFAT()` to purge them.
      */
     fun discardFile(fat: FATEntry) {
+        if (fat.deleted) return
         val clusterNum = fat.entryID
         if (clusterNum < 2 + fatClusterCount) throw IllegalArgumentException("Cannot discard cluster #$clusterNum -- is Meta/Bootsector/FAT")
 
-        if (clusterNum in INLINE_FILE_CLUSTER_BASE..INLINE_FILE_CLUSTER_LAST) {
-            fileTable[clusterNum]?.deleted = true // notify the other applications the deletion
-            fileTable.remove(clusterNum)
-        }
-        else {
-            (fileTable[clusterNum]
-                    ?: throw FileNotFoundException("No file is associated with cluster #$clusterNum")).let {
-                it.deleted = true
-
-
+        (fileTable[clusterNum]
+                ?: throw FileNotFoundException("No file is associated with cluster #$clusterNum")).let {
+            it.deleted = true // notify the other applications the deletion
+            if (clusterNum in INLINE_FILE_CLUSTER_BASE..INLINE_FILE_CLUSTER_LAST) {
+                fileTable.remove(clusterNum)
+            }
+            else {
                 traverseClusters(clusterNum) {
                     ARCHIVE.setClusterMeta1Flag(it, 0x80, 255)
                     freeClusters.add(it)
                 }
             }
-
+            fatmgrDeleteEntry(fat)
         }
 
-        fatmgrDeleteEntry(fat)
     }
 
     /**

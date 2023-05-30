@@ -80,7 +80,9 @@ open class Clustfile(private val DOM: ClusteredFormatDOM, absolutePath: String) 
 
     private fun getFirstFileInDir(dir: ClusteredFormatDOM.FATEntry): Clustfile? {
         if (dir.fileType != FILETYPE_DIRECTORY) return null
-        val filelen = minOf(DOM.getFileLength(dir), 3)
+        val realLen = DOM.getFileLength(dir)
+        val filelen = minOf(realLen, 3)
+        dbgprintln("[Clustfile.getFirstFileInDir] filelen=$filelen (realLen=$realLen)")
         if (filelen % 3 != 0) throw IllegalStateException("Length of dir not multiple of 3")
         if (filelen == 0) return null
 
@@ -400,6 +402,7 @@ open class Clustfile(private val DOM: ClusteredFormatDOM, absolutePath: String) 
 
         return continueIfTrue {
             val dirListing = getDirListing(FAT!!)!!
+            dbgprintln("[Clustfile.removeChild] dirListing of ${this.FAT!!.entryID.toHex()} (${dirListing.size})[${dirListing.joinToString { it.toHex() }}]")
             val fileEntryID = file.FAT!!.entryID
             if (dirListing.contains(fileEntryID)) {
                 continueIfTrue {
@@ -542,10 +545,12 @@ open class Clustfile(private val DOM: ClusteredFormatDOM, absolutePath: String) 
 
         return if (this.isDirectory) {
             // delete children
+            var debugEmergencyBreakCounter = 0
             var ret = true
-            while (true) {
+            while (ret && debugEmergencyBreakCounter < 25) {
                 val file = this.getFirstFileInDir(FAT!!) ?: break
                 ret = ret and file.delete()
+                debugEmergencyBreakCounter += 1
             }
             ret.continueIfTrue {
                 // delete self
