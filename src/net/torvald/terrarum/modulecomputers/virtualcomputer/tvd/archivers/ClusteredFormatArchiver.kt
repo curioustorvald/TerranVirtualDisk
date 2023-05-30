@@ -101,15 +101,15 @@ private fun ByteArray.renumCluster(increment: Int): ByteArray {
 class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorOnReadError: Boolean = false) {
 
     private inline fun testPause(msg: Any?) {
-        dbgprintln("\n\n== $msg ==\n\n"); dbgprint("> "); Scanner(System.`in`).nextLine()
+//        dbgprintln("\n\n== $msg ==\n\n"); dbgprint("> "); Scanner(System.`in`).nextLine()
     }
 
     private inline fun dbgprint(msg: Any? = "") {
-        print(msg)
+//        print(msg)
     }
 
     private inline fun dbgprintln(msg: Any? = "") {
-        println(msg)
+//        println(msg)
     }
 
     private inline fun dbgprintln2(msg: Any? = "") {

@@ -65,7 +65,7 @@ class VirtualDiskCrackerClustered() : JFrame() {
 
     private fun gotoSubDirectory(file: Clustfile) {
         directoryHierarchy.push(file)
-        labelPath.text = file.getName()
+        labelPath.text = file.name
         selectedFile = null
         fileDesc.text = ""
         updateDiskInfo()
@@ -193,7 +193,7 @@ class VirtualDiskCrackerClustered() : JFrame() {
                         if (vdisk != null) {
                             val entry = currentDirectoryEntries!![rowIndex - 1]
                             return when (columnIndex) {
-                                0 -> entry.getName() + (if (entry.isDirectory()) "/" else "")
+                                0 -> entry.name + (if (entry.isDirectory()) "/" else "")
                                 1 -> Instant.ofEpochSecond(entry.lastModified()).atZone(TimeZone.getDefault().toZoneId()).format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"))
                                 2 -> "${entry.getEffectiveSize()} ${if (entry.isDirectory()) "entries" else "bytes"}"
                                 else -> ""
@@ -499,7 +499,7 @@ class VirtualDiskCrackerClustered() : JFrame() {
                             popupError("File cannot be added in FAT Browsing mode")
                         }
                         else {
-                            var newfile = Clustfile(vdisk!!, currentDirectory, clipboard!!.getName())
+                            var newfile = Clustfile(vdisk!!, currentDirectory, clipboard!!.name)
 
                             // check the name collision. If there is a collision, ask for a new one
                             while (newfile.exists()) {
@@ -630,7 +630,7 @@ class VirtualDiskCrackerClustered() : JFrame() {
                         try {
                             val newname = JOptionPane.showInputDialog("Enter a new name:")
                             if (newname != null) {
-                                val target = Clustfile(vdisk!!, selectedFile!!.getParentFile(), newname)
+                                val target = Clustfile(vdisk!!, selectedFile!!.parentFile, newname)
                                 if (target.exists())
                                     popupError("The name already exists")
                                 else {
@@ -697,7 +697,7 @@ class VirtualDiskCrackerClustered() : JFrame() {
             add("Look Clipboard").addMouseListener(object : MouseAdapter() {
                 override fun mousePressed(e: MouseEvent?) {
                     popupMessage(if (clipboard != null)
-                        "File:${clipboard!!.getPath()}"
+                        "File:${clipboard!!.path}"
                     else "(nothing)", "Clipboard"
                     )
                 }
@@ -1024,7 +1024,7 @@ class VirtualDiskCrackerClustered() : JFrame() {
     private fun updateDiskInfo() {
         val sb = StringBuilder()
         directoryHierarchy.forEach {
-            sb.append(it.getName())
+            sb.append(it.name)
             sb.append('/')
         }
         sb.dropLast(1)
@@ -1078,7 +1078,7 @@ Write protected: ${disk.isReadOnly.toEnglish()}"""
     private fun getFileInfoText(file: Clustfile?): String {
         if (file == null) return ""
 
-        return """Name: ${file.getName()}
+        return """Name: ${file.name}
 Size: ${file.getEffectiveSize()} ${if (file.isDirectory()) "entries" else "bytes"}
 Type: ${file.FAT?.fileType?.fileTypeToString()}
 FAT ID: ${file.FAT?.entryID?.toHex()}

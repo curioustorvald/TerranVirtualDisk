@@ -16,11 +16,11 @@ import java.nio.ByteBuffer
 open class Clustfile(private val DOM: ClusteredFormatDOM, absolutePath: String) {
 
     private inline fun dbgprint(msg: Any? = "") {
-        print(msg)
+//        print(msg)
     }
 
     private inline fun dbgprintln(msg: Any? = "") {
-        println(msg)
+//        println(msg)
     }
 
     private fun <T> Array<T>.tail() = this.sliceArray(1 until this.size)
@@ -45,7 +45,7 @@ open class Clustfile(private val DOM: ClusteredFormatDOM, absolutePath: String) 
         get() = FAT?.fileType
 
     constructor(DOM: ClusteredFormatDOM, parentFile: Clustfile, childName: String) :
-            this(DOM, parentFile.getPath() + "/" + childName)
+            this(DOM, parentFile.path + "/" + childName)
 
     init {
         rebuildSelfPath(absolutePath)
@@ -290,10 +290,10 @@ open class Clustfile(private val DOM: ClusteredFormatDOM, absolutePath: String) 
 
 
 
-    open fun getName() = filename
-    open fun getParent() = parentPath
-    open fun getParentFile() = Clustfile(DOM, parentPath)
-    open fun getPath() = fullpath
+    open val name; get() = filename
+    open val parent; get() = parentPath
+    open val parentFile; get() = Clustfile(DOM, parentPath)
+    open val path; get() = fullpath
 
 
 
@@ -429,7 +429,7 @@ open class Clustfile(private val DOM: ClusteredFormatDOM, absolutePath: String) 
         else if (this.mkdir())
             true
         else {
-            val parent = getParentFile()
+            val parent = parentFile
             dbgprintln("[Clustfile.mkdirs] this path = ${fullpath}")
             dbgprintln("[Clustfile.mkdirs] parent path = $parentPath")
             (parent.mkdirs() || parent.exists()) && this.mkdir()
@@ -437,7 +437,7 @@ open class Clustfile(private val DOM: ClusteredFormatDOM, absolutePath: String) 
     }
 
     open fun mkdir(): Boolean {
-        val parent = getParentFile()
+        val parent = parentFile
         if (parent.exists()) {
             mkfat(FILETYPE_DIRECTORY)
 
@@ -468,10 +468,10 @@ open class Clustfile(private val DOM: ClusteredFormatDOM, absolutePath: String) 
         return exists()
     }
 
-    open fun getTotalSpace() = DOM.totalSpace
-    open fun getFreeSpace() = DOM.freeSpace
-    open fun getUsedSpace() = DOM.usedSpace
-    open fun getUsableSpace() = DOM.usableSpace
+    open val totalSpace; get() = DOM.totalSpace
+    open val freeSpace; get() = DOM.freeSpace
+    open val usedSpace; get() = DOM.usedSpace
+    open val usableSpace; get() = DOM.usableSpace
 
 
 
@@ -500,7 +500,7 @@ open class Clustfile(private val DOM: ClusteredFormatDOM, absolutePath: String) 
 
             dbgprintln("[Clustfile.createNewFile] getParentFile")
 
-            val parentFile = getParentFile()
+            val parentFile = parentFile
             parentFAT = parentFile.FAT!!
 
             dbgprintln("[Clustfile.createNewFile] parent path: $parentPath")
@@ -553,14 +553,14 @@ open class Clustfile(private val DOM: ClusteredFormatDOM, absolutePath: String) 
             // return conditions
             if (file.isFile()) {
                 // if not a directory, write as file
-                val newFile = File(dir, file.getName())
+                val newFile = File(dir, file.name)
                 newFile.writeBytes(file.readBytes())
                 return
             }
             // recurse
             else if (file.isDirectory()) {
                 // mkdir
-                val newDir = File(dir, file.getName())
+                val newDir = File(dir, file.name)
                 newDir.mkdir()
                 // for entries in this fileDirectory...
                 file.listFiles()!!.forEach {
@@ -572,7 +572,7 @@ open class Clustfile(private val DOM: ClusteredFormatDOM, absolutePath: String) 
 
 
         // mkdir to superNode
-        val newDir = File(otherFile, this.getName())
+        val newDir = File(otherFile, this.name)
         return newDir.mkdir().continueIfTrue {
             // for entries in this fileDirectory...
             this.listFiles()!!.forEach { recurse1(it, newDir) }
