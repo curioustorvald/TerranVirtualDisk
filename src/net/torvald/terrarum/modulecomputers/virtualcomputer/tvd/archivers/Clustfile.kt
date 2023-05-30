@@ -266,8 +266,8 @@ open class Clustfile(private val DOM: ClusteredFormatDOM, absolutePath: String) 
             dbgprintln("[Clustfile.overwrite] FAT: $FAT")
 
             try {
-                DOM.setFileLength(FAT!!, buf.size.toLong())
                 DOM.writeBytes(FAT!!, buf, 0, buf.size, 0)
+                DOM.setFileLength(FAT!!, buf.size.toLong())
                 updateFATreference(); DOM.commitFATchangeToDisk(FAT!!)
                 true
             }
@@ -384,8 +384,8 @@ open class Clustfile(private val DOM: ClusteredFormatDOM, absolutePath: String) 
                         }
                     }.let {
 //                        println("ADDCHILD " + it.joinToString { it.toUint().toString(16).padStart(2, '0') })
-                        DOM.setFileLength(FAT!!, it.size.toLong())
                         DOM.writeBytes(FAT!!, it, 0, it.size, 0)
+                        DOM.setFileLength(FAT!!, it.size.toLong())
                     }
                     updateFATreference(); DOM.commitFATchangeToDisk(FAT!!)
                 }
@@ -415,8 +415,8 @@ open class Clustfile(private val DOM: ClusteredFormatDOM, absolutePath: String) 
                             newDirListing.forEachIndexed { index, id -> newBytes.writeInt24(id, index * 3) }
                         }
                     }.let {
-                        DOM.setFileLength(FAT!!, it.size.toLong())
                         DOM.writeBytes(FAT!!, it, 0, it.size, 0)
+                        DOM.setFileLength(FAT!!, it.size.toLong())
                     }
                     updateFATreference(); DOM.commitFATchangeToDisk(FAT!!)
                     true

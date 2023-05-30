@@ -1509,13 +1509,22 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
         return ba2
     }
 
+    private fun setFileLengthInline(entry: FATEntry, newLength: Long) {
+        val oldBytes = entry.getInlineBytes()
+        val newBytes = ByteArray(newLength.toInt())
+        System.arraycopy(oldBytes, 0, newBytes, 0, minOf(oldBytes.size, newBytes.size))
+
+        fatmgrSetInlineBytes(entry, newBytes) // will spliceFAT for us
+        fatmgrUpdateModificationDate(entry, getTimeNow())
+    }
+
     /**
      * Sets the length of the file. If the new length is smaller, the remaining clusters, if any, will be marked as discarded;
      * if the new length is longer, new clusters will be allocated. Clusters marked as discarded must be freed using [defrag].
      */
     fun setFileLength(entry: FATEntry, newLength: Long) {
         if (entry.fileType == 0) throw UnsupportedOperationException("FAT has no file type set (${entry.fileType})")
-        if (entry.isInline) return
+        if (entry.isInline) return setFileLengthInline(entry, newLength)
 
         var remaining = newLength
 
