@@ -158,7 +158,7 @@ class VirtualDiskCrackerClustered() : JFrame() {
                         }
                         else {
                             val record = currentDirectoryEntries!![row - 1]
-                            if (record.isDirectory()) {
+                            if (record.isDirectory) {
                                 gotoSubDirectory(record)
                             }
                         }
@@ -193,9 +193,9 @@ class VirtualDiskCrackerClustered() : JFrame() {
                         if (vdisk != null) {
                             val entry = currentDirectoryEntries!![rowIndex - 1]
                             return when (columnIndex) {
-                                0 -> entry.name + (if (entry.isDirectory()) "/" else "")
+                                0 -> entry.name + (if (entry.isDirectory) "/" else "")
                                 1 -> Instant.ofEpochSecond(entry.lastModified()).atZone(TimeZone.getDefault().toZoneId()).format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"))
-                                2 -> "${entry.getEffectiveSize()} ${if (entry.isDirectory()) "entries" else "bytes"}"
+                                2 -> "${entry.getEffectiveSize()} ${if (entry.isDirectory) "entries" else "bytes"}"
                                 else -> ""
                             }
                         }
@@ -1079,10 +1079,10 @@ Write protected: ${disk.isReadOnly.toEnglish()}"""
         if (file == null) return ""
 
         return """Name: ${file.name}
-Size: ${file.getEffectiveSize()} ${if (file.isDirectory()) "entries" else "bytes"}
+Size: ${file.getEffectiveSize()} ${if (file.isDirectory) "entries" else "bytes"}
 Type: ${file.FAT?.fileType?.fileTypeToString()}
 FAT ID: ${file.FAT?.entryID?.toHex()}
-""" + if (file.exists() && file.isFile())
+""" + if (file.exists() && file.isFile)
         ("""Contents: """ +
                 ByteArray(minOf(PREVIEW_MAX_BYTES, file.length()).toInt()).apply {
                     file.pread(this, 0, this.size, 0)
@@ -1122,9 +1122,9 @@ FAT ID: ${fat.entryID.toHex()}
     private fun Int.entries() = if (this == 1) "one entry" else "$this entries"
     private fun Int.clusters() = if (this == 1) "one cluster" else "$this clusters"
     private fun Long.clusters() = if (this == 1L) "one cluster" else "$this clusters"
-    private fun Clustfile.getEffectiveSize() = if (this.isFile())
+    private fun Clustfile.getEffectiveSize() = if (this.isFile)
         this.length()
-    else if (this.isDirectory())
+    else if (this.isDirectory)
         this.length() / 3
     else
         "n/a"

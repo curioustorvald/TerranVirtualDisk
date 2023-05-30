@@ -55,6 +55,12 @@ class ByteArray64(initialSize: Long = BANK_SIZE.toLong()) {
         repeat(requiredBanks) { __data.add(ByteArray(BANK_SIZE)) }
     }
 
+    constructor(initialSize: Long, initFun: (Long) -> Byte) : this(initialSize) {
+        for (i in 0L until initialSize) {
+            this[i] = initFun(i)
+        }
+    }
+
     private fun Long.toBankNumber(): Int = (this / BANK_SIZE).toInt()
     private fun Long.toBankOffset(): Int = (this % BANK_SIZE).toInt()
 

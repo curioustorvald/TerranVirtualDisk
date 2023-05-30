@@ -20,7 +20,7 @@ open class Clustfile(private val DOM: ClusteredFormatDOM, absolutePath: String) 
     }
 
     private inline fun dbgprintln(msg: Any? = "") {
-//        println(msg)
+        println(msg)
     }
 
     private fun <T> Array<T>.tail() = this.sliceArray(1 until this.size)
@@ -52,7 +52,7 @@ open class Clustfile(private val DOM: ClusteredFormatDOM, absolutePath: String) 
         updateFATreference()
         updatePropertiesByHeadCluster()
 
-        dbgprintln("[Clustfile] New file created, path: \"$fullpath\", pathHierarchy = [${pathHierarchy.joinToString(" > ", transform = { "\"$it\"" })}]")
+        dbgprintln("[Clustfile] New file instance; path: \"$fullpath\", pathHierarchy = [${pathHierarchy.joinToString(" > ", transform = { "\"$it\"" })}]")
         dbgprintln("[Clustfile] FAT: $FAT")
     }
 
@@ -86,9 +86,8 @@ open class Clustfile(private val DOM: ClusteredFormatDOM, absolutePath: String) 
     }
 
     private fun updateFATreference() {
-
+        // even with the not-reassignable FAT, this function is still required :/
         parentFAT = searchForFAT(pathHierarchy.init())
-
         dbgprintln("[Clustfile.updateFATreference] pathHierarchy = [${pathHierarchy.joinToString(" > ", transform = { "\"$it\"" })}]")
         FAT = searchForFAT(pathHierarchy)
         dbgprintln("[Clustfile.updateFATreference] new FAT = $FAT")
@@ -207,7 +206,7 @@ open class Clustfile(private val DOM: ClusteredFormatDOM, absolutePath: String) 
 
 
 
-    open fun pwrite(buf: ByteArray, bufOffset: Int, count: Int, fileOffset: Int): Boolean {
+    open fun pwrite(buf: ByteArray, bufOffset: Int, count: Int, fileOffset: Long): Boolean {
         if (!exists()) createNewFile()
         return if (FAT == null || !canWrite()) false
         else {
@@ -226,15 +225,7 @@ open class Clustfile(private val DOM: ClusteredFormatDOM, absolutePath: String) 
         }
     }
 
-    open fun pwrite(buf: ByteBuffer, bufOffset: Int, count: Int, fileOffset: Int): Boolean {
-        return if (FAT == null || !canWrite()) false
-        else {
-            val bbuf = ByteArray(count) { buf[bufOffset + it] }
-            return pwrite(bbuf, 0, count, fileOffset)
-        }
-    }
-
-    open fun pwrite(unsafe: sun.misc.Unsafe, bufptr: Long, count: Int, fileOffset: Int): Boolean {
+    open fun pwrite(unsafe: sun.misc.Unsafe, bufptr: Long, count: Int, fileOffset: Long): Boolean {
         return if (FAT == null || !canWrite()) false
         else {
             val bbuf = ByteArray(count)
@@ -251,7 +242,7 @@ open class Clustfile(private val DOM: ClusteredFormatDOM, absolutePath: String) 
             dbgprintln("[Clustfile.overwrite] FAT: $FAT")
 
             try {
-                DOM.setFileLength(FAT!!, buf.size)
+                DOM.setFileLength(FAT!!, buf.size.toLong())
                 DOM.writeBytes(FAT!!, buf, 0, buf.size, 0)
                 updateFATreference(); DOM.commitFATchangeToDisk(FAT!!)
                 true
@@ -300,11 +291,14 @@ open class Clustfile(private val DOM: ClusteredFormatDOM, absolutePath: String) 
     open fun canRead() = true
     open fun canWrite() = (FAT?.readOnly == false)
     open fun exists() = (FAT != null)
-    open fun isDirectory() = (exists() && type == FILETYPE_DIRECTORY)
-    open fun isFile() = (exists() && type == FILETYPE_BINARY)
-    open fun isHidden() = (exists() && FAT!!.hidden)
+    open val isDirectory; get() = (exists() && type == FILETYPE_DIRECTORY)
+    open val isFile; get() = (exists() && type == FILETYPE_BINARY)
+    open val isHidden; get() = (exists() && FAT!!.hidden)
     open fun lastModified() = FAT?.modificationDate ?: 0L
     open fun length() = if (exists()) DOM.getFileLength(FAT!!).toLong() else 0L
+
+
+
 
     /**
      * If the file is not directory, null will be returned to comply with the Behaviour of the Java 17
@@ -348,6 +342,8 @@ open class Clustfile(private val DOM: ClusteredFormatDOM, absolutePath: String) 
     open fun addChild(file: Clustfile): Boolean {
         require(type == FILETYPE_DIRECTORY)
 
+        dbgprintln("[Clustfile.addChild] to add: ID=${file.FAT?.entryID?.toHex()} path=${file.path}")
+
         return continueIfTrue {
             // write the child
             if (FAT == null) false // run initDir() to create the file
@@ -356,15 +352,15 @@ open class Clustfile(private val DOM: ClusteredFormatDOM, absolutePath: String) 
                 // if the entry is not already there, write one
                 if (!dirListing.contains(file.FAT!!.entryID)) {
                     (dirListing + listOf(file.FAT!!.entryID)).also {
-                        dbgprintln("[Clustfile.addChild] trying to sort Dir of ID ${this.FAT!!.entryID.toHex()} [${it.joinToString { it.toHex() }}]")
-                        dbgprintln("[Clustfile.addChild] FAT1: [${DOM.fileTable.joinToString { it.entryID.toHex() }}]")
-                    }.sortedWith(DOM.fatComparator).let {
-                        ByteArray(it.size * 3).also { newBytes ->
-                            it.forEachIndexed { index, id -> newBytes.writeInt24(id, index * 3) }
+                        dbgprintln("[Clustfile.addChild] trying to sort the dir ${FAT!!.entryID.toHex()} (${it.size})[${it.joinToString { it.toHex() }}]")
+                        dbgprintln("[Clustfile.addChild] The Entire FAT: (${DOM.fileTable.size})[${DOM.fileTable.joinToString { it.entryID.toHex() }}]")
+                    }.sortedWith(DOM.fatComparator).let { newDirListing ->
+                        ByteArray(newDirListing.size * 3).also { newBytes ->
+                            newDirListing.forEachIndexed { index, id -> newBytes.writeInt24(id, index * 3) }
                         }
                     }.let {
 //                        println("ADDCHILD " + it.joinToString { it.toUint().toString(16).padStart(2, '0') })
-                        DOM.setFileLength(FAT!!, it.size)
+                        DOM.setFileLength(FAT!!, it.size.toLong())
                         DOM.writeBytes(FAT!!, it, 0, it.size, 0)
                     }
                     updateFATreference(); DOM.commitFATchangeToDisk(FAT!!)
@@ -378,21 +374,23 @@ open class Clustfile(private val DOM: ClusteredFormatDOM, absolutePath: String) 
     open fun removeChild(file: Clustfile): Boolean {
         require(type == FILETYPE_DIRECTORY)
 
+        dbgprintln("[Clustfile.removeChild] to delete: ID=${file.FAT?.entryID?.toHex()} path=${file.path}")
+
         return continueIfTrue {
             val dirListing = getDirListing(FAT!!)!!
             val fileEntryID = file.FAT!!.entryID
             if (dirListing.contains(fileEntryID)) {
                 continueIfTrue {
                     dirListing.filter { it != fileEntryID }.also {
-                        dbgprintln("[Clustfile.removeChild] trying to sort DirWithId ${file.FAT!!.entryID.toHex()} [${it.joinToString { it.toHex() }}]")
-                        dbgprintln("[Clustfile.removeChild] FAT: [${DOM.fileTable.joinToString { it.entryID.toHex() }}]")
+                        dbgprintln("[Clustfile.removeChild] trying to sort the dir ${FAT!!.entryID.toHex()} (${it.size})[${it.joinToString { it.toHex() }}]")
+                        dbgprintln("[Clustfile.removeChild] The Entire FAT: (${DOM.fileTable.size})[${DOM.fileTable.joinToString { it.entryID.toHex() }}]")
 
-                    }.sortedWith(DOM.fatComparator).let {
-                        ByteArray((it.size - 1) * 3).also { newBytes ->
-                            it.forEachIndexed { index, id -> newBytes.writeInt24(id, index * 3) }
+                    }.sortedWith(DOM.fatComparator).let { newDirListing ->
+                        ByteArray(newDirListing.size * 3).also { newBytes ->
+                            newDirListing.forEachIndexed { index, id -> newBytes.writeInt24(id, index * 3) }
                         }
                     }.let {
-                        DOM.setFileLength(FAT!!, it.size)
+                        DOM.setFileLength(FAT!!, it.size.toLong())
                         DOM.writeBytes(FAT!!, it, 0, it.size, 0)
                     }
                     updateFATreference(); DOM.commitFATchangeToDisk(FAT!!)
@@ -517,8 +515,13 @@ open class Clustfile(private val DOM: ClusteredFormatDOM, absolutePath: String) 
 
     open fun delete(): Boolean {
         if (!this.exists()) return false
-        DOM.discardFile(FAT!!)
-        return true
+        // remove the reference on the parent directory
+        dbgprintln("[Clustfile.delete] trying to delete file ID ${FAT!!.entryID.toHex()} path=$fullpath")
+        return parentFile.removeChild(this).continueIfTrue {
+            // discard entry
+            DOM.discardFile(FAT!!)
+            true
+        }
     }
 
 
@@ -527,8 +530,8 @@ open class Clustfile(private val DOM: ClusteredFormatDOM, absolutePath: String) 
      */
     open fun exportTo(otherFile: File): Boolean {
         if (!this.exists()) return false
-        return if (this.isFile()) exportFileTo(otherFile)
-        else if (this.isDirectory()) exportDirTo(otherFile)
+        return if (this.isFile) exportFileTo(otherFile)
+        else if (this.isDirectory) exportDirTo(otherFile)
         else return false
     }
 
@@ -551,14 +554,14 @@ open class Clustfile(private val DOM: ClusteredFormatDOM, absolutePath: String) 
     open fun exportDirTo(otherFile: File): Boolean {
         fun recurse1(file: Clustfile, dir: File) {
             // return conditions
-            if (file.isFile()) {
+            if (file.isFile) {
                 // if not a directory, write as file
                 val newFile = File(dir, file.name)
                 newFile.writeBytes(file.readBytes())
                 return
             }
             // recurse
-            else if (file.isDirectory()) {
+            else if (file.isDirectory) {
                 // mkdir
                 val newDir = File(dir, file.name)
                 newDir.mkdir()

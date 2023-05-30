@@ -19,11 +19,11 @@ import java.io.OutputStream
  */
 class ClustfileOutputStream(private val file: Clustfile, val append: Boolean = false) : OutputStream() {
 
-    private var cursor = file.length().toInt()
+    private var cursor = file.length()
     private var fileWipedout = append
 
     init {
-        if (file.isDirectory()) throw FileNotFoundException()
+        if (file.isDirectory) throw FileNotFoundException()
     }
 
     private fun checkFileWipeout() {

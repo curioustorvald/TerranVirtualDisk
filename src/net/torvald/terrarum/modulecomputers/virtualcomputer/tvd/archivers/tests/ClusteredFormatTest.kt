@@ -105,7 +105,7 @@ fun main(args: Array<String>) {
     println("Testing RENUM by allocating more FATs")
     repeat(45) { rpt ->
         val testmarker = "########ContentNum $rpt".toByteArray(charset)
-        DOM.allocateFile(testmarker.size, FILETYPE_BINARY, "FAT Filler $rpt").let { entry ->
+        DOM.allocateFile(testmarker.size.toLong(), FILETYPE_BINARY, "FAT Filler $rpt").let { entry ->
 //            println("Entry ${entry.entryID.toHex()}, name: ${entry.filename}, fatEntryIndices: ${DOM.fatEntryIndices[entry.entryID]}")
             DOM.writeBytes(entry, testmarker, 0, testmarker.size, 0)
     } }
@@ -125,7 +125,7 @@ fun main(args: Array<String>) {
 
     testPause("Test 3 is complete. Check the archive, then hit Return to continue")
 
-    DOM.writeBytes(inlineFile, shorttext, 0, shorttext.size, shorttext.size)
+    DOM.writeBytes(inlineFile, shorttext, 0, shorttext.size, shorttext.size.toLong())
 
     testPause("Test 4 is complete. Check the archive, then hit Return to continue")
 

@@ -68,7 +68,7 @@ fun main(args: Array<String>) {
     val root = Clustfile(DOM, "/").also {
         println("Files in '/': ")
         it.listFiles()?.forEach {
-            println(it.path + (if (it.isDirectory()) "/" else ""))
+            println(it.path + (if (it.isDirectory) "/" else ""))
         }
     }
 }
