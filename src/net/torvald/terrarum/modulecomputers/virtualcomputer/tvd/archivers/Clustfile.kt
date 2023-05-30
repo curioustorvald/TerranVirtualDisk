@@ -67,6 +67,28 @@ open class Clustfile(private val DOM: ClusteredFormatDOM, absolutePath: String) 
         return List(ba.size / 3) { ba.toInt24(it * 3) }
     }
 
+    private fun getDirListingSize(dir: ClusteredFormatDOM.FATEntry): Int? {
+        if (dir.fileType != FILETYPE_DIRECTORY) return null
+//        dbgprintln("[Clustfile.getDirListing] filelen?")
+        val filelen = DOM.getFileLength(dir)
+//        dbgprintln("[Clustfile.getDirListing] filelen = $filelen; readBytes?")
+        val ba = DOM.readBytes(dir, filelen, 0)
+//        dbgprintln("[Clustfile.getDirListing] ${ba.size} bytes read")
+        if (ba.size % 3 != 0) throw IllegalStateException("Length of dir not multiple of 3")
+        return ba.size
+    }
+
+    private fun getFirstFileInDir(dir: ClusteredFormatDOM.FATEntry): Clustfile? {
+        if (dir.fileType != FILETYPE_DIRECTORY) return null
+        val filelen = minOf(DOM.getFileLength(dir), 3)
+        if (filelen % 3 != 0) throw IllegalStateException("Length of dir not multiple of 3")
+        if (filelen == 0) return null
+
+        val id = DOM.readBytes(dir, filelen, 0).toInt24()
+        val name = DOM.fileTable[id]!!.filename
+        return Clustfile(DOM, this, name)
+    }
+
     private fun rebuildSelfPath(absolutePath: String) {
         fullpath = absolutePath.replace('\\', '/').replace(Regex("//+"), "/").let {
             (if (it.startsWith('/')) it.drop(1) else it).let {
@@ -517,10 +539,29 @@ open class Clustfile(private val DOM: ClusteredFormatDOM, absolutePath: String) 
         if (!this.exists()) return false
         // remove the reference on the parent directory
         dbgprintln("[Clustfile.delete] trying to delete file ID ${FAT!!.entryID.toHex()} path=$fullpath")
-        return parentFile.removeChild(this).continueIfTrue {
-            // discard entry
-            DOM.discardFile(FAT!!)
-            true
+
+        return if (this.isDirectory) {
+            // delete children
+            var ret = true
+            while (true) {
+                val file = this.getFirstFileInDir(FAT!!) ?: break
+                ret = ret and file.delete()
+            }
+            ret.continueIfTrue {
+                // delete self
+                parentFile.removeChild(this).continueIfTrue {
+                    // discard entry
+                    DOM.discardFile(FAT!!)
+                    true
+                }
+            }
+        }
+        else {
+            parentFile.removeChild(this).continueIfTrue {
+                // discard entry
+                DOM.discardFile(FAT!!)
+                true
+            }
         }
     }
 

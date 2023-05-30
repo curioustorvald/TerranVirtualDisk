@@ -71,4 +71,6 @@ fun main(args: Array<String>) {
             println(it.path + (if (it.isDirectory) "/" else ""))
         }
     }
+
+    // TODO: does shrinking filesize leaves craps behind, or they are marked as discarded properly?
 }
