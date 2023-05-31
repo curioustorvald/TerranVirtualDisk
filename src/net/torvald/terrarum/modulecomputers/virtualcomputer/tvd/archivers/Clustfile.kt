@@ -538,6 +538,7 @@ open class Clustfile(private val DOM: ClusteredFormatDOM, absolutePath: String) 
         }
     }
 
+    // FIXME delete() via Clustfile deletes an entry right before the file on FAT; behaviour suggests stale fatEntryIndices
     open fun delete(): Boolean {
         if (!this.exists()) return false
         // remove the reference on the parent directory
