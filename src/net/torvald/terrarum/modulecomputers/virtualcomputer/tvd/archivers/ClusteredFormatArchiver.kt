@@ -977,7 +977,7 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
             }
             else {
                 traverseClusters(clusterNum) {
-                    ARCHIVE.setClusterMeta1Flag(it, 0x80, 255)
+                    ARCHIVE.setClusterMeta1Flag(it, 0x80, 0x80)
                     freeClusters.add(it)
                 }
             }
@@ -2089,14 +2089,14 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
     private fun RandomAccessFile.setClusterMeta1Flag(clusterNum: Long, mask: Int, flag: Int) {
         this.seekToCluster(clusterNum, 0)
         val existing = this.read()
-        val newFlag = (existing and (0xFF xor mask)) or flag
+        val newFlag = (existing xor mask) or flag
         this.seekToCluster(clusterNum, 0)
         this.write(newFlag)
     }
     private fun RandomAccessFile.setClusterMeta2Flag(clusterNum: Long, mask: Int, flag: Int) {
         this.seekToCluster(clusterNum, 1)
         val existing = this.read()
-        val newFlag = (existing and (0xFF xor mask)) or flag
+        val newFlag = (existing xor mask) or flag
         this.seekToCluster(clusterNum, 1)
         this.write(newFlag)
     }
