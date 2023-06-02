@@ -574,7 +574,7 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
         fatClusterCount = ARCHIVE.readIntBig()
     }
 
-    private fun readFAT() {
+    private fun readFAT(rebuild: Boolean = false) {
         if (fatClusterCount < 0) throw InternalError("Disk has not been read")
         if (fatClusterCount == 0) throw RuntimeException("Invalid FAT size ($fatClusterCount)")
 
@@ -599,7 +599,11 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
                 // normal entries
                 else if (mainPtr >= 2 + fatClusterCount) {
                     val fat = FATEntry.fromBytes(charset, fileTable.renumberHook, fat)
-                    fileTable.put(fat)
+                    if (!rebuild) fileTable.put(fat)
+                    else {
+                        fileTable[fat.entryID]!!.takeAttribsFrom(fat)
+                        fileTable[fat.entryID]!!.extendedEntries.clear()
+                    }
                     dbgprintln("[Clustered.readFAT] ID ${fat.entryID.toHex()} = ${fat.filename}")
                 }
 
@@ -1812,7 +1816,15 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
 
         //// Step 4. find-replace on all FAT entries
         val affectedInlineFATs = HashSet<EntryID>()
-        for (kfat in 0 until fatEntryCount) {
+        // TODO do it on the FAT on the memory then commit them to the disk, instead of the reverse
+
+        fileTable.forEach {
+            TODO()
+        }
+
+
+
+        /*for (kfat in 0 until fatEntryCount) {
             ARCHIVE.seekToFAT(kfat)
             val ptr = ARCHIVE.readInt24()
             // Extended Entries?
@@ -1834,12 +1846,10 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
                 ARCHIVE.seekToFAT(kfat)
                 ARCHIVE.writeInt24(to)
             }
-        }
+        }*/
 
         //// Step 4-1. sync the affected Extended Entries
-        affectedInlineFATs.forEach {
-            fatmgrSyncInlinedBytes(it)
-        }
+        TODO()
 
         //// Step 5-1. unset 'temporarily duplicated' flag of the copied cluster
         ARCHIVE.setClusterMeta2Flag(to, 1, 0)
