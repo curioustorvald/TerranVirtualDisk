@@ -5,10 +5,7 @@ import net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.archivers.Cluste
 import net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.archivers.ClusteredFormatDOM.Companion.FILETYPE_BINARY
 import net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.archivers.ClusteredFormatDOM.Companion.FILETYPE_DIRECTORY
 import net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.archivers.Clustfile
-import java.awt.BorderLayout
-import java.awt.Color
-import java.awt.Component
-import java.awt.Dimension
+import java.awt.*
 import java.awt.event.*
 import java.io.File
 import java.time.Instant
@@ -30,7 +27,7 @@ class VirtualDiskCrackerClustered() : JFrame() {
     private val annoyHackers = false // Jar build settings. Intended for Terrarum proj.
 
 
-    private val PREVIEW_MAX_BYTES = 4L * 1024 // 4 kBytes
+    private val PREVIEW_MAX_BYTES = 1048576L
 
     private val appName = "TerranVirtualDiskCracker"
     private val copyright = "Copyright 2017-18, 2022-2023 CuriousTorvald (minjaesong). Distributed under MIT license."
@@ -937,6 +934,7 @@ class VirtualDiskCrackerClustered() : JFrame() {
         diskInfo.text = "(Disk not loaded)"
         diskInfo.preferredSize = Dimension(-1, 96)
 
+        fileDesc.font = Font.getFont(Font.MONOSPACED)
         fileDesc.highlighter = null
         fileDesc.text = ""
         fileDesc.caret.isVisible = false
@@ -1092,7 +1090,7 @@ Size: ${file.getEffectiveSize()} ${if (file.isDirectory) "entries" else "bytes"}
 Type: ${file.FAT?.fileType?.fileTypeToString()}
 FAT ID: ${file.FAT?.entryID?.toHex()}
 """ + if (file.exists() && file.isFile)
-        ("""Contents: """ +
+        ("Contents:\n" +
                 ByteArray(minOf(PREVIEW_MAX_BYTES, file.length()).toInt()).apply {
                     file.pread(this, 0, this.size, 0)
                 }.toString(vdisk?.charset ?: Charsets.ISO_8859_1))
@@ -1109,7 +1107,7 @@ Size: ${if (fat.fileType == FILETYPE_DIRECTORY) ("${flen / 3} entries") else "$f
 Type: ${fat.fileType.fileTypeToString()}
 FAT ID: ${fat.entryID.toHex()}
 """ + if (fat.fileType == FILETYPE_BINARY)
-            ("""Contents: """ +
+            ("Contents:\n" +
                     ByteArray(minOf(PREVIEW_MAX_BYTES.toInt(), flen)).apply {
                         vdisk!!.readBytes(fat, this, 0, this.size, 0)
                     }.toString(vdisk?.charset ?: Charsets.ISO_8859_1))
