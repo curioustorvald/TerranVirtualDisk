@@ -582,7 +582,7 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
         dbgprintln("[Clustered.readFAT] ============ readFAT ============")
 
         ARCHIVE.seek(2L * CLUSTER_SIZE)
-        for (block in 2 until rootDirClusterID) {
+        for (block in 0 until fatClusterCount) {
             for (blockOff in 0 until CLUSTER_SIZE step FAT_ENTRY_SIZE) {
 
                 val fat = ARCHIVE.read(FAT_ENTRY_SIZE)
@@ -608,13 +608,13 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
                     dbgprintln("[Clustered.readFAT] ID ${fat.entryID.toHex()} = ${fat.filename}")
                 }
 
-                if (mainPtr != 0) {
-                    fatEntryCount += 1
+                // set proper fatEntryIndices
+                if (mainPtr in 4 until EXTENDED_ENTRIES_BASE) {
 
-                    val fatIndex = blockOff / FAT_ENTRY_SIZE + block * FAT_ENTRY_SIZE / CLUSTER_SIZE
+                    val fatIndex = blockOff / FAT_ENTRY_SIZE + block * (CLUSTER_SIZE / FAT_ENTRY_SIZE)
                     fatEntryIndices[mainPtr] = fatIndex
 
-//                    dbgprintln("[Clustered] - index: $fatIndex")
+                    dbgprintln("[Clustered.readFAT]   - mainPtr ${mainPtr.toHex()} fatEntryIndex=$fatIndex")
 
                     if (fatIndex > fatEntryHighest.first) {
 //                        dbgprintln("[Clustered] - new fatEntryHighest: $fatIndex to $mainPtr")
@@ -622,14 +622,16 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
                     }
                 }
 
+                // increment counter
+                if (mainPtr != 0) fatEntryCount += 1
+
+
             }
         }
 
-
         fileTable.forEach { it.validate() }
 
-//        dbgprintln("fatEntryHighest = $fatEntryHighest")
-
+        dbgprintln("[Clustered.readFAT] fatEntryCount=$fatEntryCount/${fatClusterCount * (CLUSTER_SIZE / FAT_ENTRY_SIZE)}; fatEntryHighest=index:${fatEntryHighest.first} ID:${fatEntryHighest.second.toHex()}")
         dbgprintln("[Clustered.readFAT] =================================")
     }
 
@@ -689,7 +691,7 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
             ARCHIVE.write(fat)
 
             val entryID = fat.toInt24(0)
-            if (entryID < EXTENDED_ENTRIES_BASE) {
+            if (entryID.isValidCluster()) {
                 fatEntryIndices[entryID] = kfat
             }
         }
@@ -936,8 +938,11 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
     }*/
 
     private fun fatmgrDeleteEntry(fat: FATEntry) {
-        val index = fatEntryIndices[fat.entryID]!!
-        spliceFAT(index, fat.extendedEntries.size + 1, emptyList())
+        val id = fat.entryID
+        val fatIndex = fatEntryIndices[id]!!
+        spliceFAT(fatIndex, fat.extendedEntries.size + 1, emptyList())
+        fileTable.remove(id)
+        fatEntryIndices.remove(id)
     }
 
     fun commitFATchangeToDisk(fat: FATEntry) {
@@ -1162,7 +1167,7 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
         if (deleteCount > fatEntryCount) throw IllegalArgumentException("deleteCount ($deleteCount) is larger than the number of FAT entries in the Archive ($fatEntryCount)")
 
 
-//        dbgprintln("[Clustered] spliceFAT called; insertPos=$insertPos(foff: ${(2 * CLUSTER_SIZE + insertPos * FAT_ENTRY_SIZE).toHex()}), deleteCount=$deleteCount, FATs=(${FATs.size})[${FATs.joinToString(" ; ") { it.sliceArray(0..15).joinToString(" ") { it.toUint().toString(16).padStart(2, '0').toUpperCase() } }}], current FAT cap: ${fatClusterCount * FATS_PER_CLUSTER}")
+        dbgprintln("[Clustered.spliceFAT] spliceFAT called; insertPos=$insertPos(foff: ${(2 * CLUSTER_SIZE + insertPos * FAT_ENTRY_SIZE).toHex()}), deleteCount=$deleteCount, FATs=(${FATs.size})[${FATs.joinToString(" ; ") { it.sliceArray(0..15).joinToString(" ") { it.toUint().toString(16).padStart(2, '0').toUpperCase() } }}], current FAT cap: ${fatClusterCount * FATS_PER_CLUSTER}")
 
 
         // grow FAT area?
@@ -1195,10 +1200,10 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
         else
             LongRange.EMPTY
 
-//        dbgprintln("[Clustered]     splice delete=$deleteCount, add=${FATs.size}; stride=$stride, fatEntryCount=$fatEntryCount, forRange=${if (forRange.isEmpty()) "(empty)" else "${forRange.first.toHex()} to ${forRange.last.toHex()}"}")
+        dbgprintln("[Clustered.spliceFAT]     splice delete=$deleteCount, add=${FATs.size}; stride=$stride, fatEntryCount=$fatEntryCount, forRange=${if (forRange.isEmpty()) "(empty)" else "${forRange.first.toHex()} to ${forRange.last.toHex()}"}")
 
         for (startOffset in forRange) {
-//            dbgprintln("[Clustered]         moving FAT at ${startOffset.toHex()} to ${(startOffset + stride).toHex()}")
+//            dbgprintln("[Clustered.spliceFAT]         moving FAT at ${startOffset.toHex()} to ${(startOffset + stride).toHex()}")
             ARCHIVE.seek(startOffset)
             val bytes = ARCHIVE.read(FAT_ENTRY_SIZE)
             ARCHIVE.seek(startOffset + stride)
@@ -1206,14 +1211,14 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
 
             val entryID = bytes.toInt24()
 
-//            dbgprintln("[Clustered]           FAT at ${startOffset.toHex()}: ${bytes.sliceArray(0..15).joinToString(" ") { it.toUint().toString(16).padStart(2, '0').toUpperCase() }}")
+//            dbgprintln("[Clustered.spliceFAT]           FAT at ${startOffset.toHex()}: ${bytes.sliceArray(0..15).joinToString(" ") { it.toUint().toString(16).padStart(2, '0').toUpperCase() }}")
 
-//            dbgprint("[Clustered]         trying to change FAT Index for entry $entryID")
+//            dbgprint("[Clustered.spliceFAT]         trying to change FAT Index for entry $entryID")
             fatEntryIndices[entryID]?.let {
 //                dbgprint("....${it} -> ${(it + strideByEntry)}")
                 fatEntryIndices[entryID] = it + strideByEntry
             }
-//            dbgprintln()
+            dbgprintln()
         }
 
         // delete trailing FATs if stride < 0
@@ -1226,14 +1231,14 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
 
         // write new FATs
         if (FATs.isNotEmpty()) {
-//            dbgprintln("[Clustered]     writing FATs at file offset ${seekpos.toHex()}")
+            dbgprintln("[Clustered.spliceFAT]     writing FATs at file offset ${seekpos.toHex()}")
             ARCHIVE.seek(seekpos)
             FATs.forEach { bytes ->
                 ARCHIVE.write(bytes)
             }
         }
 
-//        dbgprintln("[Clustered]     incrementing fatEntryCount by ${fatSizeDelta} (${fatEntryCount} -> ${fatEntryCount + fatSizeDelta.toLong()})")
+        dbgprintln("[Clustered.spliceFAT]     incrementing fatEntryCount by ${fatSizeDelta} (${fatEntryCount} -> ${fatEntryCount + fatSizeDelta.toLong()})")
         fatEntryCount += fatSizeDelta
 
         ARCHIVE.seek(seekpos)
@@ -1776,7 +1781,7 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
 
     private fun isThisClusterFree(clusterNum: Int): Boolean {
         if (clusterNum < rootDirClusterID) {
-            dbgprintln("[Clustered.isThisClusterFree] ${clusterNum.toHex()} not free -- ${clusterNum} < ${rootDirClusterID}")
+//            dbgprintln("[Clustered.isThisClusterFree] ${clusterNum.toHex()} not free: metadata or bootsector -- ${clusterNum} < ${rootDirClusterID}")
             return false
         }
         if (clusterNum >= archiveSizeInClusters) return true
@@ -1791,7 +1796,7 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
 
         // persistent?
         if (flag2 and 0x80 != 0) {
-            dbgprintln("[Clustered.isThisClusterFree] ${clusterNum.toHex()} not free -- flag2 and 0x80 != 0 (${flag2.toString(2)})")
+//            dbgprintln("[Clustered.isThisClusterFree] ${clusterNum.toHex()} not free: persistent -- flag2 and 0x80 != 0 (${flag2.toString(2)})")
             return false
         }
         // temporarily duplicated AND marked as discarded?
@@ -1802,7 +1807,7 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
         // file type of 0
         if (flag and 0x0F == 0) return true
 
-        dbgprintln("[Clustered.isThisClusterFree] ${clusterNum.toHex()} not free -- generic failure (flags: ${flag.toString(2)}, ${flag2.toString(2)})")
+//        dbgprintln("[Clustered.isThisClusterFree] ${clusterNum.toHex()} not free: occupied -- flags: ${flag.toString(2)}, ${flag2.toString(2)}")
         return false
     }
 
