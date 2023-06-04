@@ -5,6 +5,7 @@ import net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.archivers.Cluste
 import net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.archivers.ClusteredFormatDOM.Companion.FILETYPE_BINARY
 import net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.archivers.ClusteredFormatDOM.Companion.FILETYPE_DIRECTORY
 import net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.archivers.Clustfile
+import net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.archivers.writeInt16
 import java.awt.*
 import java.awt.event.*
 import java.io.File
@@ -279,6 +280,66 @@ class VirtualDiskCrackerClustered() : JFrame() {
 
                                     // create new file
                                     ClusteredFormatDOM.createNewArchive(originalFile, Charsets.ISO_8859_1, diskName, diskSize)
+
+                                    originalFile.copyTo(swapFile, true)
+                                    // all the editing is done on the swap file
+                                    vdisk = ClusteredFormatArchiver(null).deserialize(swapFile, null)
+
+                                    gotoRoot()
+                                    updateDiskInfo()
+                                    setWindowTitleWithName(fileChooser.selectedFile.canonicalPath)
+                                    setStat("Disk created")
+                                }
+                            }
+                            catch (e: Exception) {
+                                e.printStackTrace()
+                                popupError(e.toString())
+                            }
+                        }
+                    }
+                }
+            })
+            add("New Dwarventech-Compatible Disk…").addMouseListener(object : MouseAdapter() {
+                override fun mousePressed(e: MouseEvent?) {
+                    val makeNewDisk = if (vdisk != null) confirmedDiscard() else true
+                    if (makeNewDisk) {
+                        // show fileChooser dialogue to specify where the new file goes, then create new archive from it
+                        val fileChooser = JFileChooser("./")
+                        fileChooser.showSaveDialog(null)
+                        if (fileChooser.selectedFile != null) {
+                            try {
+                                // new disk size (in clusters)?
+                                val dialogBox = OptionDwarvenTechDiskSelectors()
+                                val confirmNew = JOptionPane.OK_OPTION == dialogBox.showDialog("Set Property of New Disk")
+
+                                val diskProps = listOf(
+                                        240 to 0x1001,
+                                        2500 to 0x2001,
+                                        480 to 0x1002,
+                                        5000 to 0x2002,
+                                        960 to 0x1003,
+                                        10000 to 0x2003
+                                )
+
+                                if (confirmNew) {
+                                    val diskName = dialogBox.name.text
+                                    var optionSelected = -1
+                                    dialogBox.capacity.forEachIndexed { index, b ->
+                                        if (b.isSelected) optionSelected = index
+                                    }
+                                    if (optionSelected == -1) {
+                                        return
+                                    }
+
+                                    val diskSize = diskProps[optionSelected].first
+                                    val diskExtraAttribs = ByteArray(2).also { it.writeInt16(diskProps[optionSelected].second, 0) }
+
+                                    originalFile = fileChooser.selectedFile!!
+                                    swapFile = File(originalFile.absolutePath + ".swap")
+                                    backupFile = File(originalFile.absolutePath + ".bak")
+
+                                    // create new file
+                                    ClusteredFormatDOM.createNewArchive(originalFile, Charsets.ISO_8859_1, diskName, diskSize, diskExtraAttribs)
 
                                     originalFile.copyTo(swapFile, true)
                                     // all the editing is done on the swap file

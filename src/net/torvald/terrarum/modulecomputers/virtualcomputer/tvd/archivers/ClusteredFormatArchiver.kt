@@ -143,7 +143,7 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
 
         const val INLINING_THRESHOLD = INLINED_ENTRY_BYTES * 8 // compare with <= -- files up to this size is recommended to be inlined
 
-        fun createNewArchive(outPath: File, charset: Charset, diskName: String, capacityInSectors: Int): RandomAccessFile {
+        fun createNewArchive(outPath: File, charset: Charset, diskName: String, capacityInSectors: Int, extraAttribs: ByteArray = ByteArray(0)): RandomAccessFile {
             val timeNow = System.currentTimeMillis() / 1000L
             val file = FileOutputStream(outPath)
 
@@ -184,7 +184,7 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
             // attributes
             file.write(0)
             // more attirbutes
-            repeat(16) { file.write(0) }
+            file.write(ByteArray(16) { extraAttribs.getOrNull(it) ?: 0 })
             // FAT size (2)
             file.write(2.toInt32Arr())
             // Charset (2)

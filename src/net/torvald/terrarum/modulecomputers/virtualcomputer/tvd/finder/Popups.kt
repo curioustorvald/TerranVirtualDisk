@@ -25,7 +25,7 @@ class OptionDiskNameAndCap {
 
     init {
         mainPanel.layout = BorderLayout()
-        settingPanel.layout = GridLayout(2, 2, 2, 0)
+        settingPanel.layout = GridLayout(2, 2, 2, 2)
 
         //name.text = "Unnamed"
 
@@ -60,7 +60,7 @@ class OptionDiskNameAndCapSectors {
 
     init {
         mainPanel.layout = BorderLayout()
-        settingPanel.layout = GridLayout(2, 2, 2, 0)
+        settingPanel.layout = GridLayout(2, 2, 2, 2)
 
         //name.text = "Unnamed"
 
@@ -70,6 +70,49 @@ class OptionDiskNameAndCapSectors {
         settingPanel.add(capacity)
 
         mainPanel.add(settingPanel, BorderLayout.CENTER)
+        mainPanel.add(JLabel(""), BorderLayout.SOUTH)
+    }
+
+    /**
+     * returns either JOptionPane.OK_OPTION or JOptionPane.CANCEL_OPTION
+     */
+    fun showDialog(title: String): Int {
+        return JOptionPane.showConfirmDialog(null, mainPanel,
+                title, JOptionPane.OK_CANCEL_OPTION)
+    }
+}
+
+class OptionDwarvenTechDiskSelectors {
+    val name = JTextField(11)
+    val capacity = listOf(
+            JRadioButton("Low FDD (~1 MB)"),
+            JRadioButton("Low HDD (10 MB)"),
+            JRadioButton("Mid FDD (~2 MB)"),
+            JRadioButton("Mid HDD (20 MB)"),
+            JRadioButton("High FDD (~4 MB)"),
+            JRadioButton("High HDD (40 MB)"),
+    )
+    val mainPanel = JPanel()
+
+    init {
+        mainPanel.layout = BorderLayout()
+
+        //name.text = "Unnamed"
+
+        JPanel().also {
+            it.layout = GridLayout(1, 2, 2, 2)
+            it.add(JLabel("Name (max 32 bytes)"))
+            it.add(name)
+
+            mainPanel.add(it, BorderLayout.NORTH)
+        }
+        JPanel().also {
+            it.layout = GridLayout(3, 2, 2, 2)
+            capacity.forEach { btn -> it.add(btn) }
+
+            mainPanel.add(it, BorderLayout.CENTER)
+        }
+
         mainPanel.add(JLabel(""), BorderLayout.SOUTH)
     }
 

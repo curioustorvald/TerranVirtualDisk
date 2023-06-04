@@ -25,7 +25,7 @@ class FileTableMap : Collection<FATEntry> {
     }
 
     fun remove(id: EntryID) {
-        println("[FileTableMap] remove ${id.toHex()}")
+//        println("[FileTableMap] remove ${id.toHex()}")
 //        Thread.currentThread().stackTrace.forEach { println(it) }
         internalMap.searchForIndex(id) { it.entryID }?.let {
             internalMap.removeAt(it)
