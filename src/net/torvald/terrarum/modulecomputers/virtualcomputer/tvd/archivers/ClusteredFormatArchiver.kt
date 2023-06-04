@@ -105,11 +105,11 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
     }
 
     private inline fun dbgprint(msg: Any? = "") {
-        print(msg)
+//        print(msg)
     }
 
     private inline fun dbgprintln(msg: Any? = "") {
-        println(msg)
+//        println(msg)
     }
 
     private inline fun dbgprintln2(msg: Any? = "") {
@@ -1670,6 +1670,8 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
 
         val visited = HashSet<EntryID>()
 
+        dbgprint("[Clustered.traverseClusters] Traverse ${start.toHex()}")
+
         do {
             // seek to cluster
             ARCHIVE.seekToCluster(cluster, 5)
@@ -1686,7 +1688,13 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
             if (!action(cluster)) break
 
             cluster = nextCluster
+
+            dbgprint(" -> ${cluster.toHex()}")
+
         } while (cluster in 1 until LEAF_CLUSTER)
+
+        dbgprint("\n")
+
     }
 
     /**

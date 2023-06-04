@@ -20,7 +20,7 @@ open class Clustfile(private val DOM: ClusteredFormatDOM, absolutePath: String) 
     }
 
     private inline fun dbgprintln(msg: Any? = "") {
-        println(msg)
+//        println(msg)
     }
 
     private fun <T> Array<T>.tail() = this.sliceArray(1 until this.size)
@@ -122,17 +122,17 @@ open class Clustfile(private val DOM: ClusteredFormatDOM, absolutePath: String) 
     }
 
     private fun searchForFAT(pathHierarchy: Array<String>): ClusteredFormatDOM.FATEntry? {
-//        dbgprintln("[Clustfile.searchForFAT] file path: [${pathHierarchy.joinToString(" > ", transform = { "\"$it\"" })}]")
+        dbgprintln("[Clustfile.searchForFAT] file path: [${pathHierarchy.joinToString(" > ", transform = { "\"$it\"" })}]")
         var currentDir: ClusteredFormatDOM.FATEntry? = DOM.getRootDir()
         for (dirName in pathHierarchy) {
-//            dbgprintln("[Clustfile.searchForFAT] dirName = $dirName")
+            dbgprintln("[Clustfile.searchForFAT] dirName = $dirName")
 
             if (currentDir == null) {
-//                dbgprintln("[Clustfile.searchForFAT]     currentDir == null, breaking")
+                dbgprintln("[Clustfile.searchForFAT]     currentDir == null, breaking")
                 break
             }
 
-//            dbgprintln("[Clustfile.searchForFAT]     getDirListing of ID ${currentDir.entryID.toHex()}...")
+            dbgprintln("[Clustfile.searchForFAT]     getDirListing of ID ${currentDir.entryID.toHex()}...")
 
             /*var found = false
             // TODO: binarySearch by hash over each cluster in the dir file chain
@@ -170,20 +170,63 @@ open class Clustfile(private val DOM: ClusteredFormatDOM, absolutePath: String) 
 
             if (dirListing != null) {
                 var found = false
-                for (entryID in dirListing) {
-                    val dirFile = DOM.getFile(entryID)
+                if (currentDir.isInline) {
+                    // linear search
+                    /*for (entryID in dirListing) {
+                        val dirFile = DOM.getFile(entryID)
 
-//                    dbgprintln("[Clustfile.searchForFAT]     entryID = ${entryID.toHex()}; dirName $dirName ?= ${DOM.getFile(entryID)?.filename}")
+//                        dbgprintln("[Clustfile.searchForFAT]     entryID = ${entryID.toHex()}; dirName $dirName ?= ${DOM.getFile(entryID)?.filename}")
 
-                    if (dirFile != null && dirName == DOM.getFile(entryID)?.filename) {
-                        currentDir = dirFile
-                        found = true
-                        break
+                        if (dirFile != null && dirName == DOM.getFile(entryID)?.filename) {
+                            currentDir = dirFile
+                            found = true
+                            break
+                        }
+                    }
+                    if (!found) {
+                        currentDir = null
+                    }*/
+                    // binary search
+                    val dirListing2 = dirListing.map { DOM.getFile(it)!!.filename }
+                    dirListing2.binarySearch(dirName, DOM.filenameComparator).let { index ->
+                        if (index >= 0) {
+                            val dirFile = dirListing[index]
+
+//                                dbgprintln("[Clustfile.searchForFAT]     found intermediate; entryID = ${dirFile.entryID.toHex()}; dirname = ${dirFile.filename}")
+
+                            currentDir = DOM.getFile(dirFile)!!
+                            found = true
+                        }
+                    }
+                }
+                else {
+                    DOM.traverseClustersBreakable(currentDir!!.entryID) { clusternum ->
+                        DOM.ARCHIVE.seekToCluster(clusternum, ClusteredFormatDOM.FILE_BLOCK_OFFSET_CONTENT_LEN)
+                        val contentsSize = DOM.ARCHIVE.readUshortBig()
+                        val dirListing = DOM.ARCHIVE.read(contentsSize).chunked(3).map { DOM.getFile(it.toInt24())!! }
+
+                        dirListing.map { it.filename }.binarySearch(dirName, DOM.filenameComparator).let { index ->
+                            if (index >= 0) {
+                                val dirFile = dirListing[index]
+
+//                                dbgprintln("[Clustfile.searchForFAT]     found intermediate; entryID = ${dirFile.entryID.toHex()}; dirname = ${dirFile.filename}")
+
+                                currentDir = dirFile
+                                found = true
+                                false
+                            }
+                            else {
+//                                dbgprintln("[Clustfile.searchForFAT]     not found, trying next cluster")
+                                true // continue search on the next cluster
+                            }
+                        }
                     }
                 }
                 if (!found) {
                     currentDir = null
                 }
+
+
             }
             else {
                 currentDir = null
