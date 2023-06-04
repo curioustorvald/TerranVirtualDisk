@@ -2,6 +2,7 @@ package net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.archivers
 
 import net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.EntryID
 import net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.archivers.ClusteredFormatDOM.FATEntry
+import net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.toHex
 import java.util.*
 import java.util.function.Consumer
 import java.util.function.IntFunction
@@ -9,7 +10,7 @@ import java.util.stream.Stream
 import kotlin.collections.ArrayList
 
 class FileTableMap : Collection<FATEntry> {
-    private val internalMap = SortedArrayList<FATEntry>()
+    private val internalMap = SortedArrayList<FATEntry>(16)
 
     internal val renumberHook = {
         internalMap.arrayList.sort()
@@ -24,6 +25,8 @@ class FileTableMap : Collection<FATEntry> {
     }
 
     fun remove(id: EntryID) {
+        println("[FileTableMap] remove ${id.toHex()}")
+//        Thread.currentThread().stackTrace.forEach { println(it) }
         internalMap.searchForIndex(id) { it.entryID }?.let {
             internalMap.removeAt(it)
         }

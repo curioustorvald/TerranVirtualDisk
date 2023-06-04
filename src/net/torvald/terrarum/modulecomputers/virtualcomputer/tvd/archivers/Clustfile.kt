@@ -237,9 +237,9 @@ open class Clustfile(private val DOM: ClusteredFormatDOM, absolutePath: String) 
             require(type == FILETYPE_BINARY)
             try {
                 DOM.writeBytes(FAT!!, buf, bufOffset, count, fileOffset)
-                updateFATreference()
+//                updateFATreference()
                 dbgprintln("[Clustfile.pwrite] FAT update: $FAT")
-                DOM.commitFATchangeToDisk(FAT!!)
+//                DOM.commitFATchangeToDisk(FAT!!)
                 true
             }
             catch (e: Throwable) {
@@ -268,7 +268,7 @@ open class Clustfile(private val DOM: ClusteredFormatDOM, absolutePath: String) 
             try {
                 DOM.writeBytes(FAT!!, buf, 0, buf.size, 0)
                 DOM.setFileLength(FAT!!, buf.size.toLong())
-                updateFATreference(); DOM.commitFATchangeToDisk(FAT!!)
+//                updateFATreference(); DOM.commitFATchangeToDisk(FAT!!)
                 true
             }
             catch (e: Throwable) {
@@ -387,7 +387,7 @@ open class Clustfile(private val DOM: ClusteredFormatDOM, absolutePath: String) 
                         DOM.writeBytes(FAT!!, it, 0, it.size, 0)
                         DOM.setFileLength(FAT!!, it.size.toLong())
                     }
-                    updateFATreference(); DOM.commitFATchangeToDisk(FAT!!)
+//                    updateFATreference(); DOM.commitFATchangeToDisk(FAT!!)
                 }
 
                 true
@@ -418,7 +418,7 @@ open class Clustfile(private val DOM: ClusteredFormatDOM, absolutePath: String) 
                         DOM.writeBytes(FAT!!, it, 0, it.size, 0)
                         DOM.setFileLength(FAT!!, it.size.toLong())
                     }
-                    updateFATreference(); DOM.commitFATchangeToDisk(FAT!!)
+//                    updateFATreference(); DOM.commitFATchangeToDisk(FAT!!)
                     true
                 }
             }
@@ -440,7 +440,7 @@ open class Clustfile(private val DOM: ClusteredFormatDOM, absolutePath: String) 
          .continueIfTrue { thisParent.removeChild(this) } // remove self from parent dir; implies commitFATchangeToDisk(thisParent.FAT)
          .continueIfTrue {
              rebuildSelfPath(dest.fullpath)
-             updateFATreference()
+//             updateFATreference()
              true
          }
     }
@@ -466,7 +466,7 @@ open class Clustfile(private val DOM: ClusteredFormatDOM, absolutePath: String) 
 
             return continueIfTrue { parent.addChild(this) } // implies commitFATchangeToDisk
                   .continueIfTrue { this.initDir() } // implies commitFATchangeToDisk
-                  .continueIfTrue { updateFATreference(); true }
+//                  .continueIfTrue { updateFATreference(); true }
         }
         else {
             return false
@@ -521,7 +521,7 @@ open class Clustfile(private val DOM: ClusteredFormatDOM, absolutePath: String) 
         try {
             mkfat(FILETYPE_BINARY)
 
-            dbgprintln("[Clustfile.createNewFile] getParentFile")
+            dbgprintln("[Clustfile.createNewFile] getParentFile of $fullpath")
 
             val parentFile = parentFile
             parentFAT = parentFile.FAT!!
@@ -538,7 +538,6 @@ open class Clustfile(private val DOM: ClusteredFormatDOM, absolutePath: String) 
         }
     }
 
-    // FIXME delete() via Clustfile deletes an entry right before the file on FAT; behaviour suggests stale fatEntryIndices
     open fun delete(): Boolean {
         if (!this.exists()) return false
         // remove the reference on the parent directory

@@ -94,11 +94,11 @@ class VirtualDiskCrackerClustered() : JFrame() {
     val tableColumns = arrayOf("Name", "Date Modified", "Size")
     val tableParentRecord = arrayOf(arrayOf("..", "", ""))
 
-    val tableColumnsEntriesMode = arrayOf("Name", "FAT ID", "Type", "Size", "Created", "Modified", "# Ext")
+    val tableColumnsEntriesMode = arrayOf("Name", "FAT+idx", "Type", "Size", "Created", "Modified", "# Ext")
     var tableEntriesRecord = arrayOf(arrayOf("", "", "", "", "", "", ""))
 
     private val tableFilesPreferredSize = arrayOf(240, 120, 80)
-    private val tableEntriesPreferredSize = arrayOf(120, 48, 24, 48, 36, 36, 18)
+    private val tableEntriesPreferredSize = arrayOf(120, 64, 24, 48, 36, 36, 18)
 
 
 
@@ -879,7 +879,7 @@ class VirtualDiskCrackerClustered() : JFrame() {
                             vdisk!!.trimArchive()
                             val newSize = vdisk!!.ARCHIVE.length()
 
-                            val diff = newSize - oldSize
+                            val diff = oldSize - newSize
 
                             val message = "Reclaimed ${diff.bytes()} (${diff.div(ClusteredFormatDOM.CLUSTER_SIZE).clusters()})"
                             popupMessage(message, "Clusters Trimmed")
@@ -901,7 +901,7 @@ class VirtualDiskCrackerClustered() : JFrame() {
                             vdisk!!.defrag()
                             val newSize = vdisk!!.ARCHIVE.length()
 
-                            val diff = newSize - oldSize
+                            val diff = oldSize - newSize
 
                             val message = "Reclaimed ${diff.bytes()} (${diff.div(ClusteredFormatDOM.CLUSTER_SIZE).clusters()})"
                             popupMessage(message, "Clusters Defragmented")
@@ -924,6 +924,7 @@ class VirtualDiskCrackerClustered() : JFrame() {
             addMouseListener(object : MouseAdapter() {
                 override fun mousePressed(e: MouseEvent?) {
                     popupMessage(copyright, "Copyright")
+                    println("========================== Cut Log Messages Above ==========================")
                 }
             })
             menuBar.add(this)
@@ -980,7 +981,7 @@ class VirtualDiskCrackerClustered() : JFrame() {
 
         this.title = appName
         this.add(panelMain)
-        this.setSize(700, 700)
+        this.setSize(800, 800)
         this.isVisible = true
     }
 
@@ -1060,7 +1061,7 @@ Write protected: ${disk.isReadOnly.toEnglish()}"""
             vdisk!!.fileTable.toTypedArray().map { entry ->
                 arrayOf(
                     entry.filename,
-                    entry.entryID.toHex(),
+                    entry.entryID.toHex() + " (${entry.indexInFAT})",
                     entry.fileType.toFileTypeString(),
                     vdisk!!.getFileLength(entry).toString(),
                     Instant.ofEpochSecond(entry.creationDate).atZone(TimeZone.getDefault().toZoneId()).format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")),
