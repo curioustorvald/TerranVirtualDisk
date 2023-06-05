@@ -1,20 +1,21 @@
 package net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.finder
 
-import net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.archivers.ClusteredFormatArchiver
-import net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.archivers.ClusteredFormatDOM
+import net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.DiskSkimmer.Companion.read
+import net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.archivers.*
+import net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.archivers.ClusteredFormatDOM.Companion.CLUSTER_SIZE
 import net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.archivers.ClusteredFormatDOM.Companion.FILETYPE_BINARY
 import net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.archivers.ClusteredFormatDOM.Companion.FILETYPE_DIRECTORY
-import net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.archivers.Clustfile
 import net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.archivers.writeInt16
+import net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.toUint
 import java.awt.*
 import java.awt.event.*
 import java.io.File
+import java.io.RandomAccessFile
 import java.time.Instant
 import java.time.format.DateTimeFormatter
 import java.util.*
 import javax.swing.*
 import javax.swing.table.AbstractTableModel
-import javax.swing.table.TableCellRenderer
 import javax.swing.text.DefaultCaret
 
 
@@ -42,6 +43,7 @@ class VirtualDiskCrackerClustered() : JFrame() {
     private val menuBar = JMenuBar()
     private val tableFiles: JTable
     private val tableEntries: JTable
+    private val bootEditPane = JTextArea()
     private val fileDesc = JTextArea()
     private val diskInfo = JTextArea()
     private val statBar = JLabel("Open a disk or create new to get started")
@@ -284,6 +286,7 @@ class VirtualDiskCrackerClustered() : JFrame() {
                                     originalFile.copyTo(swapFile, true)
                                     // all the editing is done on the swap file
                                     vdisk = ClusteredFormatArchiver(null).deserialize(swapFile, null)
+                                    bootEditPane.text = ""
 
                                     gotoRoot()
                                     updateDiskInfo()
@@ -344,6 +347,7 @@ class VirtualDiskCrackerClustered() : JFrame() {
                                     originalFile.copyTo(swapFile, true)
                                     // all the editing is done on the swap file
                                     vdisk = ClusteredFormatArchiver(null).deserialize(swapFile, null)
+                                    bootEditPane.text = ""
 
                                     gotoRoot()
                                     updateDiskInfo()
@@ -375,6 +379,7 @@ class VirtualDiskCrackerClustered() : JFrame() {
                                 originalFile.copyTo(swapFile, true)
                                 // all the editing is done on the swap file
                                 vdisk = ClusteredFormatArchiver(null).deserialize(swapFile, null)
+                                bootEditPane.text = vdisk?.readBoot()?.toString(vdisk?.charset ?: Charsets.ISO_8859_1) ?: ""
 
                                 gotoRoot()
                                 updateDiskInfo()
@@ -994,13 +999,19 @@ class VirtualDiskCrackerClustered() : JFrame() {
 
         diskInfo.highlighter = null
         diskInfo.text = "(Disk not loaded)"
-        diskInfo.preferredSize = Dimension(-1, 96)
+        diskInfo.preferredSize = Dimension(-1, 120)
 
         fileDesc.font = Font.getFont(Font.MONOSPACED)
         fileDesc.highlighter = null
         fileDesc.text = ""
         fileDesc.caret.isVisible = false
         (fileDesc.caret as DefaultCaret).updatePolicy = DefaultCaret.NEVER_UPDATE
+
+
+        bootEditPane.font = Font.getFont(Font.MONOSPACED)
+        bootEditPane.text = ""
+
+
 
         val fileDescScroll = JScrollPane(fileDesc)
         val tableFilesScroll = JScrollPane(tableFiles).apply {
@@ -1015,9 +1026,47 @@ class VirtualDiskCrackerClustered() : JFrame() {
             add(tableFilesScroll, BorderLayout.CENTER)
         }
 
+
+        val bootEditorButtons = JPanel().apply {
+            add(JButton("Write").apply {
+                this.addMouseListener(object : MouseAdapter() {
+                    override fun mousePressed(e: MouseEvent?) {
+                        if (vdisk != null) {
+                            vdisk!!.writeBoot(bootEditPane.text.toByteArray(vdisk!!.charset))
+                            bootEditPane.text = vdisk!!.readBoot().toString(vdisk!!.charset)
+                            setStat("New Bootsector written")
+                        }
+                    }
+                })
+            })
+            add(JButton("Rollback").apply {
+                this.addMouseListener(object : MouseAdapter() {
+                    override fun mousePressed(e: MouseEvent?) {
+                        bootEditPane.text = RandomAccessFile(originalFile, "r").let {
+                            it.seekToCluster(1)
+                            val s = it.read(CLUSTER_SIZE).trimNull().toString(vdisk?.charset ?: Charsets.ISO_8859_1)
+                            it.close()
+                            s
+                        }
+                        vdisk!!.writeBoot(bootEditPane.text.toByteArray(vdisk!!.charset))
+                        bootEditPane.text = vdisk!!.readBoot().toString(vdisk!!.charset)
+                        setStat("Bootsector is rolled back")
+                    }
+                })
+            })
+        }
+
+        val bootEditor = JPanel(BorderLayout()).apply {
+            add(JScrollPane(bootEditPane).apply {
+                size = Dimension(200, -1)
+            }, BorderLayout.CENTER)
+            add(bootEditorButtons, BorderLayout.SOUTH)
+        }
+
         panelFinderTab = JTabbedPane().apply {
             addTab("Navigator", panelFinder)
             addTab("FAT", tableEntriesScroll)
+            addTab("Bootsector", bootEditor)
         }
 
         val panelFileDesc = JPanel(BorderLayout()).apply {
@@ -1114,7 +1163,20 @@ class VirtualDiskCrackerClustered() : JFrame() {
         return """Name: ${disk.diskNameString}
 Capacity: ${disk.totalSpace} bytes (${disk.usedSpace} bytes used, ${disk.freeSpace} bytes free)
 Clusters: ${disk.totalClusterCount} clusters (${disk.archiveSizeInClusters} clusters used, ${disk.freeClusterCount} clusters free)
-Write protected: ${disk.isReadOnly.toEnglish()}"""
+Write protected: ${disk.isReadOnly.toEnglish()}
+Bootable: ${disk.readBoot().isBootable()}"""
+    }
+
+    private fun ByteArray.isBootable() = when (this[0].toUint()) {
+        0 -> "No (first byte is null)"
+        32 -> "No (first byte is space char)"
+        in 33..126 -> "Yes (plain text)"
+        else -> {
+            if (this[0] == 0x1F.toByte() && this[1] == 0x8B.toByte())
+                "Yes (gzipped)"
+            else
+                "Unknown"
+        }
     }
 
     private fun rebuildTableEntries() {
@@ -1151,6 +1213,7 @@ Write protected: ${disk.isReadOnly.toEnglish()}"""
 Size: ${file.getEffectiveSize()} ${if (file.isDirectory) "entries" else "bytes"}
 Type: ${file.FAT?.fileType?.fileTypeToString()}
 FAT ID: ${file.FAT?.entryID?.toHex()}
+Flags: ${file.FAT?.toFlagsString()}
 """ + if (file.exists() && file.isFile)
         ("Contents:\n" +
                 ByteArray(minOf(PREVIEW_MAX_BYTES, file.length()).toInt()).apply {
@@ -1168,6 +1231,7 @@ FAT ID: ${file.FAT?.entryID?.toHex()}
 Size: ${if (fat.fileType == FILETYPE_DIRECTORY) ("${flen / 3} entries") else "$flen bytes"}
 Type: ${fat.fileType.fileTypeToString()}
 FAT ID: ${fat.entryID.toHex()}
+Flags: ${fat.toFlagsString()}
 """ + if (fat.fileType == FILETYPE_BINARY)
             ("Contents:\n" +
                     ByteArray(minOf(PREVIEW_MAX_BYTES.toInt(), flen)).apply {
@@ -1186,6 +1250,15 @@ FAT ID: ${fat.entryID.toHex()}
         FILETYPE_DIRECTORY -> "Directory"
         else -> "Unknown ($this)"
     }
+
+    private fun ClusteredFormatDOM.FATEntry.toFlagsString() =
+            listOf(
+                    (if (this.readOnly) "readonly" else null),
+                    (if (this.system) "system" else null),
+                    (if (this.hidden) "hidden" else null),
+                    (if (this.deleted) "deleted" else null),
+                    (if (this.isInternal) "internal" else null),
+            ).filterNotNull().joinToString()
 
     private fun Long.bytes() = if (this == 1L) "one byte" else "$this bytes"
     private fun Int.entries() = if (this == 1) "one entry" else "$this entries"

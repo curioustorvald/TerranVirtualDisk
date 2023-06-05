@@ -184,7 +184,7 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
             // attributes
             file.write(0)
             // more attirbutes
-            file.write(ByteArray(16) { extraAttribs.getOrNull(it) ?: 0 })
+            file.write(extraAttribs.padEnd(16))
             // FAT size (2)
             file.write(2.toInt32Arr())
             // Charset (2)
@@ -2020,7 +2020,9 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
 
     fun writeBoot(code: ByteArray) {
         ARCHIVE.seek(CLUSTER_SIZE.toLong())
-        ARCHIVE.write(code, 0, minOf(code.size, CLUSTER_SIZE))
+        code.padEnd(CLUSTER_SIZE).let {
+            ARCHIVE.write(it, 0, minOf(it.size, CLUSTER_SIZE))
+        }
     }
 
     val totalSpace: Long; get() = diskSize
@@ -2183,14 +2185,6 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
     }
     private fun RandomAccessFile.setClusterMeta1Flag(clusterNum: Int, mask: Int, flag: Int) = this.setClusterMeta1Flag(clusterNum.toLong(), mask, flag)
     private fun RandomAccessFile.setClusterMeta2Flag(clusterNum: Int, mask: Int, flag: Int) = this.setClusterMeta2Flag(clusterNum.toLong(), mask, flag)
-    private fun ByteArray.trimNull(): ByteArray {
-        var cnt = this.size - 1
-        while (cnt >= 0) {
-            if (this[cnt] != 0.toByte()) break
-            cnt -= 1
-        }
-        return this.sliceArray(0..cnt)
-    }
     private fun Long.toHex() = this.and(0xFFFFFFFF).toString(16).padStart(8, '0').toUpperCase().let {
         it.substring(0..4).toInt(16).toString(16).toUpperCase().padStart(3, '0') + ":" + it.substring(5..7)
     }
@@ -2402,3 +2396,12 @@ internal fun ByteArray.writeInt64(value: Long, offset: Int) {
     this[offset+6] = value.ushr(8).toByte()
     this[offset+7] = value.ushr(0).toByte()
 }
+fun ByteArray.trimNull(): ByteArray {
+    var cnt = this.size - 1
+    while (cnt >= 0) {
+        if (this[cnt] != 0.toByte()) break
+        cnt -= 1
+    }
+    return this.sliceArray(0..cnt)
+}
+fun ByteArray.padEnd(size: Int) = ByteArray(size) { this.getOrNull(it) ?: 0 }
