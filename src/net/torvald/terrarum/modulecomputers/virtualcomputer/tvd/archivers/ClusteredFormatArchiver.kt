@@ -2274,7 +2274,7 @@ fun RandomAccessFile.readInt64(): Long {
     val buffer = ByteArray(8)
     val readStatus = readBytes(buffer)
     if (readStatus != 8) throw InternalError("Unexpected error -- EOF reached? (expected 8, got $readStatus)")
-    return buffer.toInt48()
+    return buffer.toInt64()
 }
 fun RandomAccessFile.seekToCluster(clusterNum: Int) {
     this.seek(CLUSTER_SIZE * clusterNum.toLong())
