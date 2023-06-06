@@ -673,13 +673,15 @@ open class Clustfile(private val DOM: ClusteredFormatDOM, absolutePath: String) 
     }
 
     /**
-     * Imports the other file or directory in the host filesystem to this file. If the other file is directory, all of its contents will be imported recursively.
+     * Imports the other file or directory in the host filesystem to this file.
+     * If this file already exists, the import will fail and `false` will be returned.
+     * If the other file is directory, all of its contents will be imported recursively.
      */
     open fun importFrom(otherFile: File): Boolean {
         if (this.exists()) return false
         return if (otherFile.isFile()) importFileFrom(otherFile)
         else if (otherFile.isDirectory()) importDirFrom(otherFile)
-        else return false
+        else false
     }
 
     /**

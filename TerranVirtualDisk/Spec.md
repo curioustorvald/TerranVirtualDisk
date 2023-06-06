@@ -1,6 +1,6 @@
 # Terran Virtual Disk Image Format Specification
 
-current specversion number: 0x02
+current specversion number: 0x03
 
 ## Changes
 
