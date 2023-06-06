@@ -1533,7 +1533,7 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
         val prompt = "[Clustered.$caller] "
         dbgprintln(prompt + "$headmsg")
 
-        Thread.currentThread().stackTrace.let { it.slice(2..minOf(8, it.size)) }.forEach {
+        Thread.currentThread().stackTrace.let { it.slice(2 until minOf(10, it.size)) }.forEach {
             dbgprintln(" ".repeat(prompt.length) + "..at $it")
         }
     }
