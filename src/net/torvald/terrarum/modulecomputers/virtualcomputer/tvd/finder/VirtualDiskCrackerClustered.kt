@@ -4,9 +4,12 @@ import net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.DiskSkimmer.Comp
 import net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.EntryID
 import net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.archivers.*
 import net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.archivers.ClusteredFormatDOM.Companion.CLUSTER_SIZE
+import net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.archivers.ClusteredFormatDOM.Companion.EXTENDED_ENTRIES_BASE
+import net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.archivers.ClusteredFormatDOM.Companion.FATS_PER_CLUSTER
+import net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.archivers.ClusteredFormatDOM.Companion.FAT_ENTRY_SIZE
 import net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.archivers.ClusteredFormatDOM.Companion.FILETYPE_BINARY
 import net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.archivers.ClusteredFormatDOM.Companion.FILETYPE_DIRECTORY
-import net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.archivers.writeInt16
+import net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.archivers.ClusteredFormatDOM.Companion.INLINE_FILE_CLUSTER_BASE
 import net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.toUint
 import java.awt.*
 import java.awt.event.*
@@ -1110,11 +1113,32 @@ class VirtualDiskCrackerClustered() : JFrame() {
     }
 
     private val buttonColourFree = Color(0xfafafa)
-    private val buttonColourOccupied = Color(0xed6d9a)
-    private val buttonColourFAT = Color(0x29bb6e)
-    private val buttonColourReserved = Color(0x16a7fa)
+    private val buttonColourOccupied = Color(0xff82ac)
+    private val buttonColourFAT = Color(0x6cee91)
+    private val buttonColourFATdata = Color(0xf6cb07)
+    private val buttonColourReserved = Color(0x12adff)
     private val buttonColourVirtual = Color(0xece8d9)
     private val buttonDim = Dimension(16, 16)
+
+    private fun interpolateLinear(scale: Float, startValue: Float, endValue: Float): Float {
+        if (startValue == endValue) {
+            return startValue
+        }
+        if (scale <= 0f) {
+            return startValue
+        }
+        return if (scale >= 1f) {
+            endValue
+        }
+        else (1f - scale) * startValue + scale * endValue
+    }
+
+    private fun lerp(t: Float, c1: Color, c2: Color): Color {
+        val r = interpolateLinear(t, c1.red.div(255f), c2.red.div(255f)).coerceIn(0f, 1f)
+        val g = interpolateLinear(t, c1.green.div(255f), c2.green.div(255f)).coerceIn(0f, 1f)
+        val b = interpolateLinear(t, c1.blue.div(255f), c2.blue.div(255f)).coerceIn(0f, 1f)
+        return Color(r, g, b)
+    }
 
     private fun rebuildClustmap() {
 
@@ -1130,7 +1154,14 @@ class VirtualDiskCrackerClustered() : JFrame() {
         vdisk?.let { vdisk ->
             for (i in 0 until vdisk.totalClusterCount) {
                 val buttonCol = if (i in 0..1) buttonColourReserved
-                else if (i < vdisk.fatClusterCount + 2) buttonColourFAT
+                else if (i < vdisk.fatClusterCount + 2) {
+                    vdisk.ARCHIVE.seekToCluster(i)
+                    var dataFats = 0
+                    for (k in 0 until CLUSTER_SIZE step FAT_ENTRY_SIZE) {
+                        if (vdisk.ARCHIVE.read(FAT_ENTRY_SIZE).toInt24() >= INLINE_FILE_CLUSTER_BASE) dataFats += 1
+                    }
+                    lerp(dataFats.toFloat() / FATS_PER_CLUSTER, buttonColourFAT, buttonColourFATdata)
+                }
                 else if (i >= vdisk.ARCHIVE.length() / CLUSTER_SIZE) buttonColourVirtual
                 else {
                     if (vdisk.isThisClusterFree(i)) buttonColourFree else buttonColourOccupied
@@ -1156,7 +1187,17 @@ class VirtualDiskCrackerClustered() : JFrame() {
         return if (vdisk == null) ret
         else if (cluster == 0) "$ret\n(header)"
         else if (cluster == 1) "$ret\n(bootsector)"
-        else if (cluster < vdisk!!.fatClusterCount + 2) "$ret\n(file allocation table)"
+        else if (cluster < vdisk!!.fatClusterCount + 2) {
+            vdisk!!.ARCHIVE.seekToCluster(cluster)
+            var dataFats = 0
+            for (k in 0 until CLUSTER_SIZE step FAT_ENTRY_SIZE) {
+                if (vdisk!!.ARCHIVE.read(FAT_ENTRY_SIZE).toInt24() >= INLINE_FILE_CLUSTER_BASE) dataFats += 1
+            }
+            if (dataFats > 0)
+                "$ret\n(file allocation table with $dataFats inlined ${if (dataFats == 1) "entry" else "entries"})"
+            else
+                "$ret\n(file allocation table)"
+        }
         else if (cluster >= vdisk!!.ARCHIVE.length() / CLUSTER_SIZE) "$ret\n(trimmed)"
         else {
             vdisk!!.ARCHIVE.seekToCluster(cluster)
