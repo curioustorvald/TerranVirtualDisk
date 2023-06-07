@@ -4,7 +4,6 @@ import net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.DiskSkimmer.Comp
 import net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.EntryID
 import net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.archivers.*
 import net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.archivers.ClusteredFormatDOM.Companion.CLUSTER_SIZE
-import net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.archivers.ClusteredFormatDOM.Companion.EXTENDED_ENTRIES_BASE
 import net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.archivers.ClusteredFormatDOM.Companion.FATS_PER_CLUSTER
 import net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.archivers.ClusteredFormatDOM.Companion.FAT_ENTRY_SIZE
 import net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.archivers.ClusteredFormatDOM.Companion.FILETYPE_BINARY
@@ -1082,8 +1081,8 @@ class VirtualDiskCrackerClustered() : JFrame() {
         panelFinderTab = JTabbedPane().apply {
             addTab("Navigator", panelFinder)
             addTab("FAT", tableEntriesScroll)
-            addTab("Bootsector", bootEditor)
             addTab("Clusters", clustmap)
+            addTab("Bootsector", bootEditor)
         }
 
         val panelFileDesc = JPanel(BorderLayout()).apply {
@@ -1113,7 +1112,22 @@ class VirtualDiskCrackerClustered() : JFrame() {
     }
 
     private val buttonColourFree = Color(0xfafafa)
-    private val buttonColourOccupied = Color(0xff82ac)
+    private val buttonColourOccupied = listOf(
+            4086 to Color(0xff0d89),
+            3405 to Color(0xff5899),
+            2724 to Color(0xff7daa),
+            2043 to Color(0xff9bba),
+            1362 to Color(0xffb6cb),
+            681 to Color(0xfed0dc),
+            1 to Color(0xfee8ee),
+    )
+    private fun contentsSizeToButtonColour(i: Int): Color {
+        for (kv in buttonColourOccupied) {
+            if (i >= kv.first) return kv.second
+        }
+        return buttonColourFree
+    }
+
     private val buttonColourFAT = Color(0x6cee91)
     private val buttonColourFATdata = Color(0xf6cb07)
     private val buttonColourReserved = Color(0x12adff)
@@ -1164,7 +1178,7 @@ class VirtualDiskCrackerClustered() : JFrame() {
                 }
                 else if (i >= vdisk.ARCHIVE.length() / CLUSTER_SIZE) buttonColourVirtual
                 else {
-                    if (vdisk.isThisClusterFree(i)) buttonColourFree else buttonColourOccupied
+                    contentsSizeToButtonColour(vdisk.contentSizeInThisCluster(i))
                 }
 
 
@@ -1209,9 +1223,8 @@ Prev Chain: ${if (prev == null) "—" else "#${prev+1} (${prev.toHex()})"}
 Next Chain: ${if (next == null) "—" else "#${next+1} (${next.toHex()})"}
 Flag1: ${bytes[0].toUint().toString(2).padStart(8, '0')}
 Flag2: ${bytes[1].toUint().toString(2).padStart(8, '0')}
-Contents:
-${bytes.sliceArray(8 until CLUSTER_SIZE).toString(vdisk!!.charset)}
-"""
+Contents [${bytes.toInt16(8)}]:
+"""+bytes.sliceArray(10 until CLUSTER_SIZE).toString(vdisk!!.charset)
         }
     }
 

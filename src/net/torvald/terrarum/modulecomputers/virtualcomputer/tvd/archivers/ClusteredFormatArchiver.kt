@@ -11,7 +11,6 @@ import java.io.*
 import java.nio.charset.Charset
 import java.util.*
 import kotlin.Comparator
-import kotlin.collections.HashMap
 import kotlin.experimental.and
 import kotlin.math.ceil
 
@@ -1740,7 +1739,7 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
         }
 
         (freeClusters.maxOf { it } + 1).let {
-            if (!isThisClusterFree(it)) {
+            if (!isThisClusterVacant(it)) {
                 dbgprintln("[Clustered] cannot trim -- cluster ${it.toHex()} is occupied")
                 return
             }
@@ -1814,7 +1813,7 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
         
         // mark freeClusters by actually surveying
         for (kluster in rootDirClusterID until archiveSizeInClusters) {
-            if (isThisClusterFree(kluster)) {
+            if (isThisClusterVacant(kluster)) {
                 freeClusters.add(kluster)
             }
         }
@@ -1829,7 +1828,15 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
         return freeClusters.sorted()
     }
 
-    internal fun isThisClusterFree(clusterNum: Int): Boolean {
+    internal fun contentSizeInThisCluster(clusterNum: Int): Int {
+        if (isThisClusterVacant(clusterNum)) return 0
+        else {
+            ARCHIVE.read(6)
+            return ARCHIVE.readUnsignedShort()
+        }
+    }
+
+    private fun isThisClusterVacant(clusterNum: Int): Boolean {
         if (clusterNum < rootDirClusterID) {
 //            dbgprintln("[Clustered.isThisClusterFree] ${clusterNum.toHex()} not free: metadata or bootsector -- ${clusterNum} < ${rootDirClusterID}")
             return false
@@ -1863,7 +1870,7 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
 
     private fun changeClusterNum(from: Int, to: Int) {
         if (!from.isValidCluster() || !to.isValidCluster()) throw IllegalArgumentException("changeClusterNum only works with non-inlined (args: from=${from.toHex()}, to=${to.toHex()})")
-        if (!isThisClusterFree(to)) throw IllegalStateException("Target cluster $to(${to.toHex()}) is not free to overwrite")
+        if (!isThisClusterVacant(to)) throw IllegalStateException("Target cluster $to(${to.toHex()}) is not free to overwrite")
 
         dbgprintln("[Clustered.changeClusterNum] ${from.toHex()} -> ${to.toHex()}")
 
@@ -1926,7 +1933,7 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
         //// Step 6-2. trim the file size/zero-fill the cluster
         var isThisLastCluster = true
         for (offset in from+1 until archiveSizeInClusters) {
-            if (!isThisClusterFree(offset.toInt())) {
+            if (!isThisClusterVacant(offset.toInt())) {
                 isThisLastCluster = false
                 break
             }
