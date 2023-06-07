@@ -496,7 +496,7 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
     /** Formatted size of the disk. Archive offset 4 */
     private var diskSize = -1L
     /** How many clusters FAT is taking up. Archive offset 64 */
-    private var fatClusterCount = -1
+    internal var fatClusterCount = -1; private set
     /** How many FAT entries are there on the FAT area, including Extended Entries */
     private var fatEntryCount = 0
     /** Disk name in bytes. Archive offset 10 */
@@ -1829,7 +1829,7 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
         return freeClusters.sorted()
     }
 
-    private fun isThisClusterFree(clusterNum: Int): Boolean {
+    internal fun isThisClusterFree(clusterNum: Int): Boolean {
         if (clusterNum < rootDirClusterID) {
 //            dbgprintln("[Clustered.isThisClusterFree] ${clusterNum.toHex()} not free: metadata or bootsector -- ${clusterNum} < ${rootDirClusterID}")
             return false

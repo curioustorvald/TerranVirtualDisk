@@ -1,6 +1,7 @@
 package net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.finder
 
 import net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.DiskSkimmer.Companion.read
+import net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.EntryID
 import net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.archivers.*
 import net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.archivers.ClusteredFormatDOM.Companion.CLUSTER_SIZE
 import net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.archivers.ClusteredFormatDOM.Companion.FILETYPE_BINARY
@@ -46,6 +47,7 @@ class VirtualDiskCrackerClustered() : JFrame() {
     private val bootEditPane = JTextArea()
     private val fileDesc = JTextArea()
     private val diskInfo = JTextArea()
+    private val clustmapGrid = JPanel(GridLayout())
     private val statBar = JLabel("Open a disk or create new to get started")
 
     private var vdisk: ClusteredFormatDOM? = null
@@ -996,7 +998,6 @@ class VirtualDiskCrackerClustered() : JFrame() {
             menuBar.add(this)
         }
 
-
         diskInfo.highlighter = null
         diskInfo.text = "(Disk not loaded)"
         diskInfo.preferredSize = Dimension(-1, 120)
@@ -1007,6 +1008,7 @@ class VirtualDiskCrackerClustered() : JFrame() {
         fileDesc.caret.isVisible = false
         (fileDesc.caret as DefaultCaret).updatePolicy = DefaultCaret.NEVER_UPDATE
 
+        ////////////////////////////////////////////////////////////////////////////////////////////////////////
 
         bootEditPane.font = Font.getFont(Font.MONOSPACED)
         bootEditPane.text = ""
@@ -1026,6 +1028,7 @@ class VirtualDiskCrackerClustered() : JFrame() {
             add(tableFilesScroll, BorderLayout.CENTER)
         }
 
+        ////////////////////////////////////////////////////////////////////////////////////////////////////////
 
         val bootEditorButtons = JPanel().apply {
             add(JButton("Write").apply {
@@ -1063,10 +1066,21 @@ class VirtualDiskCrackerClustered() : JFrame() {
             add(bootEditorButtons, BorderLayout.SOUTH)
         }
 
+        ////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+
+        val clustmap = JPanel(BorderLayout()).apply {
+            add(JScrollPane(clustmapGrid), BorderLayout.CENTER)
+        }
+
+        ////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+
         panelFinderTab = JTabbedPane().apply {
             addTab("Navigator", panelFinder)
             addTab("FAT", tableEntriesScroll)
             addTab("Bootsector", bootEditor)
+            addTab("Clusters", clustmap)
         }
 
         val panelFileDesc = JPanel(BorderLayout()).apply {
@@ -1075,7 +1089,7 @@ class VirtualDiskCrackerClustered() : JFrame() {
         }
 
         val filesSplit = JSplitPane(JSplitPane.HORIZONTAL_SPLIT, panelFinderTab, panelFileDesc)
-        filesSplit.resizeWeight = 0.571428
+        filesSplit.resizeWeight = 0.6
 
 
         val panelDiskOp = JPanel(BorderLayout(2, 2)).apply {
@@ -1093,6 +1107,68 @@ class VirtualDiskCrackerClustered() : JFrame() {
         this.add(panelMain)
         this.setSize(800, 800)
         this.isVisible = true
+    }
+
+    private val buttonColourFree = Color(0xfafafa)
+    private val buttonColourOccupied = Color(0xed6d9a)
+    private val buttonColourFAT = Color(0x29bb6e)
+    private val buttonColourReserved = Color(0x16a7fa)
+    private val buttonDim = Dimension(16, 16)
+
+    private fun rebuildClustmap() {
+
+        val cols = 20
+        val rows = (vdisk?.totalClusterCount ?: cols) / cols
+        (clustmapGrid.layout as GridLayout).let {
+            it.columns = cols
+            it.rows = rows
+        }
+        clustmapGrid.removeAll()
+
+
+        vdisk?.let { vdisk ->
+            for (i in 0 until vdisk.totalClusterCount) {
+                val buttonCol = if (i in 0..1) buttonColourReserved
+                else if (i < vdisk.fatClusterCount + 2) buttonColourFAT
+                else {
+                    if (vdisk.isThisClusterFree(i)) buttonColourFree else buttonColourOccupied
+                }
+
+
+                clustmapGrid.add(JButton().also {
+                    it.text = ""
+                    it.preferredSize = buttonDim
+                    it.background = buttonCol
+                    it.addMouseListener(object : MouseAdapter() {
+                        override fun mousePressed(e: MouseEvent?) {
+                            fileDesc.text = getDescForCluster(i)
+                        }
+                    })
+                })
+            }
+        }
+    }
+
+    private fun getDescForCluster(cluster: EntryID): String {
+        val ret = "Cluster: #${cluster + 1} (${cluster.toHex()})"
+        return if (vdisk == null) ret
+        else if (cluster == 0) "$ret\n(header)"
+        else if (cluster == 1) "$ret\n(bootsector)"
+        else if (cluster < vdisk!!.fatClusterCount + 2) "$ret\n(file allocation table)"
+        else {
+            vdisk!!.ARCHIVE.seekToCluster(cluster)
+            val bytes = vdisk!!.ARCHIVE.read(CLUSTER_SIZE)
+            val prev = bytes.toInt24(2).let { if (it == 0) null else it }
+            val next = bytes.toInt24(5).let { if (it == 0xFFFFFF) null else it }
+            ret + """
+Prev Chain: ${if (prev == null) "—" else "#${prev+1} (${prev.toHex()})"}
+Next Chain: ${if (next == null) "—" else "#${next+1} (${next.toHex()})"}
+Flag1: ${bytes[0].toUint().toString(2).padStart(8, '0')}
+Flag2: ${bytes[1].toUint().toString(2).padStart(8, '0')}
+Contents:
+${bytes.sliceArray(8 until CLUSTER_SIZE).toString(vdisk!!.charset)}
+"""
+        }
     }
 
     private fun confirmedDiscard() = 0 == JOptionPane.showOptionDialog(
@@ -1158,6 +1234,9 @@ class VirtualDiskCrackerClustered() : JFrame() {
         rebuildTableEntries()
         tableEntries.revalidate()
         tableEntries.repaint()
+
+
+        rebuildClustmap()
     }
     private fun getDiskInfoText(disk: ClusteredFormatDOM): String {
         return """Name: ${disk.diskNameString} (UUID: ${disk.uuid})
