@@ -1114,12 +1114,11 @@ class VirtualDiskCrackerClustered() : JFrame() {
     private val buttonColourFree = Color(0xfafafa)
     private val buttonColourOccupied = listOf(
             4086 to Color(0xff0d89),
-            3405 to Color(0xff5899),
-            2724 to Color(0xff7daa),
-            2043 to Color(0xff9bba),
-            1362 to Color(0xffb6cb),
-            681 to Color(0xfed0dc),
-            1 to Color(0xfee8ee),
+            3269 to Color(0xff5899),
+            2452 to Color(0xff7daa),
+            1635 to Color(0xff9bba),
+            818 to Color(0xffb6cb),
+            1 to Color(0xfed0dc),
     )
     private fun contentsSizeToButtonColour(i: Int): Color {
         for (kv in buttonColourOccupied) {
