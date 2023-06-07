@@ -1113,6 +1113,7 @@ class VirtualDiskCrackerClustered() : JFrame() {
     private val buttonColourOccupied = Color(0xed6d9a)
     private val buttonColourFAT = Color(0x29bb6e)
     private val buttonColourReserved = Color(0x16a7fa)
+    private val buttonColourVirtual = Color(0xece8d9)
     private val buttonDim = Dimension(16, 16)
 
     private fun rebuildClustmap() {
@@ -1130,6 +1131,7 @@ class VirtualDiskCrackerClustered() : JFrame() {
             for (i in 0 until vdisk.totalClusterCount) {
                 val buttonCol = if (i in 0..1) buttonColourReserved
                 else if (i < vdisk.fatClusterCount + 2) buttonColourFAT
+                else if (i >= vdisk.ARCHIVE.length() / CLUSTER_SIZE) buttonColourVirtual
                 else {
                     if (vdisk.isThisClusterFree(i)) buttonColourFree else buttonColourOccupied
                 }
@@ -1155,6 +1157,7 @@ class VirtualDiskCrackerClustered() : JFrame() {
         else if (cluster == 0) "$ret\n(header)"
         else if (cluster == 1) "$ret\n(bootsector)"
         else if (cluster < vdisk!!.fatClusterCount + 2) "$ret\n(file allocation table)"
+        else if (cluster >= vdisk!!.ARCHIVE.length() / CLUSTER_SIZE) "$ret\n(trimmed)"
         else {
             vdisk!!.ARCHIVE.seekToCluster(cluster)
             val bytes = vdisk!!.ARCHIVE.read(CLUSTER_SIZE)
