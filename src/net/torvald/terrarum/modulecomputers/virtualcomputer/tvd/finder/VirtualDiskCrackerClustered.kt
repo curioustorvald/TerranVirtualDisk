@@ -114,6 +114,8 @@ class VirtualDiskCrackerClustered() : JFrame() {
     private val inEntriesMode: Boolean
         get() = panelFinderTab.selectedIndex == 1
 
+    private val isMacos = UIManager.getSystemLookAndFeelClassName().startsWith("com.apple.")
+
     init {
 
         if (annoyHackers) {
@@ -122,8 +124,6 @@ class VirtualDiskCrackerClustered() : JFrame() {
                 System.exit(1)
             }
         }
-
-
 
         panelMain.layout = BorderLayout()
         this.defaultCloseOperation = EXIT_ON_CLOSE
@@ -1185,6 +1185,8 @@ class VirtualDiskCrackerClustered() : JFrame() {
                     it.text = ""
                     it.preferredSize = buttonDim
                     it.background = buttonCol
+                    it.isOpaque = true
+                    it.isBorderPainted = !isMacos // the default "Metal" L&F is not compatible with macOS
                     it.addMouseListener(object : MouseAdapter() {
                         override fun mousePressed(e: MouseEvent?) {
                             fileDesc.text = getDescForCluster(i)
