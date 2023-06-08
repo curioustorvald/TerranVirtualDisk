@@ -67,11 +67,16 @@ class VirtualDiskCrackerClustered() : JFrame() {
 
 
 
+    private fun deselect() {
+        selectedFile = null
+        fileDesc.text = ""
+        tableFiles.clearSelection()
+        tableEntries.clearSelection()
+    }
     private fun gotoSubDirectory(file: Clustfile) {
         directoryHierarchy.push(file)
         labelPath.text = file.name
-        selectedFile = null
-        fileDesc.text = ""
+        deselect()
         updateDiskInfo()
     }
     val currentDirectory: Clustfile
@@ -82,15 +87,13 @@ class VirtualDiskCrackerClustered() : JFrame() {
     private fun gotoRoot() {
         directoryHierarchy.removeAllElements()
         directoryHierarchy.push(rootFile)
-        selectedFile = null
-        fileDesc.text = ""
+        deselect()
         updateDiskInfo()
     }
     private fun gotoParent() {
         if (directoryHierarchy.size > 1)
             directoryHierarchy.pop()
-        selectedFile = null
-        fileDesc.text = ""
+        deselect()
         updateDiskInfo()
     }
 
@@ -692,6 +695,7 @@ class VirtualDiskCrackerClustered() : JFrame() {
                             if (it) {
                                 updateDiskInfo()
                                 setStat("File deleted")
+                                deselect()
                             }
                             else {
                                 popupError("Trying to delete the file that does not actually exists (perhaps there is a bug in this app)")
@@ -790,7 +794,7 @@ class VirtualDiskCrackerClustered() : JFrame() {
                             fileChooser.showOpenDialog(null)
                             if (fileChooser.selectedFiles.isNotEmpty()) {
                                 try {
-                                    fileChooser.selectedFiles.forEach {
+                                    for (it in fileChooser.selectedFiles) {
                                         var entry = Clustfile(vdisk!!, currentDirectory, it.name)
 
                                         // check the name collision. If there is a collision, ask for a new one
@@ -806,14 +810,16 @@ class VirtualDiskCrackerClustered() : JFrame() {
 
                                         entry.importFrom(it)
                                         currentDirectory.addChild(entry)
-
                                     }
-                                    updateDiskInfo()
                                     setStat("File(s) imported")
                                 }
                                 catch (e: Exception) {
+                                    setStat("File(s) import failed")
                                     e.printStackTrace()
                                     popupError(e.toString())
+                                }
+                                finally {
+                                    updateDiskInfo()
                                 }
                             }
 
@@ -1319,16 +1325,30 @@ Bootable: ${disk.readBoot().isBootable()}"""
     private fun rebuildTableEntries() {
         tableEntriesRecord = if (vdisk != null) {
             vdisk!!.fileTable.toTypedArray().map { entry ->
-                arrayOf(
-                    entry.filename,
-                    entry.entryID.toHex() + " (${entry.indexInFAT})",
-                    entry.fileType.toFileTypeString(),
-                    vdisk!!.getFileLength(entry).toString(),
-                    Instant.ofEpochSecond(entry.creationDate).atZone(TimeZone.getDefault().toZoneId()).format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")),
-                    Instant.ofEpochSecond(entry.modificationDate).atZone(TimeZone.getDefault().toZoneId()).format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")),
-                    entry.extendedEntries.size.toString(),
-                    entry.entryID.toString()
-                )
+                try {
+                    arrayOf(
+                            entry.filename,
+                            entry.entryID.toHex() + " (${entry.indexInFAT})",
+                            entry.fileType.toFileTypeString(),
+                            vdisk!!.getFileLength(entry).toString(),
+                            Instant.ofEpochSecond(entry.creationDate).atZone(TimeZone.getDefault().toZoneId()).format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")),
+                            Instant.ofEpochSecond(entry.modificationDate).atZone(TimeZone.getDefault().toZoneId()).format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")),
+                            entry.extendedEntries.size.toString(),
+                            entry.entryID.toString()
+                    )
+                }
+                catch (e: InternalError) {
+                    arrayOf(
+                            entry.filename,
+                            entry.entryID.toHex() + " (${entry.indexInFAT})",
+                            entry.fileType.toFileTypeString(),
+                            "n/a",
+                            Instant.ofEpochSecond(entry.creationDate).atZone(TimeZone.getDefault().toZoneId()).format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")),
+                            Instant.ofEpochSecond(entry.modificationDate).atZone(TimeZone.getDefault().toZoneId()).format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")),
+                            entry.extendedEntries.size.toString(),
+                            entry.entryID.toString()
+                    )
+                }
             }.toTypedArray()
         }
         else {
