@@ -39,7 +39,7 @@ class ClusteredFormatArchiver(val dom: ClusteredFormatDOM?) : Archiver() {
      * @param charset does nothing; charset info is stored in the archive itself
      */
     override fun deserialize(file: File, charset: Charset?): ClusteredFormatDOM {
-        return ClusteredFormatDOM(RandomAccessFile(file, "rw"))
+        return ClusteredFormatDOM(RandomAccessFile(file, "rwd"))
     }
 
     companion object {
@@ -97,7 +97,21 @@ private fun ByteArray.renumCluster(increment: Int): ByteArray {
     return this
 }
 
+/**
+ * @param ARCHIVE an [RandomAccessFile] to the disk archive. Use read mode "rw" to make the disk read-only
+ * @param throwErrorOnReadError If non-critical anomalies were detected, setting this option to `true` will raise an
+ * error instead of discarding the offending entry. Default is `false`
+ */
 class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorOnReadError: Boolean = false) {
+
+    private inline fun <reified T> Any.extortField(name: String): T? { // yes I'm deliberately using negative words for the function name
+        return this.javaClass.getDeclaredField(name).let {
+            it.isAccessible = true
+            it.get(this) as T?
+        }
+    }
+
+    val isArchiveReadOnly = ARCHIVE.extortField<Boolean>("rw") == false
 
     private inline fun testPause(msg: Any?) {
 //        dbgprintln("\n\n== $msg ==\n\n"); dbgprint("> "); Scanner(System.`in`).nextLine()

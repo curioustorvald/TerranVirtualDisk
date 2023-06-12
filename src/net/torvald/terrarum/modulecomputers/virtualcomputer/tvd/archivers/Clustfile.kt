@@ -356,7 +356,7 @@ open class Clustfile(private val DOM: ClusteredFormatDOM, absolutePath: String) 
 
 
     open fun canRead() = true
-    open fun canWrite() = (FAT?.readOnly == false)
+    open fun canWrite() = (FAT?.readOnly == false && !DOM.isArchiveReadOnly)
     open fun exists() = (FAT != null)
     open val isDirectory; get() = (exists() && type == FILETYPE_DIRECTORY)
     open val isFile; get() = (exists() && type == FILETYPE_BINARY)
