@@ -526,6 +526,44 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
             ARCHIVE.seek(47L); ARCHIVE.write(primaryAttribs)
         }
 
+    /**
+     * @param A function that takes following arguments and returns nothing:
+     *  - FATEntry (written file)
+     *  - List<Int> (old cluster chain of the file before writing, may indicate inlined file)
+     *  - List<Int> (new cluster chain of the file after writing, may NOT indicate inlined-ness)
+     */
+    var fileWriteHook: (FATEntry, List<EntryID>, List<EntryID>) -> Unit = { _,_,_ -> }
+
+    /**
+     * @param A function that takes following arguments and returns nothing:
+     *  - FATEntry (deleted file)
+     *  - List<Int> (old cluster chain of the file before deletion)
+     */
+    var fileDeleteHook: (FATEntry, List<EntryID>) -> Unit = { _,_ -> }
+
+    /**
+     * @param A function that takes following arguments and returns nothing:
+     *  - FATEntry (length-modified file)
+     *  - List<Int> (old cluster chain of the file before modification, may indicate inlined file)
+     *  - List<Int> (new cluster chain of the file after modification, may indicate inlined file if the file was inlined)
+     */
+    var fileLengthChangeHook: (FATEntry, List<EntryID>, List<EntryID>) -> Unit = { _,_,_ -> }
+
+    /**
+     * @param A function that takes following arguments and returns nothing:
+     *  - Int (the head cluster number of the newly-added clusters)
+     *  - Int (how many clusters were added)
+     */
+    var archiveExpandHook: (EntryID, Int) -> Unit = { _,_ -> }
+
+    /**
+     * Following operations will NOT invoke this hook:
+     * - [writeBoot]
+     */
+    var diskModifiedHook: () -> Unit = {}
+
+    var bootloaderWriteHook: () -> Unit = {}
+
     /*private var isFixedSize: Boolean
         get() = primaryAttribs.and(0x10) != 0
         set(value) {
@@ -539,12 +577,16 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
             ba[k] = if (k < ba.size) diskName[k] else 0
         }
         diskNameString = ba.toCanonicalString(charset)
+
+        diskModifiedHook()
     }
 
     fun changeDiskCapacity(clusterCount: Int) {
         diskSize = clusterCount * 4L
         ARCHIVE.seek(4L)
         ARCHIVE.writeInt48(diskSize)
+
+        diskModifiedHook()
     }
 
     var diskNameString: String = ""
@@ -742,6 +784,8 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
         ARCHIVE.seek(64L)
         ARCHIVE.writeInt32(fatClusterCount)
 
+
+        diskModifiedHook()
     }
 
     private fun fatmgrUpdateModificationDate(entry: FATEntry, time: Long) {
@@ -1000,6 +1044,12 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
         return fileTable[rootDirClusterID] ?: throw NullPointerException("ID ${(rootDirClusterID).toHex()} is not a root directory")
     }
 
+    private fun FATEntry.getClusterChain(): List<Int> {
+        val chain = ArrayList<EntryID>()
+        traverseClusters(this.entryID) { chain.add(it) }
+        return chain
+    }
+
     /**
      * Mark the cluster and the FAT entry as to-be-deleted. Cluster and FAT changes will be written to the Archive.
      * Deleted FAT will remain on the fileTable; use `fatmgrRewriteFAT()` to purge them.
@@ -1025,6 +1075,9 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
             fatmgrDeleteEntry(fat)
         }
 
+
+        fileDeleteHook(fat, fat.getClusterChain())
+        diskModifiedHook()
     }
 
     /**
@@ -1047,6 +1100,11 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
 
                 dbgprintln("[Clustered.allocateFile] file allocated inline: ${it.entryID.toHex()} at index ${it.indexInFAT}")
 
+
+
+                fileWriteHook(it, emptyList(), it.getClusterChain())
+                diskModifiedHook()
+
                 return it
             }
         }
@@ -1059,9 +1117,15 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
 
                 dbgprintln("[Clustered.allocateFile] file allocated: ${it.entryID.toHex()} at index ${it.indexInFAT}")
 
+
+                fileWriteHook(it, emptyList(), it.getClusterChain())
+                diskModifiedHook()
+
                 return it
             }
         }
+
+
     }
 
     /**
@@ -1166,6 +1230,8 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
 
         dbgprintln("[Clustered.expandArchive] archiveSizeInClusters now = $archiveSizeInClusters")
 
+        archiveExpandHook(newPtr, clusterCount)
+
         return newPtr
     }
 
@@ -1175,7 +1241,7 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
     fun growFAT(): Int {
         val nextFatSize = (rootDirClusterID) * 2 - 2
         val fatSizeDelta = nextFatSize - fatClusterCount
-        renum(fatSizeDelta)
+        renum(fatSizeDelta) // implies diskModifiedHook() and if applicable, archiveExpandHook()
         return fatSizeDelta
     }
 
@@ -1306,6 +1372,9 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
             fatmgrSetInlineBytes(inlinedFile, fileBytes, (inlinedFile.fileType == FILETYPE_DIRECTORY))
             fatmgrUpdateModificationDate(inlinedFile, getTimeNow())
 
+
+            fileWriteHook(inlinedFile, listOf(inlinedFile.entryID), listOf(inlinedFile.entryID))
+            diskModifiedHook()
         }
         // un-inline the file
         else {
@@ -1349,6 +1418,8 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
         checkDiskCapacity(addedBytes)
 
         if (entry.isInline && !forceUninline) return writeBytesInline(entry, buffer, bufferOffset, writeLength, writeStartOffset)
+
+        val oldChain = entry.getClusterChain()
 
         var writeCursor = writeStartOffset
         var remaining = writeLength.toLong()
@@ -1452,6 +1523,10 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
             val timeNow = getTimeNow()
             fatmgrUpdateModificationDate(entry, timeNow)
         }
+
+
+        fileWriteHook(entry, oldChain, entry.getClusterChain())
+        diskModifiedHook()
     }
 
     fun readBytesInline(entry: FATEntry, buffer: ByteArray, bufferOffset: Int, readLength: Int, readStartOffset: Int): Int {
@@ -1592,6 +1667,7 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
 
         var remaining = newLength
 
+        val oldChain = entry.getClusterChain()
         var parent = HEAD_CLUSTER
         var cluster = entry.entryID
 
@@ -1630,6 +1706,10 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
         } while (cluster != LEAF_CLUSTER)
 
         fatmgrUpdateModificationDate(entry, getTimeNow())
+
+
+        fileLengthChangeHook(entry, oldChain, entry.getClusterChain())
+        diskModifiedHook()
     }
 
     /**
@@ -1737,7 +1817,7 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
      * Build map of freeClusters, actually trim the archive, then removes any numbers in freeClusters
      * that points outside of the archive.
      */
-    fun trimArchive() {
+    private fun trimArchive0() {
         dbgprintln("[Clustered.trimArchive] archiveSizeInClusters before = ${archiveSizeInClusters.toHex()}")
         dbgprintln("[Clustered.trimArchive] freeClusters before: ${freeClusters.sortedDescending().map { it.toHex() }}")
 
@@ -1788,6 +1868,15 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
     var defragInterruptRequested = false
 
     /**
+     * Build map of freeClusters, actually trim the archive, then removes any numbers in freeClusters
+     * that points outside of the archive.
+     */
+    fun trimArchive() {
+        trimArchive0()
+        diskModifiedHook()
+    }
+
+    /**
      * Trims the archive (running [trimArchive]) then frees any clusters that are marked as discarded, then fills the
      * "gaps" made by those free clusters by moving last clusters on the disk into these "gaps".
      *
@@ -1795,7 +1884,7 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
      */
     fun defrag(option: Int = 0): List<Pair<EntryID, EntryID>> {
         defragInterruptRequested = false
-        trimArchive() // will build freeClusters map if the map is empty
+        trimArchive0() // will build freeClusters map if the map is empty
 
         val workReport = ArrayList<Pair<EntryID, EntryID>>()
 
@@ -1807,7 +1896,10 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
             workReport.add(src to target)
         }
 
-        freeClusters.clear(); trimArchive()
+        freeClusters.clear(); trimArchive0()
+
+
+        diskModifiedHook()
 
         return workReport
     }
@@ -2044,6 +2136,8 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
         code.padEnd(CLUSTER_SIZE).let {
             ARCHIVE.write(it, 0, minOf(it.size, CLUSTER_SIZE))
         }
+
+        bootloaderWriteHook()
     }
 
     val totalSpace: Long; get() = diskSize
