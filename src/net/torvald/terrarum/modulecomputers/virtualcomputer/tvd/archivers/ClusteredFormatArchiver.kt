@@ -104,14 +104,14 @@ private fun ByteArray.renumCluster(increment: Int): ByteArray {
  */
 class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorOnReadError: Boolean = false) {
 
-    private inline fun <reified T> Any.extortField(name: String): T? { // yes I'm deliberately using negative words for the function name
+    /*private inline fun <reified T> Any.extortField(name: String): T? { // yes I'm deliberately using negative words for the function name
         return this.javaClass.getDeclaredField(name).let {
             it.isAccessible = true
             it.get(this) as T?
         }
-    }
+    }*/
 
-    val isArchiveReadOnly = ARCHIVE.extortField<Boolean>("rw") == false
+    val isArchiveReadOnly = false//ARCHIVE.extortField<Boolean>("rw") == false
 
     private inline fun testPause(msg: Any?) {
 //        dbgprintln("\n\n== $msg ==\n\n"); dbgprint("> "); Scanner(System.`in`).nextLine()
@@ -1045,6 +1045,9 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
     }
 
     private fun FATEntry.getClusterChain(): List<Int> {
+        if (this.isInline) {
+            return listOf(this.entryID)
+        }
         val chain = ArrayList<EntryID>()
         traverseClusters(this.entryID) { chain.add(it) }
         return chain
