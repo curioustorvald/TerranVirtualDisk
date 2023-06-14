@@ -1937,7 +1937,7 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
         return freeClusters.sorted()
     }
 
-    internal fun contentSizeInThisCluster(clusterNum: Int): Int {
+    fun contentSizeInThisCluster(clusterNum: Int): Int {
         if (isThisClusterVacant(clusterNum)) return 0
         else {
             ARCHIVE.read(6)
@@ -2149,6 +2149,7 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
     val usableSpace: Long; get() = diskSize - ARCHIVE.length()
 
     val totalClusterCount: Int; get() = (diskSize / CLUSTER_SIZE.toLong()).toInt()
+    val usedClusterCount: Int; get() = archiveSizeInClusters
     val freeClusterCount: Int; get() = totalClusterCount - archiveSizeInClusters
     val clusterSize: Int = CLUSTER_SIZE
 
