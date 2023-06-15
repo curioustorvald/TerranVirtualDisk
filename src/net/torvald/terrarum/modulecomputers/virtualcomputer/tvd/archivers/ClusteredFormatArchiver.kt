@@ -2400,24 +2400,37 @@ fun RandomAccessFile.readInt64(): Long {
     return buffer.toInt64()
 }
 fun RandomAccessFile.seekToCluster(clusterNum: Int) {
+    if (clusterNum < 0) throw IllegalArgumentException("Negative Cluster number ($clusterNum)")
+    if (clusterNum >= INLINE_FILE_CLUSTER_BASE) throw IllegalArgumentException("Cannot seek to inlined cluster (${clusterNum.toHex()})")
     this.seek(CLUSTER_SIZE * clusterNum.toLong())
 }
 fun RandomAccessFile.seekToCluster(clusterNum: Long) {
+    if (clusterNum < 0) throw IllegalArgumentException("Negative Cluster number ($clusterNum)")
+    if (clusterNum >= INLINE_FILE_CLUSTER_BASE) throw IllegalArgumentException("Cannot seek to inlined cluster (${clusterNum.toHex()})")
     this.seek(CLUSTER_SIZE * clusterNum)
 }
 fun RandomAccessFile.seekToCluster(clusterNum: Int, offset: Int) {
+    if (clusterNum < 0) throw IllegalArgumentException("Negative Cluster number ($clusterNum)")
+    if (clusterNum >= INLINE_FILE_CLUSTER_BASE) throw IllegalArgumentException("Cannot seek to inlined cluster (${clusterNum.toHex()})")
     this.seek(CLUSTER_SIZE * clusterNum.toLong() + offset)
 }
 fun RandomAccessFile.seekToCluster(clusterNum: Int, offset: Long) {
+    if (clusterNum < 0) throw IllegalArgumentException("Negative Cluster number ($clusterNum)")
+    if (clusterNum >= INLINE_FILE_CLUSTER_BASE) throw IllegalArgumentException("Cannot seek to inlined cluster (${clusterNum.toHex()})")
     this.seek(CLUSTER_SIZE * clusterNum.toLong() + offset)
 }
 fun RandomAccessFile.seekToCluster(clusterNum: Long, offset: Int) {
+    if (clusterNum < 0) throw IllegalArgumentException("Negative Cluster number ($clusterNum)")
+    if (clusterNum >= INLINE_FILE_CLUSTER_BASE) throw IllegalArgumentException("Cannot seek to inlined cluster (${clusterNum.toHex()})")
     this.seek(CLUSTER_SIZE * clusterNum + offset)
 }
 fun RandomAccessFile.seekToCluster(clusterNum: Long, offset: Long) {
+    if (clusterNum < 0) throw IllegalArgumentException("Negative Cluster number ($clusterNum)")
+    if (clusterNum >= INLINE_FILE_CLUSTER_BASE) throw IllegalArgumentException("Cannot seek to inlined cluster (${clusterNum.toHex()})")
     this.seek(CLUSTER_SIZE * clusterNum + offset)
 }
 fun RandomAccessFile.seekToFAT(index: Int, offset: Int = 0) {
+    if (index < 0) throw IllegalArgumentException("Negative FAT index ($index)")
     this.seek(2L * CLUSTER_SIZE + index * FAT_ENTRY_SIZE + offset)
 }
 fun RandomAccessFile.writeInt16(value: Int) {
