@@ -1418,6 +1418,7 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
      * The Clustfile must update its FAT reference after this function call.
      */
     fun writeBytes(entry: FATEntry, buffer: ByteArray, bufferOffset: Int, writeLength: Int, writeStartOffset: Long, forceUninline: Boolean = false) {
+        if (writeLength <= 0) return
         if (entry.fileType == 0) throw UnsupportedOperationException("FAT has no file type set (${entry.fileType})")
 
         dbgprintln2("[Clustered.writeBytes] Writebytes FAT=$entry, writeLength=$writeLength, writeStartOffset=$writeStartOffset")
