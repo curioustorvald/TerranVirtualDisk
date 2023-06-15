@@ -113,20 +113,26 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
 
     val isArchiveReadOnly = false//ARCHIVE.extortField<Boolean>("rw") == false
 
+    private var DBG = false
+
+    private fun bbbb(b: String) {
+        DBG = (b.trim().toLowerCase().equals("true"))
+    }
+
     private inline fun testPause(msg: Any?) {
 //        dbgprintln("\n\n== $msg ==\n\n"); dbgprint("> "); Scanner(System.`in`).nextLine()
     }
 
     private inline fun dbgprint(msg: Any? = "") {
-//        print(msg)
+        if (DBG) print(msg)
     }
 
     private inline fun dbgprintln(msg: Any? = "") {
-//        println(msg)
+        if (DBG) println(msg)
     }
 
     private inline fun dbgprintln2(msg: Any? = "") {
-//        println(msg)
+        if (DBG) println(msg)
     }
 
     companion object {
@@ -1138,19 +1144,19 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
      * @return Cluster ID of the head of the new cluster; `LEAF_CLUSTER` if sizeDelta < 0; `currentCluster` if sizeDelta == 0
      */
     private fun expandFile(sizeDelta: Long, prevCluster: Int, currentCluster: Int, fileType: Int): Int {
-        dbgprintln("[Clustered] expandFile(sizeDelta=$sizeDelta, prevCluster=$prevCluster, currentCluster=$currentCluster, fileType=$fileType)")
+        dbgprintln("[Clustered.expandFile] expandFile(sizeDelta=$sizeDelta, prevCluster=$prevCluster, currentCluster=$currentCluster, fileType=$fileType)")
 
         if (fileType == 0) throw UnsupportedOperationException("Invalid file type: $fileType")
 
         if (sizeDelta < 0) return LEAF_CLUSTER
         if (sizeDelta == 0L) return currentCluster
 
-        val clustersToAdd = ceil(sizeDelta.toDouble() / CLUSTER_SIZE).toInt()
+        val clustersToAdd = ceil(sizeDelta.toDouble() / FILE_BLOCK_CONTENTS_SIZE).toInt()
         val nextCluster = expandArchive(clustersToAdd)
 
         // expanding on existing
         if (nextCluster != currentCluster) {
-            dbgprintln("[Clustered] expand on existing cluster? (currentCluster=$currentCluster, nextCluster=$nextCluster)")
+            dbgprintln("[Clustered.expandFile] expand on existing cluster? (currentCluster=$currentCluster, nextCluster=$nextCluster)")
 
             // set the next cluster (previously 0xFFFFFF)
             ARCHIVE.seekToCluster(currentCluster, 5)
@@ -1163,12 +1169,12 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
         val sizeNumToWrite = minOf(FILE_BLOCK_CONTENTS_SIZE.toLong(), currentContentSize + sizeDelta)
         val sizeDiscount = sizeNumToWrite - currentContentSize
 
-        dbgprintln("[Clustered] sizeNumToWrite=$sizeNumToWrite, currentContentSize=$currentContentSize, sizeDiscount=$sizeDiscount")
+        dbgprintln("[Clustered.expandFile] sizeNumToWrite=$sizeNumToWrite, currentContentSize=$currentContentSize, sizeDiscount=$sizeDiscount")
 
         ARCHIVE.seekToCluster(currentCluster, FILE_BLOCK_OFFSET_CONTENT_LEN)
         ARCHIVE.writeInt16(sizeNumToWrite.toInt())
 
-        dbgprintln("[Clustered] expandFile -- writing contentSize $sizeNumToWrite to cluster ${currentCluster.toHex()}")
+        dbgprintln("[Clustered.expandFile] expandFile -- writing contentSize $sizeNumToWrite to cluster ${currentCluster.toHex()}")
 
         if (nextCluster != currentCluster)
             initClusters(sizeDelta - sizeDiscount, currentCluster, nextCluster, clustersToAdd, fileType)
@@ -1190,7 +1196,7 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
             ARCHIVE.seekToCluster(ptrs[k+1])
             ARCHIVE.write(byteArrayOf(fileType.toByte(), 0) + ptrs[k].toInt24Arr() + ptrs[k+2].toInt24Arr())
 
-            dbgprintln("[Clustered] initClusters -- cluster ${ptrs[k+1].toHex()}: writing prevPtr ${ptrs[k].toHex()}, nextPtr ${ptrs[k+2].toHex()}")
+            dbgprintln("[Clustered.initClusters] initClusters -- cluster ${ptrs[k+1].toHex()}: writing prevPtr ${ptrs[k].toHex()}, nextPtr ${ptrs[k+2].toHex()}")
 
             // write content size for the clusters
             val currentContentSize = ARCHIVE.readUshortBig()
@@ -1199,7 +1205,7 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
             ARCHIVE.seekToCluster(ptrs[k+1], FILE_BLOCK_OFFSET_CONTENT_LEN)
             ARCHIVE.writeInt16(sizeNumToWrite.toInt())
 
-            dbgprintln("[Clustered] initClusters -- writing contentSize $sizeNumToWrite to cluster ${ptrs[k+1].toHex()}")
+            dbgprintln("[Clustered.initClusters] initClusters -- writing contentSize $sizeNumToWrite to cluster ${ptrs[k+1].toHex()}")
 
             freeClusters.remove(ptrs[k+1])
         }
@@ -1414,7 +1420,7 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
     fun writeBytes(entry: FATEntry, buffer: ByteArray, bufferOffset: Int, writeLength: Int, writeStartOffset: Long, forceUninline: Boolean = false) {
         if (entry.fileType == 0) throw UnsupportedOperationException("FAT has no file type set (${entry.fileType})")
 
-        dbgprintln2("[Clustered] Writebytes FAT=$entry, writeLength=$writeLength, writeStartOffset=$writeStartOffset")
+        dbgprintln2("[Clustered.writeBytes] Writebytes FAT=$entry, writeLength=$writeLength, writeStartOffset=$writeStartOffset")
 
         val addedBytes = writeStartOffset + writeLength - getFileLength(entry)
 
@@ -1444,21 +1450,21 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
 
 
         while (writeCursor < writeLength + writeStartOffset) {
-            dbgprintln2("[Clustered] writeCursor = $writeCursor < ${writeLength + writeStartOffset}")
+            dbgprintln2("[Clustered.writeBytes] writeCursor = $writeCursor < ${writeLength + writeStartOffset}")
 
 
             // seek to next cluster
             // if cursorInCluster is larger than FILE_BLOCK_CONTENTS_SIZE, this operation will loop until the file cursor is on the right cluster
             while (cursorInClusterFileArea >= FILE_BLOCK_CONTENTS_SIZE) {
 
-                dbgprintln2("[Clustered]   cursorInClusterFileArea = $cursorInClusterFileArea")
+                dbgprintln2("[Clustered.writeBytes]   cursorInClusterFileArea = $cursorInClusterFileArea")
 
 
                 // if next cluster is NULL,,,
                 if (nextPtr == LEAF_CLUSTER) {
                     // allocate new cluster and then modify the nextPtr on the Archive
                     val sizeDelta = if (addedBytes > 0) addedBytes - writeLength + remaining else remaining
-                    dbgprintln2("[Clustered]   expanding file (sizeDelta=$sizeDelta, prevCluster=$prev, currentCluster=$ptr, fileType=${entry.fileType})")
+                    dbgprintln2("[Clustered.writeBytes]   expanding file (sizeDelta=$sizeDelta, prevCluster=$prev, currentCluster=$ptr, fileType=${entry.fileType})")
                     nextPtr = expandFile(sizeDelta, prev, ptr, entry.fileType)
 
                     firstClusterOfWriting = false
@@ -1493,7 +1499,7 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
                     ).filter { it > 0 }.minOf { it }.toInt()
 
 
-            dbgprintln2("[Clustered] writeLengthOnThisCluster = $writeLengthOnThisCluster (minOf $remaining, ${FILE_BLOCK_CONTENTS_SIZE - cursorInClusterFileArea}, ${FILE_BLOCK_CONTENTS_SIZE - contentsSizeInThisCluster})")
+            dbgprintln2("[Clustered.writeBytes] writeLengthOnThisCluster = $writeLengthOnThisCluster (minOf $remaining, ${FILE_BLOCK_CONTENTS_SIZE - cursorInClusterFileArea}, ${FILE_BLOCK_CONTENTS_SIZE - contentsSizeInThisCluster})")
 
             // actually write
             ARCHIVE.write(buffer, (bufferOffset + writeCursor - writeStartOffset).toInt(), writeLengthOnThisCluster)
@@ -1508,12 +1514,12 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
                                     else
                                         minOf(FILE_BLOCK_CONTENTS_SIZE.toLong(), remaining)
 
-            dbgprintln2("[Clustered] size before: $thisClusterContentsSizeBefore, after: $thisClusterContentsSizeAfter")
+            dbgprintln2("[Clustered.writeBytes] size before: $thisClusterContentsSizeBefore, after: $thisClusterContentsSizeAfter")
 
             if (thisClusterContentsSizeBefore < thisClusterContentsSizeAfter) {
                 ARCHIVE.seekToCluster(ptr, FILE_BLOCK_OFFSET_CONTENT_LEN)
                 ARCHIVE.writeInt16(thisClusterContentsSizeAfter.toInt())
-                dbgprintln2("[Clustered] writeBytes -- writing contentSize $thisClusterContentsSizeAfter to cluster ${ptr.toHex()}")
+                dbgprintln2("[Clustered.writeBytes] writeBytes -- writing contentSize $thisClusterContentsSizeAfter to cluster ${ptr.toHex()}")
             }
             firstClusterOfWriting = false
 
@@ -1636,10 +1642,8 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
      */
     fun readBytes(entry: FATEntry, length: Int, offset: Int): ByteArray {
         dbgprintln2("[Clustered.readBytes] readBytes ptr=${entry.entryID.toHex()}, len=$length")
-        dbgprintln2("[Clustered.readBytes] called by:")
-        Thread.currentThread().stackTrace.forEach {
-            dbgprintln2(" ".repeat(22) + it)
-        }
+        printStackTrace("readBytes", "called by:")
+
 
         val ba = ByteArray(length)
         val actualSize = readBytes(entry, ba, 0, length, offset)
