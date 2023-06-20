@@ -726,6 +726,16 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
         val usedBytes = ARCHIVE.length() + bytesToAdd
         if (usedBytes > diskSize) throw VDIOException("Not enough space on the disk")
     }
+    private fun checkSelfDefrag(bytesToAdd: Long) {
+        val clusterCount = ceil(bytesToAdd.toDouble() / FILE_BLOCK_CONTENTS_SIZE).toInt()
+        if (archiveSizeInClusters + clusterCount > totalClusterCount)
+            defrag(0)
+        if (archiveSizeInClusters + clusterCount > totalClusterCount)
+            throw VDIOException("Not enough space on the disk")
+    }
+    private fun checkArchiveExpandable(clusterCount: Int) {
+        if (archiveSizeInClusters + clusterCount > totalClusterCount) throw VDIOException("Not enough space on the disk")
+    }
 
     /**
      * Shifts the cluster number of every entry to given number, then actually inserts new clusters to the FAT area.
@@ -1097,8 +1107,9 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
         if (fileType != FILETYPE_BINARY && fileType != FILETYPE_DIRECTORY) throw UnsupportedOperationException("Invalid File type: $fileType")
 
         checkDiskCapacity(size)
-        val timeNow = getTimeNow()
+        checkSelfDefrag(size)
 
+        val timeNow = getTimeNow()
         val ptr = if (size <= INLINING_THRESHOLD) getNextFreeInlineCluster() else archiveSizeInClusters
 
         dbgprintln("[Clustered.allocateFile] allocateFile ptr: ${ptr.toHex()}")
@@ -1145,6 +1156,8 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
      */
     private fun expandFile(sizeDelta: Long, prevCluster: Int, currentCluster: Int, fileType: Int): Int {
         dbgprintln("[Clustered.expandFile] expandFile(sizeDelta=$sizeDelta, prevCluster=$prevCluster, currentCluster=$currentCluster, fileType=$fileType)")
+
+        // don't defrag -- the head cluster cannot be altered here; do it on the caller side of this function
 
         if (fileType == 0) throw UnsupportedOperationException("Invalid file type: $fileType")
 
@@ -1230,6 +1243,9 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
     private fun expandArchive(clusterCount: Int): Int {
 
         dbgprintln("[Clustered.expandArchive] expandArchive($clusterCount); archiveSizeInClusters = $archiveSizeInClusters")
+
+        // don't defrag -- head cluster of the expanding file cannot be changed here
+        checkArchiveExpandable(clusterCount)
 
         val newPtr = archiveSizeInClusters
         ARCHIVE.seekToCluster(newPtr.toLong())
