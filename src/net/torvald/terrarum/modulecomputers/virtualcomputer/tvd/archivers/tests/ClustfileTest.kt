@@ -24,14 +24,13 @@ fun main(args: Array<String>) {
 
 
     println("Creating Archive")
-    val diskFile = ClusteredFormatDOM.createNewArchive(archiveFile, charset, "TEST DRIVE 2", 600)
-    val DOM = ClusteredFormatDOM(diskFile)
+    ClusteredFormatDOM.createNewArchive(archiveFile, charset, "TEST DRIVE 2", 600)
 
 
 //    val rootFile = Clustfile(DOM, "/")
 //    println("rootFile.exists = ${rootFile.exists()}")
 
-    val file1 = Clustfile(DOM, "test.txt")
+    val file1 = Clustfile(archiveFile, "test.txt")
     println("Writing...")
 
     file1.overwrite("Testing! This text should be written on the FAT area!".toByteArray(charset)).let {
@@ -49,13 +48,13 @@ fun main(args: Array<String>) {
     println(ClustfileInputStream(file1).readAllBytes().toString(charset))
 
 
-    val root_bin = Clustfile(DOM, "/bin").also {
+    val root_bin = Clustfile(archiveFile, "/bin").also {
         it.mkdir()
     }
 
     testPause("new file '/bin' created; check the archive")
 
-    val root_bin_file = Clustfile(DOM, "/bin/foo.bar").also {
+    val root_bin_file = Clustfile(archiveFile, "/bin/foo.bar").also {
         "println('Hello, world!');return 0;".toByteArray(charset).let { t ->
             it.pwrite(t, 0, t.size, 0)
         }
@@ -65,7 +64,7 @@ fun main(args: Array<String>) {
 
     testPause("")
 
-    val root = Clustfile(DOM, "/").also {
+    val root = Clustfile(archiveFile, "/").also {
         println("Files in '/': ")
         it.listFiles()?.forEach {
             println(it.path + (if (it.isDirectory) "/" else ""))

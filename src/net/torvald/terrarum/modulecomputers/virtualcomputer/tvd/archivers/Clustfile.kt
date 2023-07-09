@@ -13,7 +13,9 @@ import java.nio.ByteBuffer
 /**
  * Created by minjaesong on 2023-04-21.
  */
-open class Clustfile(private val DOM: ClusteredFormatDOM, absolutePath: String) {
+open class Clustfile(private val archive: File, absolutePath: String) {
+
+    private val DOM = DomMgr[archive]
 
     private inline fun dbgprint(msg: Any? = "") {
 //        print(msg)
@@ -44,8 +46,8 @@ open class Clustfile(private val DOM: ClusteredFormatDOM, absolutePath: String) 
     private val type: Int?
         get() = FAT?.fileType
 
-    constructor(DOM: ClusteredFormatDOM, parentFile: Clustfile, childName: String) :
-            this(DOM, parentFile.path + "/" + childName)
+    constructor(archive: File, parentFile: Clustfile, childName: String) :
+            this(archive, parentFile.path + "/" + childName)
 
     init {
         rebuildSelfPath(absolutePath)
@@ -88,7 +90,7 @@ open class Clustfile(private val DOM: ClusteredFormatDOM, absolutePath: String) 
 
         val id = DOM.readBytes(dir, filelen, 0).toInt24()
         val name = DOM.fileTable[id]!!.filename
-        return Clustfile(DOM, this, name)
+        return Clustfile(archive, this, name)
     }
 
     private fun rebuildSelfPath(absolutePath: String) {
@@ -359,7 +361,7 @@ open class Clustfile(private val DOM: ClusteredFormatDOM, absolutePath: String) 
 
     open val name; get() = filename
     open val parent; get() = parentPath
-    open val parentFile; get() = Clustfile(DOM, parentPath)
+    open val parentFile; get() = Clustfile(archive, parentPath)
     open val path; get() = fullpath
 
 
@@ -391,7 +393,7 @@ open class Clustfile(private val DOM: ClusteredFormatDOM, absolutePath: String) 
         if (!exists()) return arrayOf<Clustfile>()
         return getDirListing(this.FAT!!)?.map { id -> DOM.getFile(id)!! }?.filter { fat -> !fat.deleted }?.mapNotNull { fat ->
             val fullFilePath = "${this.fullpath}/${fat.filename}"
-            if (nameFilter(fullFilePath)) Clustfile(DOM, fullFilePath) else null
+            if (nameFilter(fullFilePath)) Clustfile(archive, fullFilePath) else null
         }?.toTypedArray()
     }
 
@@ -480,8 +482,8 @@ open class Clustfile(private val DOM: ClusteredFormatDOM, absolutePath: String) 
 
     open fun renameTo(dest: Clustfile): Boolean {
 
-        val destParent = Clustfile(DOM, dest.parentPath)
-        val thisParent = Clustfile(DOM, parentPath)
+        val destParent = Clustfile(archive, dest.parentPath)
+        val thisParent = Clustfile(archive, parentPath)
 
         return continueIfTrue {
             if (!destParent.exists()) {
@@ -718,7 +720,7 @@ open class Clustfile(private val DOM: ClusteredFormatDOM, absolutePath: String) 
             // return conditions
             if (!externalFile.isDirectory) {
                 // if not a directory, add to node
-                val importedFile = Clustfile(DOM, node, externalFile.name).also {
+                val importedFile = Clustfile(archive, node, externalFile.name).also {
                     dbgprintln("[Clustfile.importDirFrom]     mkfile ${it.fullpath}")
                     it.importFileFrom(externalFile)
                 }
@@ -728,7 +730,7 @@ open class Clustfile(private val DOM: ClusteredFormatDOM, absolutePath: String) 
             // recurse
             else {
                 // mkdir
-                val newDir = Clustfile(DOM, node, externalFile.name).also {
+                val newDir = Clustfile(archive, node, externalFile.name).also {
                     dbgprintln("[Clustfile.importDirFrom]     mkdir ${it.fullpath}")
                     it.mkdirs()
                 }
