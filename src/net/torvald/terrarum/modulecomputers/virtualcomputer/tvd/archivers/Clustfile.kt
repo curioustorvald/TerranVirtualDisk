@@ -267,8 +267,17 @@ open class Clustfile(private val DOM: ClusteredFormatDOM, absolutePath: String) 
         }
     }
 
+    /**
+     * Returns the entire bytes of the file.
+     * @throws IllegalStateException if the file is directory
+     */
     open fun readBytes(): ByteArray = ClustfileInputStream(this).readAllBytes()
-    open fun writeBytes(ba: ByteArray) = ClustfileOutputStream(this).write(ba)
+
+    /**
+     * Replaces the content of the file with given bytes.
+     * @throws IllegalStateException if the file is directory
+     */
+    open fun writeBytes(ba: ByteArray) = if (isDirectory) throw IllegalStateException() else overwrite(ba)
 
 
 
@@ -539,6 +548,9 @@ open class Clustfile(private val DOM: ClusteredFormatDOM, absolutePath: String) 
     open val usedSpace; get() = DOM.usedSpace
     open val usableSpace; get() = DOM.usableSpace
 
+    open fun setFileLength(newlength: Long) {
+        DOM.setFileLength(FAT!!, newlength)
+    }
 
 
 

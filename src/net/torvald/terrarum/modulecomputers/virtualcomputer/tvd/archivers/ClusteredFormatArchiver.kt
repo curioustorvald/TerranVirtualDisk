@@ -1117,10 +1117,9 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
         if (ptr in INLINE_FILE_CLUSTER_BASE..INLINE_FILE_CLUSTER_LAST) {
             fatmgrCreateNewEntry(ptr, filename, false, false, false, false, timeNow, timeNow, fileType).let {
                 fatmgrAllocateInlineFile(it, size)
+                fatmgrRewriteAllFAT()
 
                 dbgprintln("[Clustered.allocateFile] file allocated inline: ${it.entryID.toHex()} at index ${it.indexInFAT}")
-
-
 
                 fileWriteHook(it, emptyList(), it.getClusterChain())
                 diskModifiedHook()
@@ -1135,8 +1134,8 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
                     expandFile(size, HEAD_CLUSTER, ptr, fileType)
                 }
 
-                dbgprintln("[Clustered.allocateFile] file allocated: ${it.entryID.toHex()} at index ${it.indexInFAT}")
 
+                dbgprintln("[Clustered.allocateFile] file allocated: ${it.entryID.toHex()} at index ${it.indexInFAT}")
 
                 fileWriteHook(it, emptyList(), it.getClusterChain())
                 diskModifiedHook()
@@ -1475,16 +1474,20 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
             while (cursorInClusterFileArea >= FILE_BLOCK_CONTENTS_SIZE) {
 
                 dbgprintln2("[Clustered.writeBytes]   cursorInClusterFileArea = $cursorInClusterFileArea")
+                dbgprintln2("[Clustered.writeBytes]   nextPtr = ${nextPtr.toHex()}")
 
 
                 // if next cluster is NULL,,,
                 if (nextPtr == LEAF_CLUSTER) {
                     // allocate new cluster and then modify the nextPtr on the Archive
-                    val sizeDelta = if (addedBytes > 0) addedBytes - writeLength + remaining else remaining
+                    dbgprintln2("[Clustered.writeBytes]   addedBytes=$addedBytes, writeLength=$writeLength, remaining=$remaining")
+                    val sizeDelta = remaining
                     dbgprintln2("[Clustered.writeBytes]   expanding file (sizeDelta=$sizeDelta, prevCluster=$prev, currentCluster=$ptr, fileType=${entry.fileType})")
                     nextPtr = expandFile(sizeDelta, prev, ptr, entry.fileType)
 
                     firstClusterOfWriting = false
+
+                    dbgprintln2("[Clustered.writeBytes]   new nextPtr = ${nextPtr.toHex()}")
                 }
                 ptr = nextPtr
                 ARCHIVE.seekToCluster(ptr)
@@ -1512,11 +1515,10 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
             val writeLengthOnThisCluster =
                     listOf(remaining,
                             FILE_BLOCK_CONTENTS_SIZE - cursorInClusterFileArea,
-                            FILE_BLOCK_CONTENTS_SIZE - contentsSizeInThisCluster.toLong()
                     ).filter { it > 0 }.minOf { it }.toInt()
 
 
-            dbgprintln2("[Clustered.writeBytes] writeLengthOnThisCluster = $writeLengthOnThisCluster (minOf $remaining, ${FILE_BLOCK_CONTENTS_SIZE - cursorInClusterFileArea}, ${FILE_BLOCK_CONTENTS_SIZE - contentsSizeInThisCluster})")
+            dbgprintln2("[Clustered.writeBytes] writeLengthOnThisCluster = $writeLengthOnThisCluster (minOf $remaining, ${FILE_BLOCK_CONTENTS_SIZE - cursorInClusterFileArea})")//, ${FILE_BLOCK_CONTENTS_SIZE - contentsSizeInThisCluster})")
 
             // actually write
             ARCHIVE.write(buffer, (bufferOffset + writeCursor - writeStartOffset).toInt(), writeLengthOnThisCluster)

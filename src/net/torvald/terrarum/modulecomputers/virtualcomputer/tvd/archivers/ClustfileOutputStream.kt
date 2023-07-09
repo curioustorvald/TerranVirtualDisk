@@ -13,24 +13,19 @@ import java.io.OutputStream
  *
  * @param DOM disk object model
  * @param file a file to write to
- * @param append if `true`, starting offset of the writing operation will be performed at the end of the file (inserting
- * bytes at the end of the file); if `false`, writing operation will be performed at the beginning of the file (essentially re-writing the file)
+ * @param append if `false`, initial write operation will discard the existing content of the file; if `true`, initial
+ * write will be done right after the existing bytes. Any subsequent operation from this Outputstream will append the
+ * existing bytes.
+ * @throws IllegalStateException if the file is directory
+ *
  * Created by minjaesong on 2023-05-13.
  */
 class ClustfileOutputStream(private val file: Clustfile, val append: Boolean = false) : OutputStream() {
 
-    private var cursor = file.length()
-    private var fileWipedout = append
+    private var cursor = if (append) file.length() else 0L
 
     init {
-        if (file.isDirectory) throw FileNotFoundException()
-    }
-
-    private fun checkFileWipeout() {
-        if (!fileWipedout && file.exists()) {
-            file.clear()
-            fileWipedout = true
-        }
+        if (file.isDirectory) throw IllegalStateException()
     }
 
     override fun write(p0: Int) {
@@ -38,15 +33,17 @@ class ClustfileOutputStream(private val file: Clustfile, val append: Boolean = f
     }
 
     override fun write(b: ByteArray) {
-        checkFileWipeout()
+        if (!file.exists()) file.createNewFile()
         file.pwrite(b, 0, b.size, cursor)
         cursor += b.size
+        file.setFileLength(cursor)
     }
 
     override fun write(b: ByteArray, off: Int, len: Int) {
-        checkFileWipeout()
+        if (!file.exists()) file.createNewFile()
         file.pwrite(b, off, len, cursor)
         cursor += len
+        file.setFileLength(cursor)
     }
 }
 
@@ -86,7 +83,7 @@ class ClustfileInputStream(private val file: Clustfile) : InputStream() {
     }
 
     override fun readAllBytes(): ByteArray {
-        if (fileLength > 2147483639L) throw IllegalStateException("File too large")
+        if (fileLength > 2147483639L) throw IndexOutOfBoundsException("File too large")
 
         val b = ByteArray(fileLength.toInt())
         file.pread(b, 0, b.size, cursor)
