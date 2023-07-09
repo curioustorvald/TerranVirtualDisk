@@ -1,4 +1,7 @@
-import net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.archivers.*
+import net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.archivers.ClusteredFormatDOM
+import net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.archivers.Clustfile
+import net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.archivers.ClustfileOutputStream
+import net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.archivers.FileTableMap
 import java.io.File
 import java.util.*
 
@@ -23,10 +26,11 @@ fun main() {
 
 
     println("Creating Archive")
-    ClusteredFormatDOM.createNewArchive(archiveFile, charset, "TEST DRIVE 3", 600)
+    val diskFile = ClusteredFormatDOM.createNewArchive(archiveFile, charset, "TEST DRIVE 3", 600)
+    val DOM = ClusteredFormatDOM(diskFile)
 
 
-    val testfile = Clustfile(archiveFile, "/testfile")
+    val testfile = Clustfile(DOM, "/testfile")
     val cos = ClustfileOutputStream(testfile, false)
 
     println("ClustfileOutputStream Overwrite test")
@@ -45,8 +49,8 @@ fun main() {
         println(it.size)
     }
 
-    DomMgr[archiveFile].buildFreeClustersMap()
-    println("Free clusters: ${DomMgr[archiveFile].getFreeClusterMap()}")
+    DOM.buildFreeClustersMap()
+    println("Free clusters: ${DOM.getFreeClusterMap()}")
 
 
     testfile.delete()
