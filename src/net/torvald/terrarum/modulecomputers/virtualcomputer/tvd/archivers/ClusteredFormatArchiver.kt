@@ -2060,7 +2060,6 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
         fileTable[from]?.entryID = to // null check because the cluster may not be the head cluster
 
         //// Step 4-1. write changes to the FATs by find-replacing on all FAT entries
-        val affectedInlineFATs = HashSet<EntryID>()
         // TODO do it on the FAT on the memory then commit them to the disk, instead of the reverse
 
         fileTable.forEach {
@@ -2070,7 +2069,6 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
                     for (offset in 8 .. 253 step 3) {
                         if (it.toInt24(offset) == from) {
                             it.writeInt24(to, offset)
-                            affectedInlineFATs.add(parentID)
                         }
                     }
                 }
@@ -2080,6 +2078,31 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
 
         //// Step 4-2. sync the affected Extended Entries
         fatmgrRewriteAllFAT()
+
+        //// Step 4-3. find-replace on all non-inline directories
+        fileTable.filter { it.fileType == FILETYPE_DIRECTORY/* || if.fileType == FILETYPE_SYMBOLIC_LINK*/ }.forEach { fat ->
+            traverseClustersBreakable(fat.entryID) { cluster ->
+                ARCHIVE.seekToCluster(cluster, 8)
+                val dirLen = ARCHIVE.readUnsignedShort() / 3
+                var c = 0
+                var replaced = false
+
+                while (c < dirLen) {
+                    val id = ARCHIVE.readInt24()
+
+                    if (id == from) {
+                        ARCHIVE.seekToCluster(cluster, 8 + 3*c)
+                        ARCHIVE.writeInt24(to)
+                        replaced = true
+                        break
+                    }
+
+                    c += 1
+                }
+
+                replaced
+            }
+        }
 
         //// Step 5-1. unset 'temporarily duplicated' flag of the copied cluster
         ARCHIVE.setClusterMeta2Flag(to, 1, 0)
