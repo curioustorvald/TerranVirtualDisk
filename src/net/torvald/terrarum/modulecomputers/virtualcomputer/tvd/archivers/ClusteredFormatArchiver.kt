@@ -2104,6 +2104,25 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
             }
         }
 
+        //// Step 4-4. edit /$copy+on+write
+        val root = getFile(rootDirClusterID)!!
+        val rba = readBytes(root, getFileLength(root), 0)
+        val rootDirContents = List(rba.size / 3) { rba.toInt24(it * 3) }
+        fileTable.filter { it.filename == "\$copy+on+write" && rootDirContents.contains(it.entryID) }.firstOrNull()?.let { cow ->
+            val cowBytes = readBytes(cow, getFileLength(cow), 0) // always guaranteed to have length multple of 3
+            val cowNumbers =  List(cowBytes.size / 3) {
+                val n = cowBytes.toInt24(it * 3)
+                if (n == from)
+                    to
+                else
+                    n
+            }
+            val newCowBytes = ByteArray(cowBytes.size)
+            cowNumbers.forEachIndexed { i, b -> b.toInt24Arr().let { System.arraycopy(b, 0, newCowBytes, 3*i, 3) } }
+            writeBytes(cow, newCowBytes, 0, newCowBytes.size, 0L)
+        }
+
+
         //// Step 5-1. unset 'temporarily duplicated' flag of the copied cluster
         ARCHIVE.setClusterMeta2Flag(to, 1, 0)
 
