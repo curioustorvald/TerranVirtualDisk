@@ -223,12 +223,18 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
 
             //// CLUSTER 2-3 ////
             val fats = listOf(
-                    // root dir
-                    mkfat(4, FILETYPE_DIRECTORY, 4, timeNow, "", charset),
-                    // cow
-                    mkfat(0xfffe00, FILETYPE_DIRECTORY, 4, timeNow, "copyonwrite", charset),
-                    // lost+found
-                    mkfat(0xfffe01, FILETYPE_DIRECTORY, 4, timeNow, "lost+found", charset),
+                // root dir
+                mkfat(4, FILETYPE_DIRECTORY, 4, timeNow, "", charset),
+                // /$lost+found
+                mkfat(INLINE_FILE_CLUSTER_BASE + 0, FILETYPE_DIRECTORY, 6, timeNow, "\$lost+found", charset),
+                // /$copy+on+write
+                mkfat(INLINE_FILE_CLUSTER_BASE + 1, FILETYPE_BINARY, 6, timeNow, "\$copy+on+write", charset),
+                // /$snapshots
+                mkfat(INLINE_FILE_CLUSTER_BASE + 2, FILETYPE_DIRECTORY, 6, timeNow, "\$snapshots", charset, (INLINE_FILE_CLUSTER_BASE + 3).toInt24Arr()),
+                // /$snapshots/index
+                mkfat(INLINE_FILE_CLUSTER_BASE + 3, FILETYPE_BINARY, 4, timeNow, "index", charset),
+
+
             ).flatten()
             fats.forEach {
                 file.write(it)
@@ -257,9 +263,18 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
             it.writeInt24(HEAD_CLUSTER, 2)
             // next ptr
             it.writeInt24(LEAF_CLUSTER, 5)
+
+            // dir contents: size
+            it.writeInt16(3 * 3, 8)
+            // dir contents: /$lost+found
+            it.writeInt24(INLINE_FILE_CLUSTER_BASE + 0, 10)
+            // dir contents: /$copy+on+write
+            it.writeInt24(INLINE_FILE_CLUSTER_BASE + 1, 13)
+            // dir contents: /$snapshots
+            it.writeInt24(INLINE_FILE_CLUSTER_BASE + 2, 16)
         }
 
-        private fun mkfat(id: Int, type: Int, otherFlags: Int, timeNow: Long, name: String, charset: Charset): List<ByteArray> {
+        private fun mkfat(id: Int, type: Int, otherFlags: Int, timeNow: Long, name: String, charset: Charset, extraBytes: ByteArray? = null): List<ByteArray> {
             val ba = ByteArray(FAT_ENTRY_SIZE)
             ba.writeInt24(id, 0)
             ba[3] = (type.shl(4) or otherFlags.and(15)).toByte()
@@ -273,10 +288,20 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
             }
             else {
                 val ba2 = ByteArray(FAT_ENTRY_SIZE)
-                ba2.writeInt24(0xFFFF00 or type, 0)
+                ba2.writeInt24(0xFFFF10 or type, 0)
                 ba2.writeInt24(id, 3)
                 ba2[6] = 1
-                ba2[7] = 0
+
+                if (extraBytes == null) {
+                    ba2[7] = 0
+                }
+                else {
+                    ba2[7] = extraBytes.size.toByte()
+                    extraBytes.forEachIndexed { index, byte ->
+                        ba2[8 + index] = byte
+                    }
+                }
+
                 listOf(ba, ba2)
             }
         }

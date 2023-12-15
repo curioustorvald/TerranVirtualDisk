@@ -19,7 +19,7 @@ fun main() {
 
     println("Charset: ${charset.name().toUpperCase()}")
 
-    val archiveFile = File("./testclustered3.tevd")
+    val archiveFile = File("./newformat.tevd")
 
     println("Cleanup...")
     archiveFile.delete()
@@ -29,29 +29,4 @@ fun main() {
     val diskFile = ClusteredFormatDOM.createNewArchive(archiveFile, charset, "TEST DRIVE 3", 600)
     val DOM = ClusteredFormatDOM(diskFile)
 
-
-    val testfile = Clustfile(DOM, "/testfile")
-    val cos = ClustfileOutputStream(testfile, false)
-
-    println("ClustfileOutputStream Overwrite test")
-
-    cos.write(ByteArray(4000) { 0x42 })
-    testfile.readBytes().let {
-        println(it.toString(charset))
-        println(it.size)
-    }
-
-    val cos2 = ClustfileOutputStream(testfile, false)
-
-    cos2.write(ByteArray(5000) { 0x41 })
-    testfile.readBytes().let {
-        println(it.toString(charset))
-        println(it.size)
-    }
-
-    DOM.buildFreeClustersMap()
-    println("Free clusters: ${DOM.getFreeClusterMap()}")
-
-
-    testfile.delete()
 }
