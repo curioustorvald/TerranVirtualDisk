@@ -2080,35 +2080,22 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
         fatmgrRewriteAllFAT()
 
         //// Step 4-3. find-replace on all non-inline directories
-        fileTable.filter { it.fileType == FILETYPE_DIRECTORY/* || if.fileType == FILETYPE_SYMBOLIC_LINK*/ }.forEach { fat ->
-            traverseClustersBreakable(fat.entryID) { cluster ->
-                ARCHIVE.seekToCluster(cluster, 8)
-                val dirLen = ARCHIVE.readUnsignedShort() / 3
-                var c = 0
-                var replaced = false
-
-                while (c < dirLen) {
-                    val id = ARCHIVE.readInt24()
-
-                    if (id == from) {
-                        ARCHIVE.seekToCluster(cluster, 8 + 3*c)
+        for (kluster in rootDirClusterID until archiveSizeInClusters) {
+            ARCHIVE.seekToCluster(kluster)
+            if (ARCHIVE.read() and 15 == FILETYPE_DIRECTORY) {
+                for (offset in FILE_BLOCK_HEADER_SIZE until CLUSTER_SIZE step 3) {
+                    ARCHIVE.seekToCluster(kluster, offset)
+                    if (ARCHIVE.readInt24() == from) {
+                        ARCHIVE.seekToCluster(kluster, offset)
                         ARCHIVE.writeInt24(to)
-                        replaced = true
-                        break
+                        dbgprintln("[Clustered.changeClusterNum] $from -> $to at Cluster ${kluster.toHex()}, offset $offset")
                     }
-
-                    c += 1
                 }
-
-                replaced
             }
         }
 
         //// Step 4-4. edit /$copy+on+write
-        val root = getFile(rootDirClusterID)!!
-        val rba = readBytes(root, getFileLength(root), 0)
-        val rootDirContents = List(rba.size / 3) { rba.toInt24(it * 3) }
-        fileTable.filter { it.filename == "\$copy+on+write" && rootDirContents.contains(it.entryID) }.firstOrNull()?.let { cow ->
+        getCopyOnWrite()?.let { cow ->
             val cowBytes = readBytes(cow, getFileLength(cow), 0) // always guaranteed to have length multple of 3
             val cowNumbers =  List(cowBytes.size / 3) {
                 val n = cowBytes.toInt24(it * 3)
@@ -2258,6 +2245,13 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
         return ARCHIVE.readUshortBig()
     }
 
+    fun getCopyOnWrite(): FATEntry? {
+        val root = getFile(rootDirClusterID)!!
+        val rba = readBytes(root, getFileLength(root), 0)
+        val rootDirContents = List(rba.size / 3) { rba.toInt24(it * 3) }
+        return fileTable.filter { it.filename == "\$copy+on+write" && rootDirContents.contains(it.entryID) }.firstOrNull()
+    }
+
     /**
      * Renaming targets:
      * - FAT area: Extended Attributes 0xFFFF12
@@ -2318,6 +2312,22 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
                     }
                 }
             }
+        }
+
+
+        // rename on /$copy+on+write
+        getCopyOnWrite()?.let { cow ->
+            val cowBytes = readBytes(cow, getFileLength(cow), 0) // always guaranteed to have length multple of 3
+            val cowNumbers =  List(cowBytes.size / 3) {
+                val n = cowBytes.toInt24(it * 3)
+                if (n == old)
+                    new
+                else
+                    n
+            }
+            val newCowBytes = ByteArray(cowBytes.size)
+            cowNumbers.forEachIndexed { i, b -> b.toInt24Arr().let { System.arraycopy(b, 0, newCowBytes, 3*i, 3) } }
+            writeBytes(cow, newCowBytes, 0, newCowBytes.size, 0L)
         }
 
 
