@@ -1106,6 +1106,7 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
         if (clusterNum < rootDirClusterID) throw IllegalArgumentException("Cannot discard cluster #${clusterNum.toHex()} -- is Meta/Bootsector/FAT")
         if (fat.system) throw IllegalArgumentException("Cannot discard cluster #${clusterNum.toHex()} -- is system file")
 
+        discardShadow(fat)
 
         (fileTable[clusterNum]
                 ?: throw FileNotFoundException("No file is associated with cluster #${clusterNum.toHex()}")).let {
@@ -1463,6 +1464,8 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
         if (writeLength <= 0) return
         if (entry.fileType == 0) throw UnsupportedOperationException("FAT has no file type set (${entry.fileType})")
 
+        tryUnshadow(entry)
+
         val addedBytes = writeStartOffset + writeLength - getFileLength(entry)
 
         checkDiskCapacity(addedBytes)
@@ -1715,6 +1718,8 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
     fun setFileLength(entry: FATEntry, newLength: Long) {
         if (entry.fileType == 0) throw UnsupportedOperationException("FAT has no file type set (${entry.fileType})")
         if (entry.isInline) return setFileLengthInline(entry, newLength)
+
+        tryUnshadow(entry)
 
         var remaining = newLength
 
@@ -2383,6 +2388,37 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
 
         ARCHIVE.seekToCluster(clusternum, FILE_BLOCK_HEADER_SIZE)
         ARCHIVE.write(newContents)
+    }
+
+    /**
+     * Try to "shadow" the file for implicit sharing, a crucial function for the Copy-on-Write scheme.
+     *
+     * If the file is already been shadowed or nonexistent, this function will do nothing except for the modifying of the file cursor.
+     *
+     * @return false if shadowing failed (entry not exists or could not expand the $copy+on+write due to the lack of the space)
+     */
+    internal fun shadow(entry: FATEntry): Boolean {
+        TODO()
+    }
+
+    /**
+     * Unregister the entry from the copy-on-write ledger. The only caller of this function must be `discardFile(FATEntry)`
+     *
+     * If the file is not shadowed or nonexistent, this function will do nothing except for the modifying of the file cursor.
+     */
+    private fun discardShadow(entry: FATEntry) {
+        TODO()
+    }
+
+    /**
+     * Try to "un-shadow" the file that is shared implicitly, a crucial function for the Copy-on-Write scheme.
+     *
+     * If the file is not shadowed or nonexistent, this function will do nothing except for the modifying of the file cursor.
+     *
+     * @throws VDIOException if unshadowing failed (not enough space, etc)
+     */
+    private fun tryUnshadow(entry: FATEntry) {
+        TODO()
     }
 
 

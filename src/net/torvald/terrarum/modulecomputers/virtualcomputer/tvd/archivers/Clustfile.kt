@@ -353,6 +353,31 @@ open class Clustfile(private val DOM: ClusteredFormatDOM, absolutePath: String) 
         else false
     }
 
+    open fun copy(src: Clustfile, dest: Clustfile): Boolean {
+        // mkdir can take up a disk space (the FAT area)
+        // shadowing can also take up a space but only when the copy-on-write file has expanded
+
+        return if (src.isFile) {
+            dest.createNewFile().continueIfTrue {
+                dest.DOM.shadow(src.FAT!!)
+            }
+        }
+        else {
+            var ret = (dest.exists() || dest.mkdir())
+            if (ret) {
+                for (it in src.listFiles()!!) {
+                    val dest1 = Clustfile(DOM, dest, it.name)
+                    ret = (dest1.exists() || dest1.mkdir())
+                    if (ret && !copy(it, dest1)) {
+                        ret = false
+                        break
+                    }
+                }
+            }
+            ret
+        }
+    }
+
 
 
 
@@ -714,7 +739,7 @@ open class Clustfile(private val DOM: ClusteredFormatDOM, absolutePath: String) 
      * Imports a directory. If the given file is binary, the behaviour is undefined.
      */
     open fun importDirFrom(otherFile: File): Boolean {
-        fun recurse1(externalFile: File, node: Clustfile) {
+        fun recurse1(externalFile: File, node: Clustfile): Boolean {
             // return conditions
             if (!externalFile.isDirectory) {
                 // if not a directory, add to node
@@ -722,8 +747,7 @@ open class Clustfile(private val DOM: ClusteredFormatDOM, absolutePath: String) 
                     dbgprintln("[Clustfile.importDirFrom]     mkfile ${it.fullpath}")
                     it.importFileFrom(externalFile)
                 }
-                node.addChild(importedFile)
-                return
+                return node.addChild(importedFile)
             }
             // recurse
             else {
@@ -733,7 +757,10 @@ open class Clustfile(private val DOM: ClusteredFormatDOM, absolutePath: String) 
                     it.mkdirs()
                 }
                 // for entries in this fileDirectory...
-                externalFile.listFiles()!!.forEach { recurse1(it, newDir) }
+                for (it in externalFile.listFiles()!!) {
+                    if (!recurse1(it, newDir)) return false
+                }
+                return true
             }
         }
 
@@ -747,8 +774,14 @@ open class Clustfile(private val DOM: ClusteredFormatDOM, absolutePath: String) 
             it
         }.continueIfTrue {
             // for entries in this fileDirectory...
-            otherFile.listFiles()!!.forEach { recurse1(it, this) }
-            true
+            var ret = true
+            for (it in otherFile.listFiles()!!) {
+                if (!recurse1(it, this)) {
+                    ret = false
+                    break
+                }
+            }
+            ret
         }
     }
 
