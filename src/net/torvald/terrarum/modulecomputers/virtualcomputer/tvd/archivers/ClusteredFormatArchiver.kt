@@ -225,16 +225,14 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
             val fats = listOf(
                 // root dir
                 mkfat(4, FILETYPE_DIRECTORY, 4, timeNow, "", charset),
+                // /$copy+on+write
+                mkfat(5, FILETYPE_BINARY, 6, timeNow, "\$copy+on+write", charset),
                 // /$lost+found
                 mkfat(INLINE_FILE_CLUSTER_BASE + 0, FILETYPE_DIRECTORY, 6, timeNow, "\$lost+found", charset),
-                // /$copy+on+write
-                mkfat(INLINE_FILE_CLUSTER_BASE + 1, FILETYPE_BINARY, 6, timeNow, "\$copy+on+write", charset),
                 // /$snapshots
-                mkfat(INLINE_FILE_CLUSTER_BASE + 2, FILETYPE_DIRECTORY, 6, timeNow, "\$snapshots", charset, (INLINE_FILE_CLUSTER_BASE + 3).toInt24Arr()),
+                mkfat(INLINE_FILE_CLUSTER_BASE + 1, FILETYPE_DIRECTORY, 6, timeNow, "\$snapshots", charset, (INLINE_FILE_CLUSTER_BASE + 3).toInt24Arr()),
                 // /$snapshots/index
-                mkfat(INLINE_FILE_CLUSTER_BASE + 3, FILETYPE_BINARY, 4, timeNow, "index", charset),
-
-
+                mkfat(INLINE_FILE_CLUSTER_BASE + 2, FILETYPE_BINARY, 4, timeNow, "index", charset),
             ).flatten()
             fats.forEach {
                 file.write(it)
@@ -246,6 +244,10 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
             //// CLUSTER 4 ////
             // root directory
             file.write(ROOT_DIR_CLUSTER)
+
+            //// CLUSTER 5 ////
+            // /$copy+on+write
+            file.write(COPYONWRITE_DIR_CLUSTER)
 
 
             file.flush(); file.close()
@@ -266,12 +268,24 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
 
             // dir contents: size
             it.writeInt16(3 * 3, 8)
-            // dir contents: /$lost+found
-            it.writeInt24(INLINE_FILE_CLUSTER_BASE + 0, 10)
             // dir contents: /$copy+on+write
-            it.writeInt24(INLINE_FILE_CLUSTER_BASE + 1, 13)
+            it.writeInt24(5, 10)
+            // dir contents: /$lost+found
+            it.writeInt24(INLINE_FILE_CLUSTER_BASE + 0, 13)
             // dir contents: /$snapshots
             it.writeInt24(INLINE_FILE_CLUSTER_BASE + 2, 16)
+        }
+
+        /** Typically the copy+on+write will sit on ID=5 */
+        internal val COPYONWRITE_DIR_CLUSTER = ByteArray(CLUSTER_SIZE).also {
+            // meta1 (type:dir)
+            it[0] = FILETYPE_BINARY.toByte()
+            // meta2 (persistent:true)
+            it[1] = 0x80.toByte()
+            // prev ptr
+            it.writeInt24(HEAD_CLUSTER, 2)
+            // next ptr
+            it.writeInt24(LEAF_CLUSTER, 5)
         }
 
         private fun mkfat(id: Int, type: Int, otherFlags: Int, timeNow: Long, name: String, charset: Charset, extraBytes: ByteArray? = null): List<ByteArray> {
@@ -658,6 +672,22 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
         readMeta()
         readFAT()
         tallyClusterCount()
+
+        // update disk for copy-on-write
+        fileTable[rootDirClusterID + 1].let {
+            if (it != null) {
+                if (it.filename != "\$copy+on+write" || !it.system || readBytes(getRootDir(), 3, 0).toInt24() != copyOnWriteClusterID) {
+                    val new = expandArchive(1)
+                    changeClusterNum(rootDirClusterID + 1, new)
+
+                    initCopyOnWrite()
+                }
+                // else, the file IS copy+on+write -- do nothing
+            }
+            else {
+                initCopyOnWrite()
+            }
+        }
     }
 
     fun notifyError(throwable: Throwable) {
@@ -670,6 +700,7 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
     val archiveSizeInClusters; get() = (ARCHIVE.length() / CLUSTER_SIZE).toInt()
     private val rootDirClusterID; get() = 2 + fatClusterCount
     private val rootDirOffset; get() = rootDirClusterID * CLUSTER_SIZE
+    private val copyOnWriteClusterID; get() = rootDirClusterID + 1
 
     private fun tallyClusterCount() {
         if (fatClusterCount < 0) throw InternalError("Uninitialised -- call readMeta() and readFAT() first")
@@ -2030,6 +2061,9 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
         return false
     }
 
+    /**
+     * Physically move the file to the another location
+     */
     private fun changeClusterNum(from: Int, to: Int) {
         if (!from.isValidCluster() || !to.isValidCluster()) throw IllegalArgumentException("changeClusterNum only works with non-inlined (args: from=${from.toHex()}, to=${to.toHex()})")
         if (!isThisClusterVacant(to)) throw IllegalStateException("Target cluster $to(${to.toHex()}) is not free to overwrite")
@@ -2100,19 +2134,22 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
         }
 
         //// Step 4-4. edit /$copy+on+write
-        getCopyOnWrite()?.let { cow ->
-            val cowBytes = readBytes(cow, getFileLength(cow), 0) // always guaranteed to have length multple of 3
-            val cowNumbers =  List(cowBytes.size / 3) {
-                val n = cowBytes.toInt24(it * 3)
-                if (n == from)
-                    to
-                else
-                    n
+        try {
+            getCopyOnWrite().let { cow ->
+                val cowBytes = readBytes(cow, getFileLength(cow), 0) // always guaranteed to have length multple of 3
+                val cowNumbers = List(cowBytes.size / 3) {
+                    val n = cowBytes.toInt24(it * 3)
+                    if (n == from)
+                        to
+                    else
+                        n
+                }
+                val newCowBytes = ByteArray(cowBytes.size)
+                cowNumbers.forEachIndexed { i, b -> b.toInt24Arr().let { System.arraycopy(b, 0, newCowBytes, 3 * i, 3) } }
+                writeBytes(cow, newCowBytes, 0, newCowBytes.size, 0L)
             }
-            val newCowBytes = ByteArray(cowBytes.size)
-            cowNumbers.forEachIndexed { i, b -> b.toInt24Arr().let { System.arraycopy(b, 0, newCowBytes, 3*i, 3) } }
-            writeBytes(cow, newCowBytes, 0, newCowBytes.size, 0L)
         }
+        catch (_: NullPointerException) { /* trying to create copyonwrite, obviously this needs to be ignored */ }
 
 
         //// Step 5-1. unset 'temporarily duplicated' flag of the copied cluster
@@ -2250,12 +2287,7 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
         return ARCHIVE.readUshortBig()
     }
 
-    fun getCopyOnWrite(): FATEntry? {
-        val root = getFile(rootDirClusterID)!!
-        val rba = readBytes(root, getFileLength(root), 0)
-        val rootDirContents = List(rba.size / 3) { rba.toInt24(it * 3) }
-        return fileTable.filter { it.filename == "\$copy+on+write" && rootDirContents.contains(it.entryID) }.firstOrNull()
-    }
+    private inline fun getCopyOnWrite(): FATEntry = getFile(copyOnWriteClusterID)!!
 
     /**
      * Renaming targets:
@@ -2321,7 +2353,7 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
 
 
         // rename on /$copy+on+write
-        getCopyOnWrite()?.let { cow ->
+        getCopyOnWrite().let { cow ->
             val cowBytes = readBytes(cow, getFileLength(cow), 0) // always guaranteed to have length multple of 3
             val cowNumbers =  List(cowBytes.size / 3) {
                 val n = cowBytes.toInt24(it * 3)
@@ -2418,7 +2450,17 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
      * @throws VDIOException if unshadowing failed (not enough space, etc)
      */
     private fun tryUnshadow(entry: FATEntry) {
-        TODO()
+//        TODO()
+    }
+
+    private fun initCopyOnWrite() {
+        checkDiskCapacity(FILE_BLOCK_CONTENTS_SIZE)
+
+        val timeNow = getTimeNow()
+        val file = fatmgrCreateNewEntry(copyOnWriteClusterID, "\$copy+on+write", false, true, true, false, timeNow, timeNow, FILETYPE_BINARY)
+        writeBytes(getRootDir(), copyOnWriteClusterID.toInt24Arr(), 0, 3, 0) // copyOnWriteClusterID is smaller than anything else except for the rootID
+        ARCHIVE.seekToCluster(copyOnWriteClusterID)
+        ARCHIVE.write(COPYONWRITE_DIR_CLUSTER)
     }
 
 
