@@ -359,7 +359,7 @@ open class Clustfile(private val DOM: ClusteredFormatDOM, absolutePath: String) 
 
         return if (src.isFile) {
             dest.createNewFile().continueIfTrue {
-                dest.DOM.shadow(src.FAT!!)
+                dest.DOM.shadow(src.FAT!!, dest.FAT!!)
             }
         }
         else {

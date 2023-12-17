@@ -2420,10 +2420,40 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
      *
      * If the file is already been shadowed or nonexistent, this function will do nothing except for the modifying of the file cursor.
      *
+     * @param master the "master" file for shadowing
+     * @param entry the "clone" file, must be an empty file
      * @return false if shadowing failed (entry not exists or could not expand the $copy+on+write due to the lack of the space)
      */
-    internal fun shadow(entry: FATEntry): Boolean {
-        TODO()
+    internal fun shadow(master: FATEntry, entry: FATEntry): Boolean {
+        entry.fileType = 8 or entry.fileType // set shadowed? flag
+
+        val ledger = getCopyOnWriteLedger()
+
+        // find if the master exists on the ledger already
+        val existingRecord = ledger.find { it.binarySearch(master.entryID) > -1 }
+        // if the record already exists, append then sort
+        if (existingRecord != null) {
+            existingRecord.add(entry.entryID)
+            existingRecord.sort()
+        }
+        // if not, create new record and add it to the ledger
+        else {
+            val newRecord = ArrayList<Int>()
+            newRecord.add(master.entryID)
+            newRecord.add(entry.entryID)
+            newRecord.sort()
+            ledger.add(newRecord)
+        }
+
+        return try {
+            fatmgrRewriteFATheaderOnly(entry)
+            rewriteCopyOnWriteLedger(ledger)
+            true
+        }
+        catch (e: Throwable) {
+            e.printStackTrace()
+            false
+        }
     }
 
     /**
@@ -2453,6 +2483,34 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
         }
     }
 
+    private fun makeCopyForNewShadowMaster(entry: FATEntry, ledger: ArrayList<ArrayList<Int>>) {
+        // remove shadowed flag
+        entry.fileType = entry.fileType or 7
+        fatmgrRewriteFATheaderOnly(entry)
+
+        // check if new entry can be written
+        val entryFileLength = getFileLength(entry)
+
+        // "just change the FAT record" is not possible when this function just augments the discardFile operation
+        val oldFileContents = readBytes(entry, entryFileLength, 0)
+
+        // actually write bytes to the file
+        // the `entry` is guaranteed to be un-shadow at this moment
+        writeBytes(entry, oldFileContents, 0, oldFileContents.size, 0, skipCoWcheck = true)
+
+        // set up the modified file type flags to the clusters (if applicable)
+        if (!entry.isInline) {
+            traverseClusters(entry.entryID) { kluster ->
+                val flag = ARCHIVE.read()
+                val newFlag = (flag and 0xF0) or entry.fileType
+                ARCHIVE.seekToCluster(kluster)
+                ARCHIVE.write(newFlag)
+            }
+        }
+
+        rewriteCopyOnWriteLedger(ledger)
+    }
+
     /**
      * Try to "un-shadow" the file that is shared implicitly, a crucial function for the Copy-on-Write scheme.
      *
@@ -2471,9 +2529,7 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
             // elect a new "master" (guaranteed to be "shadowed" at this moment)
             val entry = fileTable[record.first()]!!
 
-
-            TODO()
-
+            makeCopyForNewShadowMaster(entry, ledger)
 
             return oldEntry
         }
@@ -2481,31 +2537,7 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
         else {
             record.remove(entry.entryID)
 
-            // remove shadowed flag
-            entry.fileType = entry.fileType or 7
-            fatmgrRewriteFATheaderOnly(entry)
-
-            // check if new entry can be written
-            val entryFileLength = getFileLength(entry)
-
-            // "just change the FAT record" is not possible when this function just augments the discardFile operation
-            val oldFileContents = readBytes(entry, entryFileLength, 0)
-
-            // actually write bytes to the file
-            // the `entry` is guaranteed to be un-shadow at this moment
-            writeBytes(entry, oldFileContents, 0, oldFileContents.size, 0, skipCoWcheck = true)
-
-            // set up the modified file type flags to the clusters (if applicable)
-            if (!entry.isInline) {
-                traverseClusters(entry.entryID) { kluster ->
-                    val flag = ARCHIVE.read()
-                    val newFlag = (flag and 0xF0) or entry.fileType
-                    ARCHIVE.seekToCluster(kluster)
-                    ARCHIVE.write(newFlag)
-                }
-            }
-
-            rewriteCopyOnWriteLedger(ledger)
+            makeCopyForNewShadowMaster(entry, ledger)
 
             return entry
         }
@@ -2518,13 +2550,13 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
         val siblings = ledger.find { it.binarySearch(entry.entryID) > -1 } ?: return entry.entryID
 
         // search for the master (non-shadowed) entry
-        return siblings.find { fileTable[it]!!.fileType >= 8 } ?: entry.entryID
+        return siblings.find { fileTable[it]!!.fileType < 8 } ?: entry.entryID
     }
 
     private fun resolveShadowed(entry: FATEntry): FATEntry {
         val resolvedID = resolveShadowedEntryID(entry)
         val entry1 = fileTable[resolvedID] ?: throw InternalError("Resolved entry does not exist on the disk (resolveShadowed0 returned ${resolvedID.toHex()})")
-        if (entry1.fileType < 8) throw InternalError("No master copy exists for $entry (resolveShadowed0 returned ${resolvedID.toHex()})")
+        if (entry1.fileType >= 8) throw InternalError("No master copy exists for $entry (resolveShadowed0 returned ${resolvedID.toHex()})")
         return entry1
     }
 
