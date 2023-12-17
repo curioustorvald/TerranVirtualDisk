@@ -338,7 +338,7 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
             var system: Boolean,
             var deleted: Boolean,
 
-            var fileType: Int,
+            var fileType: Int, // includes shadowed? bit
 
             var creationDate: Long = -1L,
             var modificationDate: Long = -1L,
@@ -917,7 +917,7 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
                 ?: throw IllegalArgumentException("No such file with following ID: ${entry.entryID.toHex()}")
         val oldFATentrySize = entry.extendedEntries.size + 1
 
-        if (entry.fileType == 0) throw UnsupportedOperationException("FAT has no file type set (${entry.fileType})")
+        if (entry.fileType and 7 == 0) throw UnsupportedOperationException("FAT has no file type set (${entry.fileType})")
         if (!entry.isInline) throw IllegalArgumentException("File is not inline (ID: ${entry.entryID})")
         if (entry.hasExtraEntryWithType { it xor 0xFFFF10 < 16 }) throw IllegalArgumentException("File is already allocated and is inline (ID: ${entry.entryID})")
 
@@ -966,8 +966,8 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
         val myEntryIndex = fileTable[entry.entryID]?.indexInFAT // deliberately checking against fileTable instead of the given FAT
                 ?: throw IllegalArgumentException("No such file with following ID: ${entry.entryID.toHex()}")
 
-        if (entry.fileType == 0) throw UnsupportedOperationException("FAT has no file type set (${entry.fileType})")
-        if (!entry.isInline) throw IllegalArgumentException("File is not inline (ID: ${entry.entryID.toHex()})")
+        if (entry.fileType and 7 == 0) throw UnsupportedOperationException("FAT has no file type set (${entry.fileType})")
+        if (!entry.isInline) throw IllegalArgumentException("File is not inlined (ID: ${entry.entryID.toHex()})")
 
         val oldExtendedEntryCount = entry.extendedEntries.size
 
@@ -1161,7 +1161,9 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
      * @return newly-created FAT entry
      */
     fun allocateFile(size: Long, fileType: Int, filename: String): FATEntry {
-        if (fileType != FILETYPE_BINARY && fileType != FILETYPE_DIRECTORY) throw UnsupportedOperationException("Invalid File type: $fileType")
+        if (fileType and 7 != FILETYPE_BINARY && fileType and 7 != FILETYPE_DIRECTORY) throw UnsupportedOperationException("Invalid File type: $fileType")
+
+        val size = if (fileType and 8 == 0) size else 0 // shadowed file has zero size internally
 
         checkDiskCapacity(size)
         checkSelfDefrag(size)
@@ -1173,7 +1175,7 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
 
         if (ptr in INLINE_FILE_CLUSTER_BASE..INLINE_FILE_CLUSTER_LAST) {
             fatmgrCreateNewEntry(ptr, filename, false, false, false, false, timeNow, timeNow, fileType).let {
-                fatmgrAllocateInlineFile(it, size)
+//                fatmgrAllocateInlineFile(it, size)
                 fatmgrRewriteAllFAT()
 
                 dbgprintln("[Clustered.allocateFile] file allocated inline: ${it.entryID.toHex()} at index ${it.indexInFAT}")
@@ -1215,7 +1217,7 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
 
         // don't defrag -- the head cluster cannot be altered here; do it on the caller side of this function
 
-        if (fileType == 0) throw UnsupportedOperationException("Invalid file type: $fileType")
+        if (fileType and 7 == 0) throw UnsupportedOperationException("Invalid file type: $fileType")
 
         if (sizeDelta < 0) return LEAF_CLUSTER
         if (sizeDelta == 0L) return currentCluster
@@ -1255,7 +1257,7 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
     }
 
     private fun initClusters(sizeDelta: Long, parent: Int, current: Int, clusterCount: Int, fileType: Int) {
-        if (fileType == 0) throw UnsupportedOperationException("Invalid file type: $fileType")
+        if (fileType and 7 == 0) throw UnsupportedOperationException("Invalid file type: $fileType")
 
         val ptrs = listOf(parent) + (current until current+clusterCount) + listOf(LEAF_CLUSTER)
         freeClusters.remove(parent)
@@ -1441,7 +1443,7 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
     }*/
 
     private fun writeBytesInline(inlinedFile: FATEntry, buffer: ByteArray, bufferOffset: Int, writeLength: Int, writeStartOffset: Long) {
-        if (inlinedFile.fileType == 0) throw UnsupportedOperationException("FAT has no file type set (${inlinedFile.fileType})")
+        if (inlinedFile.fileType and 7 == 0) throw UnsupportedOperationException("FAT has no file type set (${inlinedFile.fileType})")
 
         val fileCopy = inlinedFile.getInlineBytes()
         val fileBytes = ByteArray(maxOf(fileCopy.size.toLong(), writeStartOffset + writeLength).toInt())
@@ -1493,9 +1495,9 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
         dbgprintln2("[Clustered.writeBytes] Writebytes FAT=$entry, writeLength=$writeLength, writeStartOffset=$writeStartOffset")
 
         if (writeLength <= 0) return
-        if (entry.fileType == 0) throw UnsupportedOperationException("FAT has no file type set (${entry.fileType})")
+        if (entry.fileType and 7 == 0) throw UnsupportedOperationException("FAT has no file type set (${entry.fileType})")
 
-        tryUnshadow(entry)
+        val entry = tryUnshadow(entry)
 
         val addedBytes = writeStartOffset + writeLength - getFileLength(entry)
 
@@ -1639,6 +1641,8 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
             return readBytesInline(entry, buffer, bufferOffset, readLength, readStartOffset)
         }
 
+        val entry = resolveShadowed(entry)
+
         var readCursor = readStartOffset
         var remaining = readLength
 
@@ -1722,6 +1726,7 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
         dbgprintln2("[Clustered.readBytes] readBytes ptr=${entry.entryID.toHex()}, len=$length")
         printStackTrace("readBytes", "called by:")
 
+        val entry = resolveShadowed(entry)
 
         val ba = ByteArray(length)
         val actualSize = readBytes(entry, ba, 0, length, offset)
@@ -1750,7 +1755,7 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
         if (entry.fileType == 0) throw UnsupportedOperationException("FAT has no file type set (${entry.fileType})")
         if (entry.isInline) return setFileLengthInline(entry, newLength)
 
-        tryUnshadow(entry)
+        val entry = tryUnshadow(entry)
 
         var remaining = newLength
 
@@ -2135,21 +2140,17 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
 
         //// Step 4-4. edit /$copy+on+write
         try {
-            getCopyOnWrite().let { cow ->
-                val cowBytes = readBytes(cow, getFileLength(cow), 0) // always guaranteed to have length multple of 3
-                val cowNumbers = List(cowBytes.size / 3) {
-                    val n = cowBytes.toInt24(it * 3)
-                    if (n == from)
-                        to
-                    else
-                        n
+            val ledger = getCopyOnWriteLedger()
+            for (row in ledger.indices) {
+                for (col in ledger[row].indices) {
+                    if (ledger[row][col] == from)
+                        ledger[row][col] = to
                 }
-                val newCowBytes = ByteArray(cowBytes.size)
-                cowNumbers.forEachIndexed { i, b -> b.toInt24Arr().let { System.arraycopy(b, 0, newCowBytes, 3 * i, 3) } }
-                writeBytes(cow, newCowBytes, 0, newCowBytes.size, 0L)
+                ledger[row].sort()
             }
+            rewriteCopyOnWriteLedger(ledger)
         }
-        catch (_: NullPointerException) { /* trying to create copyonwrite, obviously this needs to be ignored */ }
+        catch (_: NullPointerException) { /* exception raised while trying to create copyonwrite when there is none, obviously need to be ignored */ }
 
 
         //// Step 5-1. unset 'temporarily duplicated' flag of the copied cluster
@@ -2180,73 +2181,6 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
     }
 
 
-
-
-    fun getFileIterator(clusterNum: Int): ByteIterator {
-        if (clusterNum !in rootDirClusterID..archiveSizeInClusters)
-            throw IllegalArgumentException("Not a valid cluster number: $clusterNum")
-
-        ARCHIVE.seekToCluster(clusterNum)
-        val fileType = ARCHIVE.read()
-
-        if (fileType != 1) // will also detect non-zero-ness of the "error flags"
-            throw UnsupportedOperationException("File is not a binary file (type ${fileType and 15}, flags ${fileType.ushr(4) and 15})")
-
-        // initial cluster must be clean and not dirty!
-        return object : ByteIterator() {
-
-            private var clusterOffset = 0 // 0..4086
-
-            private var nextCluster = clusterNum // end-of-cluster = 0
-            private var bytesInCurrentCluster = -1
-
-            private var foundDirtyCluster = false
-
-            private fun getSizeOnThisClusterAndResetClusterOffset(clusterNum: Int) {
-                ARCHIVE.seekToCluster(clusterNum)
-
-                // detect the dirty/deleted cluster
-                val flags = ARCHIVE.read().ushr(4)
-
-                if (flags != 0) {
-                    foundDirtyCluster = true
-                    nextCluster = 0
-                    bytesInCurrentCluster = 0
-                    ARCHIVE.skipBytes(9)
-                }
-                else {
-                    ARCHIVE.skipBytes(4)
-                    nextCluster = ARCHIVE.readInt24()
-                    bytesInCurrentCluster = ARCHIVE.readUshortBig()
-                }
-                clusterOffset = 0
-            }
-
-            override fun hasNext(): Boolean {
-                if (clusterOffset >= bytesInCurrentCluster) {
-                    if (nextCluster == 0) return false
-                    else {
-                        getSizeOnThisClusterAndResetClusterOffset(nextCluster)
-                        if (foundDirtyCluster) return false
-                    }
-                }
-
-                return !(clusterOffset >= bytesInCurrentCluster && nextCluster == 0)
-            }
-
-            override fun nextByte(): Byte {
-                if (clusterOffset >= bytesInCurrentCluster) {
-                    getSizeOnThisClusterAndResetClusterOffset(nextCluster)
-                }
-
-                ARCHIVE.read().toByte().let {
-                    clusterOffset += 1
-                    return it
-                }
-            }
-
-        }
-    }
 
     fun readBoot(): ByteArray {
         ARCHIVE.seek(CLUSTER_SIZE.toLong())
@@ -2288,6 +2222,53 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
     }
 
     private inline fun getCopyOnWrite(): FATEntry = getFile(copyOnWriteClusterID)!!
+
+    /**
+     * The inner list is guaranteed to be not empty and sored; the outer list is not sorted nor guaranteed to be empty.
+     */
+    private fun getCopyOnWriteLedger(): ArrayList<ArrayList<Int>> {
+        val cow = getCopyOnWrite()
+        val ledger = readBytes(cow, getFileLength(cow), 0)
+        val listOuter = ArrayList<ArrayList<Int>>()
+        val listInner = ArrayList<Int>()
+        (0 until ledger.size / 3).map { ledger.toInt24(it * 3) }.forEach {
+            if (it == 0xFFFFFF) {
+                if (listInner.isNotEmpty()) { listInner.sort(); listOuter.add(listInner) }
+                listInner.clear()
+            }
+            else {
+                listInner.add(it)
+            }
+        }
+        if (listInner.isNotEmpty()) { listInner.sort(); listOuter.add(listInner) }
+
+        return listOuter
+    }
+
+    private fun rewriteCopyOnWriteLedger(ledger: ArrayList<ArrayList<Int>>) {
+        val cow = getCopyOnWrite()
+        val newLedger = ledger.map { records ->
+            records.map { it.toInt24Arr() }.joinToByteArray()
+        }.joinToByteArray(0xFFFFFF.toInt24Arr(), true)
+
+        writeBytes(cow, newLedger, 0, newLedger.size, 0)
+        setFileLength(cow, newLedger.size.toLong())
+    }
+
+    private fun List<ByteArray>.joinToByteArray(separator: ByteArray = ByteArray(0), putSeparatorAtTheEnd: Boolean = false): ByteArray {
+        val outbuf = ByteArray(this.sumBy { it.size } + (this.size - (!putSeparatorAtTheEnd).toInt()) * separator.size)
+
+        var cursor = 0
+        this.forEachIndexed { index, bytes ->
+            System.arraycopy(bytes, 0, outbuf, cursor, bytes.size)
+            cursor += bytes.size
+            if (putSeparatorAtTheEnd || index < this.lastIndex)
+            System.arraycopy(separator, 0, outbuf, cursor, separator.size)
+            cursor += separator.size
+        }
+
+        return outbuf
+    }
 
     /**
      * Renaming targets:
@@ -2378,6 +2359,8 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
     }
 
     fun sortDirectory(entry: FATEntry) {
+        val entry = resolveShadowed(entry)
+
         if (entry.fileType != FILETYPE_DIRECTORY) throw VDIOException("Tried to sort non-directory (filetype = ${entry.fileType})")
 
         if (entry.isInline) {
@@ -2449,8 +2432,25 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
      *
      * @throws VDIOException if unshadowing failed (not enough space, etc)
      */
-    private fun tryUnshadow(entry: FATEntry) {
+    private fun tryUnshadow(entry: FATEntry): FATEntry {
 //        TODO()
+    }
+
+    private fun resolveShadowedEntryID(entry: FATEntry): Int {
+        val ledger = getCopyOnWriteLedger()
+
+        // search for the entry in the ledger
+        val siblings = ledger.find { it.binarySearch(entry.entryID) > -1 } ?: return entry.entryID
+
+        // search for the master (non-shadowed) entry
+        return siblings.find { fileTable[it]!!.fileType >= 8 } ?: entry.entryID
+    }
+
+    private fun resolveShadowed(entry: FATEntry): FATEntry {
+        val resolvedID = resolveShadowedEntryID(entry)
+        val entry1 = fileTable[resolvedID] ?: throw InternalError("Resolved entry does not exist on the disk (resolveShadowed0 returned ${resolvedID.toHex()})")
+        if (entry1.fileType < 8) throw InternalError("No master copy exists for $entry (resolveShadowed0 returned ${resolvedID.toHex()})")
+        return entry1
     }
 
     private fun initCopyOnWrite() {
