@@ -1495,11 +1495,11 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
      * The Clustfile must update its FAT reference after this function call.
      */
     fun writeBytes(entry: FATEntry, buffer: ByteArray, bufferOffset: Int, writeLength: Int, writeStartOffset: Long, forceUninline: Boolean = false) {
-        writeBytes(entry, buffer, bufferOffset, writeLength, writeStartOffset, forceUninline)
+        writeBytes(entry, buffer, bufferOffset, writeLength, writeStartOffset, forceUninline, false)
     }
 
 
-    private fun writeBytes(entry: FATEntry, buffer: ByteArray, bufferOffset: Int, writeLength: Int, writeStartOffset: Long, forceUninline: Boolean = false, skipCoWcheck: Boolean = false) {
+    private fun writeBytes(entry: FATEntry, buffer: ByteArray, bufferOffset: Int, writeLength: Int, writeStartOffset: Long, forceUninline: Boolean, skipCoWcheck: Boolean) {
         dbgprintln2("[Clustered.writeBytes] Writebytes FAT=$entry, writeLength=$writeLength, writeStartOffset=$writeStartOffset")
 
         if (writeLength <= 0) return
@@ -1626,8 +1626,9 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
         diskModifiedHook()
     }
 
-    fun readBytesInline(entry: FATEntry, buffer: ByteArray, bufferOffset: Int, readLength: Int, readStartOffset: Int): Int {
+    private fun readBytesInline(entry: FATEntry, buffer: ByteArray, bufferOffset: Int, readLength: Int, readStartOffset: Int): Int {
         dbgprintln2("[Clustered.readBytesInline] ptr = ${entry.entryID.toHex()}")
+
         val bytes = entry.getInlineBytes()
         var readLength = if (readLength + readStartOffset > bytes.size) bytes.size - readStartOffset else readLength
         if (readLength + bufferOffset > bytes.size) readLength -= bufferOffset
@@ -1644,12 +1645,13 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
      * @return number of bytes actually read
      */
     fun readBytes(entry: FATEntry, buffer: ByteArray, bufferOffset: Int, readLength: Int, readStartOffset: Int): Int {
+        val entry = resolveShadowed(entry)
+
         if (entry.isInline) {
             dbgprintln2("[Clustered.readBytes] this file (ID ${entry.entryID.toHex()}) is in-lined, calling readBytesInline")
             return readBytesInline(entry, buffer, bufferOffset, readLength, readStartOffset)
         }
 
-        val entry = resolveShadowed(entry)
 
         var readCursor = readStartOffset
         var remaining = readLength
@@ -1889,6 +1891,8 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
         dbgprint("\n")
 
     }
+
+
 
     /**
      * Returns the length of the file. The file's length is only knowable by chain traversal, so store the result of
@@ -2240,11 +2244,11 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
         val cow = getCopyOnWrite()
         val ledger = readBytes(cow, getFileLength(cow), 0)
         val listOuter = ArrayList<ArrayList<Int>>()
-        val listInner = ArrayList<Int>()
+        var listInner = ArrayList<Int>()
         (0 until ledger.size / 3).map { ledger.toInt24(it * 3) }.forEach {
             if (it == 0xFFFFFF) {
                 if (listInner.isNotEmpty()) { listInner.sort(); listOuter.add(listInner) }
-                listInner.clear()
+                listInner = ArrayList<Int>()
             }
             else {
                 listInner.add(it)
@@ -2425,6 +2429,8 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
      * @return false if shadowing failed (entry not exists or could not expand the $copy+on+write due to the lack of the space)
      */
     internal fun shadow(master: FATEntry, entry: FATEntry): Boolean {
+        if (entry.system) throw IllegalArgumentException("System file cannot be a shadowing target (master=$master; target=$entry)")
+
         entry.fileType = 8 or entry.fileType // set shadowed? flag
 
         val ledger = getCopyOnWriteLedger()
@@ -2484,8 +2490,20 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
     }
 
     private fun makeCopyForNewShadowMaster(entry: FATEntry, ledger: ArrayList<ArrayList<Int>>) {
+        // ledger: remove the records with one or less element
+        var i = 0
+        while (i < ledger.size) {
+            val rec = ledger[i]
+            if (rec.size <= 1) {
+                ledger.removeAt(i)
+            }
+            else {
+                i += 1
+            }
+        }
+
         // remove shadowed flag
-        entry.fileType = entry.fileType or 7
+        entry.fileType = entry.fileType and 7
         fatmgrRewriteFATheaderOnly(entry)
 
         // check if new entry can be written
@@ -2496,7 +2514,7 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
 
         // actually write bytes to the file
         // the `entry` is guaranteed to be un-shadow at this moment
-        writeBytes(entry, oldFileContents, 0, oldFileContents.size, 0, skipCoWcheck = true)
+        writeBytes(entry, oldFileContents, 0, oldFileContents.size, 0, forceUninline = false, skipCoWcheck = true)
 
         // set up the modified file type flags to the clusters (if applicable)
         if (!entry.isInline) {
@@ -2519,6 +2537,8 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
      * @throws VDIOException if unshadowing failed (not enough space, etc)
      */
     private fun tryUnshadow(entry: FATEntry, ledger: ArrayList<ArrayList<Int>> = getCopyOnWriteLedger()): FATEntry {
+        if (entry.system) return entry
+
         val record = ledger.find { it.binarySearch(entry.entryID) > -1 } ?: return entry
         val oldEntry = entry
 
@@ -2554,6 +2574,8 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
     }
 
     private fun resolveShadowed(entry: FATEntry): FATEntry {
+        if (entry.system) return entry
+
         val resolvedID = resolveShadowedEntryID(entry)
         val entry1 = fileTable[resolvedID] ?: throw InternalError("Resolved entry does not exist on the disk (resolveShadowed0 returned ${resolvedID.toHex()})")
         if (entry1.fileType >= 8) throw InternalError("No master copy exists for $entry (resolveShadowed0 returned ${resolvedID.toHex()})")

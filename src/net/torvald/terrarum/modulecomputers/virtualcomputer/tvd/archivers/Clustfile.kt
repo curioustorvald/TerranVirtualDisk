@@ -353,7 +353,7 @@ open class Clustfile(private val DOM: ClusteredFormatDOM, absolutePath: String) 
         else false
     }
 
-    open fun copy(src: Clustfile, dest: Clustfile): Boolean {
+    open fun copy0(src: Clustfile, dest: Clustfile): Boolean {
         // mkdir can take up a disk space (the FAT area)
         // shadowing can also take up a space but only when the copy-on-write file has expanded
 
@@ -368,7 +368,7 @@ open class Clustfile(private val DOM: ClusteredFormatDOM, absolutePath: String) 
                 for (it in src.listFiles()!!) {
                     val dest1 = Clustfile(DOM, dest, it.name)
                     ret = (dest1.exists() || dest1.mkdir())
-                    if (ret && !copy(it, dest1)) {
+                    if (ret && !copy0(it, dest1)) {
                         ret = false
                         break
                     }
@@ -377,6 +377,8 @@ open class Clustfile(private val DOM: ClusteredFormatDOM, absolutePath: String) 
             ret
         }
     }
+
+    open fun copyInto(dest: Clustfile) = copy0(this, dest)
 
 
 
