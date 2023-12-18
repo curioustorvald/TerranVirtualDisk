@@ -39,17 +39,17 @@ fun main() {
         test1.copyInto(it)
     }
 
-    println("Test1.txt = ${test1.readBytes().toString(charset)}")
-    println("Test2.txt = ${test2.readBytes().toString(charset)}")
+    println("Test1.txt = ${test1.readBytes().toString(charset)};\t${test1.FAT}")
+    println("Test2.txt = ${test2.readBytes().toString(charset)};\t${test2.FAT}")
 
     testPause("")
 
     // modify the head file
-    test1.writeBytes("Testing 321".toByteArray(charset))
+//    test1.writeBytes("Testing 32".toByteArray(charset))
 
     // modify the shadow
-//    test2.writeBytes("Testing 666".toByteArray(charset))
+    test2.writeBytes("Testing 66".toByteArray(charset))
 
-    println("Test1.txt = ${test1.readBytes().toString(charset)}")
-    println("Test2.txt = ${test2.readBytes().toString(charset)}")
+    println("Test1.txt = ${test1.readBytes().toString(charset)};\t${test1.FAT}")
+    println("Test2.txt = ${test2.readBytes().toString(charset)};\t${test2.FAT}")
 }

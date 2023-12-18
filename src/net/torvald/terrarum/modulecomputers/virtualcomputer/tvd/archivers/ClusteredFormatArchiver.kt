@@ -416,8 +416,26 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
         }
         private fun Int.toHex() = this.toLong().toHex()
 
+        private fun fileTypeTostr() = when (fileType) {
+            0  -> "nulfile"
+            8  -> "nul sdw"
+            1  -> "binfile"
+            9  -> "bin sdw"
+            2  -> "dirctry"
+            10 -> "dir sdw"
+            else -> "unknown"
+        } + "($fileType)"
+
         override fun toString(): String {
-            return "FATEntry(ID: ${entryID.toHex()}, idx: $indexInFAT; filename=\"$filename\", #ExtEntries=${extendedEntries.size}; filetype=$fileType, readOnly=$readOnly, hidden=$hidden, system=$system, deleted=$deleted)"
+            val flags = listOf(
+                    if (readOnly) "ro" else null,
+                    if (hidden) "hid" else null,
+                    if (system) "sys" else null,
+                    if (deleted) "del" else null,
+            ).filterNotNull().joinToString(" ").let {
+                if (it.isNotEmpty()) "; flags: $it" else it
+            }
+            return "FATEntry(ID: ${entryID.toHex()}, idx:${indexInFAT.toString().padStart(3,' ')}, type:${fileTypeTostr()}; filename=\"$filename\", #Ext:${extendedEntries.size}$flags)"
         }
 
         fun toFlag() = readOnly.toInt(0) or
