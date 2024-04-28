@@ -163,6 +163,11 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
         const val INLINING_THRESHOLD = INLINED_ENTRY_BYTES * 8 // compare with <= -- files up to this size is recommended to be inlined
 
         fun createNewArchive(outPath: File, charset: Charset, diskName: String, capacityInSectors: Int, extraAttribs: ByteArray = ByteArray(0)): RandomAccessFile {
+            if (capacityInSectors > 0x7FFFF)
+                throw IllegalArgumentException("Disk capacity too large -- max: ${0x7FFFF}, entered: $capacityInSectors")
+            if (capacityInSectors < 16)
+                throw IllegalArgumentException("Disk capacity too small -- min: 16, entered: $capacityInSectors")
+
             val timeNow = System.currentTimeMillis() / 1000L
             val file = FileOutputStream(outPath)
 
