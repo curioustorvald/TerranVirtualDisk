@@ -1,4 +1,4 @@
 Manifest-Version: 1.0
 Main-Class: net.torvald.terrarum.modulecomputers.virtualcomputer.tvd.fin
- der.VirtualDiskCrackerKt
+ der.VirtualDiskCrackerClusteredKt
 
