@@ -28,8 +28,8 @@ class ClusteredFormatArchiver(val dom: ClusteredFormatDOM?) : Archiver() {
     override fun serializeToBA64(): ByteArray64 {
         val buffer = ByteArray64(dom!!.ARCHIVE.length())
         dom.ARCHIVE.seek(0)
-        for (k in 0 until dom.ARCHIVE.length() step ClusteredFormatDOM.CLUSTER_SIZE.toLong()) {
-            buffer.appendBytes(dom.ARCHIVE.read(CLUSTER_SIZE))
+        for (k in 0 until dom.ARCHIVE.length() step CLUSTER_SIZE) {
+            buffer.appendBytes(dom.ARCHIVE.read(CLUSTER_SIZE.toInt()))
         }
         return buffer
     }
@@ -72,7 +72,7 @@ private fun ByteArray.renumFAT(increment: Int): ByteArray {
 }
 
 private fun ByteArray.renumCluster(increment: Int): ByteArray {
-    if (this.size != CLUSTER_SIZE) throw IllegalStateException()
+    if (this.size != CLUSTER_SIZE.toInt()) throw IllegalStateException()
 
     val meta1 = this[0].toUint()
     val meta2 = this[1].toUint()
@@ -140,15 +140,15 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
         const val FILETYPE_BINARY = 1
         const val FILETYPE_DIRECTORY = 2
 
-        const val CLUSTER_SIZE = 4096 // as per spec
+        const val CLUSTER_SIZE = 4096L // as per spec
         const val FAT_ENTRY_SIZE = 256 // as per spec
-        const val FATS_PER_CLUSTER = CLUSTER_SIZE / FAT_ENTRY_SIZE // typically 16
-        private val EMPTY_CLUSTER = ByteArray(CLUSTER_SIZE)
+        const val FATS_PER_CLUSTER = (CLUSTER_SIZE / FAT_ENTRY_SIZE).toInt() // typically 16
+        private val EMPTY_CLUSTER = ByteArray(CLUSTER_SIZE.toInt())
         private val EMPTY_FAT_ENTRY = ByteArray(FAT_ENTRY_SIZE)
 
         const val FILE_BLOCK_HEADER_SIZE = 10 // as per spec
         const val FILE_BLOCK_OFFSET_CONTENT_LEN = 8 // as per spec
-        const val FILE_BLOCK_CONTENTS_SIZE = CLUSTER_SIZE - FILE_BLOCK_HEADER_SIZE // typically 4086
+        const val FILE_BLOCK_CONTENTS_SIZE = CLUSTER_SIZE.toInt() - FILE_BLOCK_HEADER_SIZE // typically 4086
 
         const val NULL_CLUSTER = 0
         const val HEAD_CLUSTER = 0
@@ -163,8 +163,8 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
         const val INLINING_THRESHOLD = INLINED_ENTRY_BYTES * 8 // compare with <= -- files up to this size is recommended to be inlined
 
         fun createNewArchive(outPath: File, charset: Charset, diskName: String, capacityInSectors: Int, extraAttribs: ByteArray = ByteArray(0)): RandomAccessFile {
-            if (capacityInSectors > 0x7FFFF)
-                throw IllegalArgumentException("Disk capacity too large -- max: ${0x7FFFF}, entered: $capacityInSectors")
+            if (capacityInSectors > 0xEFFFFF)
+                throw IllegalArgumentException("Disk capacity too large -- max: ${0xEFFFFF}, entered: $capacityInSectors")
             if (capacityInSectors < 16)
                 throw IllegalArgumentException("Disk capacity too small -- min: 16, entered: $capacityInSectors")
 
@@ -198,7 +198,7 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
             // header
             file.write(VirtualDisk.MAGIC)
             // capacity
-            file.write((CLUSTER_SIZE * capacityInSectors).toLong().toInt48Arr())
+            file.write((CLUSTER_SIZE.toLong() * capacityInSectors).toInt48Arr())
             // disk name
             file.write(diskName.toEntryName(32, charset))
             // dummy CRC
@@ -261,7 +261,7 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
         }
 
         /** Typically the root dir will sit on ID=4 */
-        internal val ROOT_DIR_CLUSTER = ByteArray(CLUSTER_SIZE).also {
+        internal val ROOT_DIR_CLUSTER = ByteArray(CLUSTER_SIZE.toInt()).also {
             // meta1 (type:dir)
             it[0] = FILETYPE_DIRECTORY.toByte()
             // meta2 (persistent:true)
@@ -282,7 +282,7 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
         }
 
         /** Typically the copy+on+write will sit on ID=5 */
-        internal val COPYONWRITE_DIR_CLUSTER = ByteArray(CLUSTER_SIZE).also {
+        internal val COPYONWRITE_DIR_CLUSTER = ByteArray(CLUSTER_SIZE.toInt()).also {
             // meta1 (type:dir)
             it[0] = FILETYPE_BINARY.toByte()
             // meta2 (persistent:true)
@@ -650,7 +650,7 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
     }
 
     fun changeDiskCapacity(clusterCount: Int) {
-        diskSize = clusterCount * 4L
+        diskSize = clusterCount * CLUSTER_SIZE
         ARCHIVE.seek(4L)
         ARCHIVE.writeInt48(diskSize)
 
@@ -750,9 +750,9 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
 
         dbgprintln("[Clustered.readFAT] ============ readFAT ============")
 
-        ARCHIVE.seek(2L * CLUSTER_SIZE)
+        ARCHIVE.seek(2 * CLUSTER_SIZE)
         for (block in 0 until fatClusterCount) {
-            for (blockOff in 0 until CLUSTER_SIZE step FAT_ENTRY_SIZE) {
+            for (blockOff in 0 until CLUSTER_SIZE.toInt() step FAT_ENTRY_SIZE) {
 
                 val fat = ARCHIVE.read(FAT_ENTRY_SIZE)
 
@@ -780,7 +780,7 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
                 // set proper fatEntryIndices
                 if (mainPtr in 4 until EXTENDED_ENTRIES_BASE) {
 
-                    val fatIndex = blockOff / FAT_ENTRY_SIZE + block * (CLUSTER_SIZE / FAT_ENTRY_SIZE)
+                    val fatIndex = blockOff / FAT_ENTRY_SIZE + block * (CLUSTER_SIZE.toInt() / FAT_ENTRY_SIZE)
                     fileTable[mainPtr]!!.indexInFAT = fatIndex
 
                     dbgprintln("[Clustered.readFAT]   - mainPtr ${mainPtr.toHex()} fatEntryIndex=${fileTable[mainPtr]!!.indexInFAT}")
@@ -844,7 +844,7 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
 
 
             // do the actual renumbering on the cluster contents
-            val clusterContents = ARCHIVE.read(CLUSTER_SIZE)
+            val clusterContents = ARCHIVE.read(CLUSTER_SIZE.toInt())
             clusterContents.renumCluster(increment)
 
 
@@ -1442,8 +1442,8 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
         if (stride < 0) {
             dbgprintln("[Clustered.spliceFAT]         rubout ${(rootDirOffset + stride).toHex()}..${(rootDirOffset - 1).toHex()}")
 
-            for (i in rootDirOffset + stride until rootDirOffset step FAT_ENTRY_SIZE) {
-                ARCHIVE.seek(i.toLong())
+            for (i in rootDirOffset + stride until rootDirOffset step FAT_ENTRY_SIZE.toLong()) {
+                ARCHIVE.seek(i)
                 ARCHIVE.write(ByteArray(FAT_ENTRY_SIZE))
             }
         }
@@ -2115,7 +2115,7 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
         //// Step 1. copy over cluster
         // copy over a cluster
         ARCHIVE.seekToCluster(from)
-        val cluster = ARCHIVE.read(CLUSTER_SIZE)
+        val cluster = ARCHIVE.read(CLUSTER_SIZE.toInt())
         // mark copied cluster as temporarily duplicated
         cluster[1] = (cluster[1].toUint() and 0xFE or 1).toByte()
         // paste the cluster to target position
@@ -2220,14 +2220,14 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
 
 
     fun readBoot(): ByteArray {
-        ARCHIVE.seek(CLUSTER_SIZE.toLong())
-        return ARCHIVE.read(CLUSTER_SIZE)
+        ARCHIVE.seek(CLUSTER_SIZE)
+        return ARCHIVE.read(CLUSTER_SIZE.toInt())
     }
 
     fun writeBoot(code: ByteArray) {
-        ARCHIVE.seek(CLUSTER_SIZE.toLong())
-        code.padEnd(CLUSTER_SIZE).let {
-            ARCHIVE.write(it, 0, minOf(it.size, CLUSTER_SIZE))
+        ARCHIVE.seek(CLUSTER_SIZE)
+        code.padEnd(CLUSTER_SIZE.toInt()).let {
+            ARCHIVE.write(it, 0, minOf(it.size, CLUSTER_SIZE.toInt()))
         }
 
         bootloaderWriteHook()
@@ -2241,7 +2241,6 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
     val totalClusterCount: Int; get() = (diskSize / CLUSTER_SIZE.toLong()).toInt()
     val usedClusterCount: Int; get() = archiveSizeInClusters
     val freeClusterCount: Int; get() = totalClusterCount - archiveSizeInClusters
-    val clusterSize: Int = CLUSTER_SIZE
 
     /**
      * @return Cluster flags in big endian: high 8 bits for Meta1, low 8 bits for Meta2
@@ -2392,7 +2391,7 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
 
     fun getRawCluster(num: Int): ByteArray {
         ARCHIVE.seekToCluster(num)
-        return ARCHIVE.read(CLUSTER_SIZE)
+        return ARCHIVE.read(CLUSTER_SIZE.toInt())
     }
 
     fun sortDirectory(entry: FATEntry) {

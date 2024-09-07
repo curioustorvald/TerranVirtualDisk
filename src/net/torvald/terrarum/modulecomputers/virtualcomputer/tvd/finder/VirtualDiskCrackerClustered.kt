@@ -1055,7 +1055,7 @@ class VirtualDiskCrackerClustered() : JFrame() {
                     override fun mousePressed(e: MouseEvent?) {
                         bootEditPane.text = RandomAccessFile(originalFile, "r").let {
                             it.seekToCluster(1)
-                            val s = it.read(CLUSTER_SIZE).trimNull().toString(vdisk?.charset ?: Charsets.ISO_8859_1)
+                            val s = it.read(CLUSTER_SIZE.toInt()).trimNull().toString(vdisk?.charset ?: Charsets.ISO_8859_1)
                             it.close()
                             s
                         }
@@ -1176,7 +1176,7 @@ class VirtualDiskCrackerClustered() : JFrame() {
                 else if (i < vdisk.fatClusterCount + 2) {
                     vdisk.ARCHIVE.seekToCluster(i)
                     var dataFats = 0
-                    for (k in 0 until CLUSTER_SIZE step FAT_ENTRY_SIZE) {
+                    for (k in 0 until CLUSTER_SIZE step FAT_ENTRY_SIZE.toLong()) {
                         if (vdisk.ARCHIVE.read(FAT_ENTRY_SIZE).toInt24() >= INLINE_FILE_CLUSTER_BASE) dataFats += 1
                     }
                     lerp(dataFats.toFloat() / FATS_PER_CLUSTER, buttonColourFAT, buttonColourFATdata)
@@ -1211,7 +1211,7 @@ class VirtualDiskCrackerClustered() : JFrame() {
         else if (cluster < vdisk!!.fatClusterCount + 2) {
             vdisk!!.ARCHIVE.seekToCluster(cluster)
             var dataFats = 0
-            for (k in 0 until CLUSTER_SIZE step FAT_ENTRY_SIZE) {
+            for (k in 0 until CLUSTER_SIZE step FAT_ENTRY_SIZE.toLong()) {
                 if (vdisk!!.ARCHIVE.read(FAT_ENTRY_SIZE).toInt24() >= INLINE_FILE_CLUSTER_BASE) dataFats += 1
             }
             if (dataFats > 0)
@@ -1222,7 +1222,7 @@ class VirtualDiskCrackerClustered() : JFrame() {
         else if (cluster >= vdisk!!.ARCHIVE.length() / CLUSTER_SIZE) "$ret\n(trimmed)"
         else {
             vdisk!!.ARCHIVE.seekToCluster(cluster)
-            val bytes = vdisk!!.ARCHIVE.read(CLUSTER_SIZE)
+            val bytes = vdisk!!.ARCHIVE.read(CLUSTER_SIZE.toInt())
             val prev = bytes.toInt24(2).let { if (it == 0) null else it }
             val next = bytes.toInt24(5).let { if (it == 0xFFFFFF) null else it }
             ret + """
@@ -1231,7 +1231,7 @@ Next Chain: ${if (next == null) "—" else "#${next+1} (${next.toHex()})"}
 Flag1: ${bytes[0].toUint().toString(2).padStart(8, '0')}
 Flag2: ${bytes[1].toUint().toString(2).padStart(8, '0')}
 Contents [${bytes.toInt16(8)}]:
-"""+bytes.sliceArray(10 until CLUSTER_SIZE).toString(vdisk!!.charset)
+"""+bytes.sliceArray(10 until CLUSTER_SIZE.toInt()).toString(vdisk!!.charset)
         }
     }
 

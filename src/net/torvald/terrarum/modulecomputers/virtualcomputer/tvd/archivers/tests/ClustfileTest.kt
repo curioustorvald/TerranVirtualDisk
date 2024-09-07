@@ -24,7 +24,7 @@ fun main(args: Array<String>) {
 
 
     println("Creating Archive")
-    val diskFile = ClusteredFormatDOM.createNewArchive(archiveFile, charset, "TEST DRIVE 2", 600)
+    val diskFile = ClusteredFormatDOM.createNewArchive(archiveFile, charset, "TEST DRIVE 2", 524288)
     val DOM = ClusteredFormatDOM(diskFile)
 
 
