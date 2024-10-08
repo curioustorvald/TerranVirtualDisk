@@ -75,7 +75,7 @@ open class Clustfile(private val DOM: ClusteredFormatDOM, absolutePath: String) 
         val ba = DOM.readBytes(dir, filelen, 0)
 //        dbgprintln("[Clustfile.getDirListing] ${ba.size} bytes read")
         if (ba.size % 3 != 0) throw IllegalStateException("Length of dir not multiple of 3")
-        return ba.size
+        return ba.size / 3
     }
 
     private fun getFirstFileInDir(dir: ClusteredFormatDOM.FATEntry): Clustfile? {

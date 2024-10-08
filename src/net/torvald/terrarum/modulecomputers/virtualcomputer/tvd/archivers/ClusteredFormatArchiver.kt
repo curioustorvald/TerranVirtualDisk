@@ -88,7 +88,7 @@ private fun ByteArray.renumCluster(increment: Int): ByteArray {
     // renumber clusternum on the directory files
     if (filetype == 2) {
         val entrySize = this.toInt16(8)
-        for (entryOffset in 10 until 10 + 3*entrySize step 3) {
+        for (entryOffset in 10 until 10 + entrySize step 3) {
             val clusterNum = this.toInt24(entryOffset).incClusterNum(increment).toInt24Arr()
             System.arraycopy(clusterNum, 0, this, entryOffset, 3)
         }
