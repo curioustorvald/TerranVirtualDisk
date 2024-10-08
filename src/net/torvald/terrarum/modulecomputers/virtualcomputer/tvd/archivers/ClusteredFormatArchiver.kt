@@ -157,14 +157,16 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
         const val INLINE_FILE_CLUSTER_LAST = 0xFFFDFF
         const val EXTENDED_ENTRIES_BASE = 0xFFFF00
 
+        const val MAX_CAPA_IN_SECTORS = INLINE_FILE_CLUSTER_BASE - 1
+
         const val INLINED_ENTRY_BYTES = FAT_ENTRY_SIZE - 8 // typically 248
         const val FILENAME_PRIMARY_LENGTH = 220
 
         const val INLINING_THRESHOLD = INLINED_ENTRY_BYTES * 8 // compare with <= -- files up to this size is recommended to be inlined
 
         fun createNewArchive(outPath: File, charset: Charset, diskName: String, capacityInSectors: Int, extraAttribs: ByteArray = ByteArray(0)): RandomAccessFile {
-            if (capacityInSectors > 0xEFFFFF)
-                throw IllegalArgumentException("Disk capacity too large -- max: ${0xEFFFFF}, entered: $capacityInSectors")
+            if (capacityInSectors > MAX_CAPA_IN_SECTORS)
+                throw IllegalArgumentException("Disk capacity too large -- max: $MAX_CAPA_IN_SECTORS, entered: $capacityInSectors")
             if (capacityInSectors < 16)
                 throw IllegalArgumentException("Disk capacity too small -- min: 16, entered: $capacityInSectors")
 
@@ -669,6 +671,8 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
 
         return (magic.contentEquals(VirtualDisk.MAGIC) && ver == ClusteredFormatArchiver.specversion)
     }
+
+    fun getRootFile() = Clustfile(this, "/")
 
     fun dispose() {
         ARCHIVE.close()
