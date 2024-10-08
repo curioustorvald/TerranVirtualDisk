@@ -1161,8 +1161,23 @@ class VirtualDiskCrackerClustered() : JFrame() {
 
     private fun rebuildClustmap() {
 
+        var usedClusterMax = 4
+        if (vdisk != null) {
+            usedClusterMax = vdisk!!.fatClusterCount + 2
+            val file = vdisk!!.ARCHIVE
+            val filelen = file.length()
+            val oldPtr = file.filePointer
+            while (usedClusterMax * CLUSTER_SIZE < filelen) {
+                file.seekToCluster(usedClusterMax)
+                val c = file.readInt24()
+                if (c == 0) break
+                usedClusterMax += 1
+            }
+        }
+        usedClusterMax -= 1
+
         val cols = 20
-        val rows = (vdisk?.totalClusterCount ?: cols) / cols
+        val rows = usedClusterMax / cols
         (clustmapGrid.layout as GridLayout).let {
             it.columns = cols
             it.rows = rows
@@ -1171,7 +1186,7 @@ class VirtualDiskCrackerClustered() : JFrame() {
 
 
         vdisk?.let { vdisk ->
-            for (i in 0 until vdisk.totalClusterCount) {
+            for (i in 0 until usedClusterMax) {
                 val buttonCol = if (i in 0..1) buttonColourReserved
                 else if (i < vdisk.fatClusterCount + 2) {
                     vdisk.ARCHIVE.seekToCluster(i)
