@@ -11,9 +11,11 @@ import java.nio.ByteBuffer
 
 
 /**
+ * WARNING: do not modify internal DOM by yourself!
+ *
  * Created by minjaesong on 2023-04-21.
  */
-open class Clustfile(private val DOM: ClusteredFormatDOM, absolutePath: String) {
+open class Clustfile(val DOM: ClusteredFormatDOM, absolutePath: String) {
 
     private inline fun dbgprint(msg: Any? = "") {
 //        print(msg)
