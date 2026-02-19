@@ -1026,7 +1026,11 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
         entry.extendedEntries.addAll(newBytes)
 
         // splice up the Archive
-        spliceFAT(myEntryIndex + 1, oldExtendedEntryCount, entry.extendedEntries)
+        // Pass copies to spliceFAT because if growFAT→renum is triggered inside spliceFAT,
+        // _fatRenum will renumber entry.extendedEntries (in-memory), and then spliceFAT's
+        // FATs.forEach { renumFAT } would double-renumber the same byte arrays.
+        // Using copies ensures each path renumbers independently exactly once.
+        spliceFAT(myEntryIndex + 1, oldExtendedEntryCount, entry.extendedEntries.map { it.copyOf() })
     }
 
     private fun tallyFATentryCount(): Int {
@@ -1501,13 +1505,26 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
             dbgprintln("[Clustered.writeBytesInline] un-inlining ${oldID.toHex()} -> ${inlinedFile.entryID.toHex()}")
 
             // write new FAT manually
+            val preRenumID = inlinedFile.entryID
             fatmgrRewriteAllFAT() // must precede the writeBytes. calculates new fatEntryCount
 
+            // If fatmgrRewriteAllFAT triggered growFAT→renum, regular cluster IDs in fileBytes
+            // are now stale (they weren't incremented since the extended entries were already removed
+            // and the data hasn't been written to clusters yet). Fix up directory listings.
+            val postRenumID = inlinedFile.entryID
+            if (preRenumID != postRenumID && inlinedFile.fileType and 7 == FILETYPE_DIRECTORY) {
+                val increment = postRenumID - preRenumID
+                for (i in 0 until fileBytes.size step 3) {
+                    val id = fileBytes.toInt24(i)
+                    if (id in 4 until INLINE_FILE_CLUSTER_BASE) {
+                        fileBytes.writeInt24(id + increment, i)
+                    }
+                }
+            }
 
             // create space
             expandFile(fileBytes.size.toLong(), HEAD_CLUSTER, inlinedFile.entryID, inlinedFile.fileType)
             writeBytes(inlinedFile, fileBytes, 0, fileBytes.size, 0, true)
-
 
             renameEntryID(oldID, inlinedFile.entryID)
             fatmgrRewriteAllFAT() // required because of the renameEntryID
@@ -1780,7 +1797,7 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
         val newBytes = ByteArray(newLength.toInt())
         System.arraycopy(oldBytes, 0, newBytes, 0, minOf(oldBytes.size, newBytes.size))
 
-        fatmgrSetInlineBytes(entry, newBytes) // will spliceFAT for us
+        fatmgrSetInlineBytes(entry, newBytes, entry.fileType == FILETYPE_DIRECTORY) // will spliceFAT for us
         fatmgrUpdateModificationDate(entry, getTimeNow())
     }
 
@@ -2322,25 +2339,9 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
 
         val toBeSortedInline = HashSet<EntryID>()
         val toBeSorted2 = HashSet<Int>()
+        var foundCount = 0
 
-        // rename FAT area
-        /*for (fatIndex in 0 until fatEntryCount) {
-            ARCHIVE.seekToFAT(fatIndex)
-            // rename on inline directory
-            if (ARCHIVE.readInt24() == 0xFFFF12) {
-                val parentID = ARCHIVE.readInt24()
-                for (offset in 8 until FAT_ENTRY_SIZE - 3 step 3) {
-                    ARCHIVE.seekToFAT(fatIndex, offset)
-                    if (ARCHIVE.readInt24() == old) {
-                        ARCHIVE.seekToFAT(fatIndex, offset)
-                        ARCHIVE.writeInt24(new)
-                        dbgprintln("[Clustered.renameEntryID] ... at inlineDir of entry ${parentID.toHex()} ExtEnt order ${fatEntryIndices[parentID]?.minus(fatIndex)?.times(-1)}, offset $offset")
-                        toBeSortedInline.add(parentID)
-                    }
-                }
-            }
-        }*/
-        // rename FAT area
+        // rename FAT area (in-memory extended entries)
         fileTable.forEach { entry ->
             entry.extendedEntries.forEachIndexed { bindex, it ->
                 if (it.toInt24(0) == 0xFFFF12) {
@@ -2349,6 +2350,7 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
                             it.writeInt24(new, offset)
                             dbgprintln("[Clustered.renameEntryID] ... at inlineDir of entry ${entry.entryID.toHex()} ExtEnt order $bindex, offset $offset")
                             toBeSortedInline.add(entry.entryID)
+                            foundCount++
                         }
                     }
                 }
@@ -2367,9 +2369,14 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
                         ARCHIVE.writeInt24(new)
                         dbgprintln("[Clustered.renameEntryID] ... at Cluster ${kluster.toHex()}, offset $offset")
                         toBeSorted2.add(kluster)
+                        foundCount++
                     }
                 }
             }
+        }
+
+        if (foundCount == 0) {
+            dbgprintln("[Clustered.renameEntryID] WARNING: ${old.toHex()} was NOT FOUND anywhere! (renaming to ${new.toHex()})")
         }
 
 
@@ -2384,7 +2391,7 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
                     n
             }
             val newCowBytes = ByteArray(cowBytes.size)
-            cowNumbers.forEachIndexed { i, b -> b.toInt24Arr().let { System.arraycopy(b, 0, newCowBytes, 3*i, 3) } }
+            cowNumbers.forEachIndexed { i, b -> b.toInt24Arr().let { System.arraycopy(it, 0, newCowBytes, 3*i, 3) } }
             writeBytes(cow, newCowBytes, 0, newCowBytes.size, 0L)
         }
 
@@ -2675,12 +2682,8 @@ class ClusteredFormatDOM(internal val ARCHIVE: RandomAccessFile, val throwErrorO
     }
 
     val fatComparator = Comparator<Int> { o1, o2 ->
-        val f1 = getFile(o1).also {
-            if (it == null) throw NullPointerException("First file (ID=${o1.toHex()}) does not exist")
-        }!!.filename
-        val f2 = getFile(o2).also {
-            if (it == null) throw NullPointerException("Second file (ID=${o2.toHex()}) does not exist")
-        }!!.filename
+        val f1 = getFile(o1)?.filename ?: throw NullPointerException("First file (ID=${o1.toHex()}) does not exist")
+        val f2 = getFile(o2)?.filename ?: throw NullPointerException("Second file (ID=${o2.toHex()}) does not exist")
         compareFilenameHash(f1, f2)
     }
     val filenameComparator = Comparator<String> { f1, f2 ->

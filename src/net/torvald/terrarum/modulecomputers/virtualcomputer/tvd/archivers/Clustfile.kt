@@ -456,8 +456,8 @@ open class Clustfile(val DOM: ClusteredFormatDOM, absolutePath: String) {
                 val dirListing = getDirListing(FAT!!) ?: throw NullPointerException("Unable to list directory for $FAT")
                 // if the entry is not already there, write one
                 if (!dirListing.contains(file.FAT!!.entryID)) {
-                    (dirListing + listOf(file.FAT!!.entryID)).also {
-                        dbgprintln("[Clustfile.addChild] trying to sort the dir ${FAT!!.entryID.toHex()} (${it.size})[${it.joinToString { it.toHex() }}]")
+                    (dirListing + listOf(file.FAT!!.entryID)).also { listing ->
+                        dbgprintln("[Clustfile.addChild] trying to sort the dir ${FAT!!.entryID.toHex()} (${listing.size})[${listing.joinToString { it.toHex() }}]")
                         dbgprintln("[Clustfile.addChild] The Entire FAT: (${DOM.fileTable.size})[${DOM.fileTable.joinToString { it.entryID.toHex() }}]")
                     }.sortedWith(DOM.fatComparator).let { newDirListing ->
                         ByteArray(newDirListing.size * 3).also { newBytes ->
