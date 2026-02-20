@@ -53,10 +53,12 @@ class ClustfileInputStream(private val file: Clustfile) : InputStream() {
     private var markLimit = 0
     private var markPos = 0
 
+    private fun remaining(): Int = (fileLength - cursor).coerceAtLeast(0).toInt()
+
     override fun skip(n: Long): Long {
-        val n1 = (if (cursor + n > fileLength) cursor + fileLength else n).toInt()
-        cursor += n1
-        return n1.toLong()
+        val skip = n.coerceAtMost(remaining().toLong()).toInt()
+        cursor += skip
+        return skip.toLong()
     }
 
     override fun read(): Int {
@@ -69,23 +71,27 @@ class ClustfileInputStream(private val file: Clustfile) : InputStream() {
     }
 
     override fun read(b: ByteArray): Int {
-        val count = file.pread(b, 0, b.size, cursor)
+        if (cursor >= fileLength) return -1
+        val toRead = minOf(b.size, remaining())
+        val count = file.pread(b, 0, toRead, cursor)
         cursor += count
-        markLimit -= 1
+        markLimit -= count
         return count
     }
 
     override fun read(b: ByteArray, off: Int, len: Int): Int {
-        val count = file.pread(b, off, len, cursor)
+        if (cursor >= fileLength) return -1
+        val toRead = minOf(len, remaining())
+        val count = file.pread(b, off, toRead, cursor)
         cursor += count
         markLimit -= count
         return count
     }
 
     override fun readAllBytes(): ByteArray {
-        if (fileLength > 2147483639L) throw IndexOutOfBoundsException("File too large")
-
-        val b = ByteArray(fileLength.toInt())
+        val rem = remaining()
+        if (rem == 0) return ByteArray(0)
+        val b = ByteArray(rem)
         file.pread(b, 0, b.size, cursor)
         cursor += b.size
         markLimit -= b.size
@@ -93,24 +99,28 @@ class ClustfileInputStream(private val file: Clustfile) : InputStream() {
     }
 
     override fun readNBytes(len: Int): ByteArray {
-        val b = ByteArray(len)
-        file.pread(b, 0, b.size, cursor)
-        cursor += b.size
-        markLimit -= b.size
-        return b
+        val toRead = minOf(len, remaining())
+        if (toRead == 0) return ByteArray(0)
+        val b = ByteArray(toRead)
+        val count = file.pread(b, 0, toRead, cursor)
+        cursor += count
+        markLimit -= count
+        return if (count == toRead) b else b.copyOf(count)
     }
 
     override fun readNBytes(b: ByteArray, off: Int, len: Int): Int {
-        return file.pread(b, off, len, cursor).also {
-            cursor += len
-            markLimit -= len
-        }
+        val toRead = minOf(len, remaining())
+        if (toRead == 0) return 0
+        val count = file.pread(b, off, toRead, cursor)
+        cursor += count
+        markLimit -= count
+        return count
     }
 
     override fun skipNBytes(n: Long) {
-        cursor -= n.toInt()
-        markLimit -= n.toInt()
-        if (cursor < 0) cursor = 0
+        val skip = n.coerceAtMost(remaining().toLong()).toInt()
+        cursor += skip
+        markLimit -= skip
     }
 
     /**
